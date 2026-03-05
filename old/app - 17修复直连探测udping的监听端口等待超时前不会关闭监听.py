@@ -771,17 +771,13 @@ def udp_ping(ip, port):
 
         s = socket.socket(fam, socket.SOCK_DGRAM)
         # 显式 bind：固定本地监听端口，高并发时防止端口被OS回收或复用
+        # 不指定端口(0)让OS分配，但 bind 后端口在 socket 生命周期内保持有效
         bind_addr = ('::' if fam == socket.AF_INET6 else '', 0)
         s.bind(bind_addr)
-        # connect() 使 socket 进入"已连接"状态：
-        # - Windows/Linux 都会把 ICMP Port Unreachable 反映为 socket 异常
-        # - 对方端口关闭时立刻抛 ConnectionRefusedError，不傻等 timeout
-        # - recv() 只接收来自目标地址的包，自动过滤无关UDP包
-        s.connect(sockaddr)
         s.settimeout(timeout)
 
         t = time.time()
-        s.send(packet)  # connect后用 send 代替 sendto
+        s.sendto(packet, sockaddr)
 
         # 接收并校验 transaction_id
         deadline = time.time() + timeout
@@ -790,7 +786,7 @@ def udp_ping(ip, port):
             if remaining <= 0:
                 raise socket.timeout()
             s.settimeout(remaining)
-            data = s.recv(1024)  # connect后用 recv，ICMP错误会在这里抛出
+            data, _ = s.recvfrom(1024)
             if len(data) >= 8 and data[4:8] == tid:
                 break
 
@@ -803,14 +799,7 @@ def udp_ping(ip, port):
     except socket.timeout:
         if s: s.close()
         return False, -1, f"超时(>{timeout}s)"
-    except ConnectionRefusedError:
-        if s: s.close()
-        return False, -1, "端口未开放"
     except OSError as e:
-        if s: s.close()
-        # ICMP Port Unreachable 在 Windows 上表现为 WinError 10054
-        if getattr(e, 'winerror', None) == 10054 or 'forcibly closed' in str(e).lower():
-            return False, -1, "端口未开放"
         return False, -1, f"网络错误: {e}"
     except Exception as e:
         if s: s.close()

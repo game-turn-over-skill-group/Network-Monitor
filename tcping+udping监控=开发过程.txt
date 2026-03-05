@@ -503,14 +503,69 @@ Address:  18.232.197.8
 --------------------------------------
 
 
+我又发现了个问题
+关于udping探测的超时等待机制
+好像在接收到数据以前 udp的随机监听端口就会关闭 没有按照 连接超时等待的时间 保留udp监听端口
+这样会导致 在批量大量探测的时候 有的部分域名/IP容易丢包 甚至使用udp代理模式也是一样
+我测试了我自己写的udping工具久没有这个问题，你检查一下看看 是不是有我说的问题
 
 
+--------------------------------------
 
 
+C:\Users\Administrator\Desktop>udping bt.rer.lol 6969
+Proxy parameter received for parsing:
+Attempting to resolve target host: bt.rer.lol
+Failed to resolve target host bt.rer.lol as IPv4
+Resolved IPv6 address: 2408:8248:412:cf90::1
+Probing 2408:8248:412:cf90::1:6969/udp - Reply from 2408:8248:412:cf90::1 - time=0.276ms
+Ping statistics for 2408:8248:412:cf90::1:6969/udp
+     1 probes sent.
+     1 successful, 0 failed.  (0.00% fail)
+Approximate trip times in milli-seconds:
+     Minimum = 0.276ms, Maximum = 0.276ms, Average = 0.276ms
+C:\Users\Administrator\Desktop>udping bt.rer.lol 6960
+Proxy parameter received for parsing:
+Attempting to resolve target host: bt.rer.lol
+Failed to resolve target host bt.rer.lol as IPv4
+Resolved IPv6 address: 2408:8248:412:cf90::1
+Socket error while receiving: [WinError 10054] 远程主机强迫关闭了一个现有的连接。
+Ping statistics for 2408:8248:412:cf90::1:6960/udp
+     1 probes sent.
+     0 successful, 1 failed.  (100.00% fail)
 
 
+还有你看 我的udping探测对方未启用的端口 就是关闭的端口 可以直接收到错误类型提示
+我们app现在的 好像就只会傻傻的等待超时 没办法区别类型提示？
+连最基本的对方的端口是否开放 都没办法直接确认吗？这是为什么？
+
+-----------
+可以修复： 在发包前加 s.connect(sockaddr)，让socket进入"已连接"状态，
+Windows就会把ICMP Port Unreachable转成异常，立刻返回而不是傻等超时：
+修改后的完整行为对比：
+情况修复前修复后端口关闭（ICMP Unreachable）	傻等15s超时	立刻返回 "端口未开放"
+网络不通/丢包	等15s超时	等15s超时（正常，无法区分）
+正常响应	✓ Online	✓ Online
+关键改动：sendto → connect + send，recvfrom → recv。
+connect() 让OS把这个socket和目标地址绑定，之后：
+Windows 的 ICMP 错误会在 recv() 时抛 WinError 10054
+Linux 同样会抛 ConnectionRefusedError
+两种情况都捕获，统一返回 "端口未开放"，日志里也能看出来是关闭还是超时
 
 
+--------------------------------------
+
+
+又测了下排序功能 状态排序 好像未按照预期进行排序 检查一下 为什么？
+理论上：
+第1次点击：按照100%百分比状态 升序 靠前应该看到的都是100% 有失败率的应该在最下面 按照成功率100%->0%排序
+第2次点击：按照100%百分比状态 降序 靠前应该都不是100% 有失败率的应该在最上面 按照失败率0%->100% 排序
+第3次点击：在线状态 排序 先进行100%百分比 升序 再进行 在线检查排序
+第4次点击：离线状态 排序 先进行100%百分比 降序 在进行 离线检查排序
+第5次点击：还原初始状态
+
+
+--------------------------------------
 
 
 
