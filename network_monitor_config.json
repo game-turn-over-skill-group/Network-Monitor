@@ -1,0 +1,15 @@
+{
+  "check_interval": 30,
+  "timeout": 15,
+  "retry_mode": "polling",
+  "retry_interval": 5,
+  "log_to_disk": false,
+  "console_log_level": "error",
+  "http_proxy": "",
+  "udp_proxy": "socks5://localhost:22",
+  "proxy_enabled": false,
+  "dns_mode": "system",
+  "dns_custom": "8.8.8.8",
+  "max_log_entries": 2000,
+  "page_refresh_ms": 5000
+}

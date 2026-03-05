@@ -1,0 +1,1722 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>网络监控 - Network Monitor</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue-i18n@9/dist/vue-i18n.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #1a1a2e;
+            --card-bg: #16213e;
+            --text-primary: #eee;
+            --text-secondary: #aaa;
+            --accent: #0f3460;
+            --success: #10b981;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+        }
+
+        body {
+            background: var(--bg-color);
+            color: var(--text-primary);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .navbar {
+            background: var(--card-bg) !important;
+            border-bottom: 1px solid var(--accent);
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--accent);
+            margin-bottom: 20px;
+        }
+
+        .card-header {
+            background: var(--accent);
+            border-bottom: 1px solid var(--accent);
+        }
+
+        .stat-card {
+            text-align: center;
+            padding: 20px;
+        }
+
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+        }
+
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .status-online {
+            color: var(--success);
+        }
+
+        .status-offline {
+            color: var(--danger);
+        }
+
+        .status-unknown {
+            color: var(--warning);
+        }
+
+        .tracker-row {
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .tracker-row:hover {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .tracker-domain {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .tracker-ip {
+            font-family: monospace;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        .country-flag {
+            width: 20px;
+            height: 14px;
+            vertical-align: middle;
+            margin-right: 5px;
+        }
+
+        .latency-bar {
+            width: 100px;
+            height: 6px;
+            background: var(--accent);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .latency-fill {
+            height: 100%;
+            background: var(--success);
+            transition: width 0.3s;
+        }
+
+        .latency-fill.slow {
+            background: var(--warning);
+        }
+
+        .latency-fill.very-slow {
+            background: var(--danger);
+        }
+
+        .expand-icon {
+            transition: transform 0.2s;
+        }
+
+        .expand-icon.expanded {
+            transform: rotate(90deg);
+        }
+
+        .uptime-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .uptime-100 {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--success);
+        }
+
+        .uptime-high {
+            background: rgba(245, 158, 11, 0.2);
+            color: var(--warning);
+        }
+
+        .uptime-low {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--danger);
+        }
+
+        .log-entry {
+            font-family: monospace;
+            font-size: 0.85rem;
+            padding: 5px 0;
+            border-bottom: 1px solid var(--accent);
+        }
+
+        .log-time {
+            color: var(--text-secondary);
+            margin-right: 10px;
+        }
+
+        .log-level-info {
+            color: var(--success);
+        }
+
+        .log-level-error {
+            color: var(--danger);
+        }
+
+        .log-level-debug {
+            color: var(--text-secondary);
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+
+        .btn-primary:hover {
+            background: #1a4a7a;
+        }
+
+        .form-control {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: var(--text-primary);
+        }
+
+        .form-control:focus {
+            background: var(--accent);
+            border-color: #2a5a8a;
+            color: var(--text-primary);
+        }
+
+        .table {
+            color: var(--text-primary);
+        }
+
+        .table > :not(caption) > * > * {
+            background: transparent;
+            border-color: var(--accent);
+        }
+
+        .nav-tabs {
+            border-bottom-color: var(--accent);
+        }
+
+        .nav-tabs .nav-link {
+            color: var(--text-secondary);
+            border-color: transparent;
+        }
+
+        .nav-tabs .nav-link:hover {
+            color: var(--text-primary);
+            border-color: transparent;
+        }
+
+        .nav-tabs .nav-link.active {
+            background: var(--card-bg);
+            color: var(--text-primary);
+            border-color: var(--accent);
+            border-bottom-color: var(--card-bg);
+        }
+
+        .modal-content {
+            background: var(--card-bg);
+            border: 1px solid var(--accent);
+        }
+
+        .modal-header {
+            border-bottom-color: var(--accent);
+        }
+
+        .modal-footer {
+            border-top-color: var(--accent);
+        }
+
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+        }
+
+        .spinner-border {
+            color: var(--accent);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+
+        .ranking-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            border-bottom: 1px solid var(--accent);
+        }
+
+        .ranking-item:hover {
+            background: rgba(255,255,255,0.05);
+        }
+
+        .ranking-number {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: var(--success);
+            width: 40px;
+        }
+
+        .config-switch {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- 导航栏 -->
+        <nav class="navbar navbar-expand-lg navbar-dark">
+            <div class="container-fluid">
+                <a class="navbar-brand" href="#">
+                    <i class="bi bi-activity"></i> 网络监控
+                </a>
+                <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                    <span class="navbar-toggler-icon"></span>
+                </button>
+                <div class="collapse navbar-collapse" id="navbarNav">
+                    <ul class="navbar-nav me-auto">
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{active: currentTab === 'dashboard'}" @click="currentTab = 'dashboard'" href="#">
+                                <i class="bi bi-speedometer2"></i> {{ t('nav.dashboard') }}
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{active: currentTab === 'trackers'}" @click="currentTab = 'trackers'" href="#">
+                                <i class="bi bi-list-check"></i> {{ t('nav.trackers') }}
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{active: currentTab === 'ranking'}" @click="currentTab = 'ranking'" href="#">
+                                <i class="bi bi-trophy"></i> {{ t('nav.ranking') }}
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{active: currentTab === 'logs'}" @click="currentTab = 'logs'" href="#">
+                                <i class="bi bi-journal-text"></i> {{ t('nav.logs') }}
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" :class="{active: currentTab === 'config'}" @click="currentTab = 'config'" href="#">
+                                <i class="bi bi-gear"></i> {{ t('nav.config') }}
+                            </a>
+                        </li>
+                    </ul>
+                    <div class="d-flex align-items-center">
+                        <select class="form-select form-select-sm" v-model="currentLocale" @change="changeLocale" style="width: 140px;">
+                            <option value="zh">中文</option>
+                            <option value="en">English</option>
+                            <option value="ru">Русский</option>
+                            <option value="fr">Français</option>
+                            <option value="ja">日本語</option>
+                            <option value="ko">한국어</option>
+                        </select>
+                        <button class="btn btn-primary btn-sm ms-2" @click="showAddModal = true">
+                            <i class="bi bi-plus-lg"></i> {{ t('common.add') }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <div class="container-fluid p-4">
+            <!-- 统计卡片 -->
+            <div class="row mb-4" v-if="currentTab === 'dashboard'">
+                <div class="col-md-3">
+                    <div class="card stat-card">
+                        <div class="stat-number">{{ stats.total }}</div>
+                        <div class="stat-label">{{ t('stats.total') }}</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card stat-card">
+                        <div class="stat-number status-online">{{ stats.alive }}</div>
+                        <div class="stat-label">{{ t('stats.alive') }}</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card stat-card">
+                        <div class="stat-number">{{ stats.ipv4 }}</div>
+                        <div class="stat-label">{{ t('stats.ipv4') }}</div>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="card stat-card">
+                        <div class="stat-number">{{ stats.ipv6 }}</div>
+                        <div class="stat-label">{{ t('stats.ipv6') }}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tracker列表 -->
+            <div v-if="currentTab === 'trackers'">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>{{ t('tracker.title') }}</span>
+                        <div>
+                            <input type="text" class="form-control form-control-sm"
+                                   v-model="searchQuery" :placeholder="t('common.search')"
+                                   style="width: 200px; display: inline-block;">
+                        </div>
+                    </div>
+                    <div class="card-body p-0">
+                        <div v-if="loading" class="loading">
+                            <div class="spinner-border" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                        </div>
+                        <div v-else-if="filteredTrackers.length === 0" class="empty-state">
+                            <i class="bi bi-inbox" style="font-size: 3rem;"></i>
+                            <p class="mt-3">{{ t('tracker.empty') }}</p>
+                        </div>
+                        <table v-else class="table table-hover mb-0">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px;"></th>
+                                    <th>{{ t('tracker.domain') }}</th>
+                                    <th>{{ t('tracker.ip') }}</th>
+                                    <th>{{ t('tracker.country') }}</th>
+                                    <th>{{ t('tracker.isp') }}</th>
+                                    <th>{{ t('tracker.status') }}</th>
+                                    <th>{{ t('tracker.latency') }}</th>
+                                    <th>{{ t('tracker.lastCheck') }}</th>
+                                    <th style="width: 80px;"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template v-for="(tracker, domain) in filteredTrackers" :key="domain">
+                                    <!-- 域名主行 -->
+                                    <tr class="tracker-row" @click="toggleExpand(domain)">
+                                        <td>
+                                            <i class="bi bi-chevron-right expand-icon"
+                                               :class="{expanded: expandedDomains.includes(domain)}"></i>
+                                        </td>
+                                        <td class="tracker-domain">{{ domain }}</td>
+                                        <td>{{ tracker.ips.length }} {{ t('tracker.ips') }}</td>
+                                        <td colspan="4">
+                                            <span class="uptime-badge" :class="getUptimeClass(getUptime(tracker))">
+                                                {{ getUptime(tracker).toFixed(2) }}%
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <button class="btn btn-sm btn-outline-primary" @click.stop="checkNow(domain)">
+                                                <i class="bi bi-arrow-repeat"></i>
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-danger ms-1" @click.stop="deleteTracker(domain)">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    <!-- IP详情行 -->
+                                    <tr v-if="expandedDomains.includes(domain)" v-for="ipInfo in tracker.ips" :key="ipInfo.ip">
+                                        <td></td>
+                                        <td></td>
+                                        <td class="tracker-ip">
+                                            <span :class="{'text-success': ipInfo.version === 'ipv4', 'text-info': ipInfo.version === 'ipv6'}">
+                                                {{ ipInfo.ip }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span v-if="ipInfo.country">
+                                                <span class="country-flag">{{ getFlag(ipInfo.country.country_code) }}</span>
+                                                {{ ipInfo.country.country }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span v-if="ipInfo.country">
+                                                {{ ipInfo.country.isp || '-' }}
+                                            </span>
+                                            <span v-else>-</span>
+                                        </td>
+                                        <td>
+                                            <span :class="getStatusClass(ipInfo.status)">
+                                                <i class="bi" :class="getStatusIcon(ipInfo.status)"></i>
+                                                {{ getStatusText(ipInfo.status) }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <div class="latency-bar">
+                                                <div class="latency-fill"
+                                                     :class="getLatencyClass(ipInfo.latency)"
+                                                     :style="{width: getLatencyWidth(ipInfo.latency)}"></div>
+                                            </div>
+                                            <small v-if="ipInfo.latency >= 0">{{ ipInfo.latency }}ms</small>
+                                            <small v-else>-</small>
+                                        </td>
+                                        <td>
+                                            <small>{{ formatTime(ipInfo.last_check) }}</small>
+                                        </td>
+                                        <td></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 排行页面 -->
+            <div v-if="currentTab === 'ranking'">
+                <div class="card">
+                    <div class="card-header">
+                        <ul class="nav nav-tabs card-header-tabs">
+                            <li class="nav-item">
+                                <a class="nav-link" :class="{active: rankingPeriod === '24h'}"
+                                   @click="rankingPeriod = '24h'; loadRanking()" href="#">
+                                    {{ t('ranking.24h') }}
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" :class="{active: rankingPeriod === '7d'}"
+                                   @click="rankingPeriod = '7d'; loadRanking()" href="#">
+                                    {{ t('ranking.7d') }}
+                                </a>
+                            </li>
+                            <li class="nav-item">
+                                <a class="nav-link" :class="{active: rankingPeriod === '30d'}"
+                                   @click="rankingPeriod = '30d'; loadRanking()" href="#">
+                                    {{ t('ranking.30d') }}
+                                </a>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="card-body p-0">
+                        <div v-if="ranking.length === 0" class="empty-state">
+                            <i class="bi bi-trophy" style="font-size: 3rem;"></i>
+                            <p class="mt-3">{{ t('ranking.empty') }}</p>
+                        </div>
+                        <div v-else>
+                            <div class="ranking-item" v-for="(item, index) in ranking" :key="index">
+                                <div class="d-flex align-items-center">
+                                    <span class="ranking-number">#{{ index + 1 }}</span>
+                                    <span class="tracker-domain">{{ item.domain }}</span>
+                                </div>
+                                <div class="d-flex align-items-center">
+                                    <span class="text-secondary me-3">{{ item.ip_count }} IPs</span>
+                                    <span class="uptime-badge uptime-100">{{ item.uptime.toFixed(2) }}%</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 日志页面 -->
+            <div v-if="currentTab === 'logs'">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>{{ t('logs.title') }}</span>
+                        <button class="btn btn-sm btn-outline-danger" @click="clearLogs">
+                            <i class="bi bi-trash"></i> {{ t('logs.clear') }}
+                        </button>
+                    </div>
+                    <div class="card-body" style="max-height: 600px; overflow-y: auto;">
+                        <div v-if="logs.length === 0" class="empty-state">
+                            <i class="bi bi-journal-text" style="font-size: 3rem;"></i>
+                            <p class="mt-3">{{ t('logs.empty') }}</p>
+                        </div>
+                        <div v-else>
+                            <div class="log-entry" v-for="(log, index) in logs" :key="index">
+                                <span class="log-time">{{ formatLogTime(log.time) }}</span>
+                                <span class="log-level" :class="'log-level-' + log.level">{{ log.level }}</span>
+                                <span>{{ log.message }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 配置页面 -->
+            <div v-if="currentTab === 'config'">
+                <!-- 监控配置 -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        {{ t('config.monitorTitle') }}
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">{{ t('config.checkInterval') }}</label>
+                            <select class="form-select" v-model="config.check_interval" @change="saveConfig">
+                                <option :value="5">5 {{ t('config.seconds') }}</option>
+                                <option :value="15">15 {{ t('config.seconds') }}</option>
+                                <option :value="30">30 {{ t('config.seconds') }}</option>
+                                <option :value="60">1 {{ t('config.minute') }}</option>
+                                <option :value="300">5 {{ t('config.minutes') }}</option>
+                                <option :value="600">10 {{ t('config.minutes') }}</option>
+                                <option :value="1800">30 {{ t('config.minutes') }}</option>
+                                <option :value="3600">1 {{ t('config.hour') }}</option>
+                            </select>
+                            <div class="form-text">{{ t('config.checkIntervalDesc') }}</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">{{ t('config.timeout') }}</label>
+                            <select class="form-select" v-model="config.timeout" @change="saveConfig">
+                                <option :value="5">5 {{ t('config.seconds') }}</option>
+                                <option :value="15">15 {{ t('config.seconds') }}</option>
+                                <option :value="30">30 {{ t('config.seconds') }}</option>
+                            </select>
+                            <div class="form-text">{{ t('config.timeoutDesc') }}</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">{{ t('config.retryInterval') }}</label>
+                            <select class="form-select" v-model="config.retry_interval" @change="saveConfig">
+                                <option :value="3">3 {{ t('config.seconds') }}</option>
+                                <option :value="5">5 {{ t('config.seconds') }}</option>
+                                <option :value="10">10 {{ t('config.seconds') }}</option>
+                            </select>
+                            <div class="form-text">{{ t('config.retryIntervalDesc') }}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 代理配置 -->
+                <div class="card mb-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span>{{ t('config.proxyTitle') }}</span>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" v-model="config.proxy_enabled" @change="saveConfig">
+                            <label class="form-check-label">{{ t('config.enable') }}</label>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">{{ t('config.httpProxy') }}</label>
+                            <input type="text" class="form-control" v-model="config.http_proxy"
+                                   :placeholder="t('config.httpProxyPlaceholder')" @change="saveConfig">
+                            <div class="form-text">{{ t('config.httpProxyDesc') }}</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">{{ t('config.udpProxy') }}</label>
+                            <input type="text" class="form-control" v-model="config.udp_proxy"
+                                   :placeholder="t('config.udpProxyPlaceholder')" @change="saveConfig">
+                            <div class="form-text">{{ t('config.udpProxyDesc') }}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 显示配置 -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        {{ t('config.displayTitle') }}
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">{{ t('config.autoRefresh') }}</label>
+                            <select class="form-select" v-model="autoRefreshInterval" @change="toggleAutoRefresh">
+                                <option :value="1000">1 {{ t('config.second') }}</option>
+                                <option :value="5000">5 {{ t('config.seconds') }}</option>
+                                <option :value="30000">30 {{ t('config.seconds') }}</option>
+                                <option :value="60000">1 {{ t('config.minute') }}</option>
+                                <option :value="0">{{ t('config.disabled') }}</option>
+                            </select>
+                            <div class="form-text">{{ t('config.autoRefreshDesc') }}</div>
+                        </div>
+                        <div class="config-switch">
+                            <div>
+                                <strong>{{ t('config.logToDisk') }}</strong>
+                                <p class="text-secondary mb-0">{{ t('config.logToDiskDesc') }}</p>
+                            </div>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" v-model="config.log_to_disk" @change="saveConfig">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 添加Tracker模态框 -->
+        <div class="modal fade" v-model="showAddModal" :class="{show: showAddModal}"
+             :style="{display: showAddModal ? 'block' : 'none'}" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">{{ t('modal.addTracker') }}</h5>
+                        <button type="button" class="btn-close" @click="showAddModal = false"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">{{ t('modal.trackerUrl') }}</label>
+                            <input type="text" class="form-control" v-model="newTrackerUrl"
+                                   :placeholder="t('modal.urlPlaceholder')">
+                            <div class="form-text">{{ t('modal.urlExample') }}</div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" @click="showAddModal = false">
+                            {{ t('common.cancel') }}
+                        </button>
+                        <button type="button" class="btn btn-primary" @click="addTracker" :disabled="adding">
+                            <span v-if="adding" class="spinner-border spinner-border-sm me-1"></span>
+                            {{ t('common.add') }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-backdrop fade" v-if="showAddModal" :class="{show: showAddModal}"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const { createApp, ref, computed, onMounted, watch } = Vue;
+        const { createI18n } = VueI18n;
+
+        // 多语言配置
+        const messages = {
+            zh: {
+                nav: {
+                    dashboard: '仪表盘',
+                    trackers: 'Tracker列表',
+                    ranking: '可用率排行',
+                    logs: '日志',
+                    config: '配置'
+                },
+                stats: {
+                    total: '总监控数',
+                    alive: '在线',
+                    ipv4: 'IPv4',
+                    ipv6: 'IPv6'
+                },
+                tracker: {
+                    title: '监控列表',
+                    domain: '域名',
+                    ip: 'IP地址',
+                    country: '归属地',
+                    isp: '运营商',
+                    status: '状态',
+                    latency: '延迟',
+                    lastCheck: '最后检查',
+                    ips: '个IP',
+                    empty: '暂无监控的Tracker'
+                },
+                ranking: {
+                    '24h': '24小时',
+                    '7d': '7天',
+                    '30d': '30天',
+                    empty: '暂无100%可用率的Tracker'
+                },
+                logs: {
+                    title: '系统日志',
+                    clear: '清空',
+                    empty: '暂无日志'
+                },
+                config: {
+                    title: '系统配置',
+                    monitorTitle: '监控配置',
+                    displayTitle: '显示配置',
+                    proxyTitle: '代理配置',
+                    checkInterval: '监控间隔',
+                    checkIntervalDesc: '自动检测所有tracker的时间间隔',
+                    timeout: '连接超时',
+                    timeoutDesc: 'TCP/UDP连接等待超时时间',
+                    retryInterval: '失败重试间隔',
+                    retryIntervalDesc: '首次失败后自动重试的等待时间',
+                    autoRefresh: '页面自动刷新',
+                    autoRefreshDesc: '网页数据自动刷新间隔',
+                    logToDisk: '日志存储到磁盘',
+                    logToDiskDesc: '重启后日志不会丢失',
+                    enable: '启用',
+                    httpProxy: 'HTTP代理',
+                    httpProxyPlaceholder: 'http://127.0.0.1:7890 或 socks5://127.0.0.1:1080',
+                    httpProxyDesc: '支持HTTP、HTTPS、SOCKS5代理',
+                    udpProxy: 'UDP代理',
+                    udpProxyPlaceholder: 'socks5://127.0.0.1:1080',
+                    udpProxyDesc: 'UDP代理通常只支持SOCKS5',
+                    seconds: '秒',
+                    second: '秒',
+                    minute: '分钟',
+                    minutes: '分钟',
+                    hour: '小时',
+                    disabled: '禁用'
+                },
+                modal: {
+                    addTracker: '添加Tracker',
+                    trackerUrl: 'Tracker URL',
+                    urlPlaceholder: 'udp://tracker.example.com:80/announce',
+                    urlExample: '支持 udp://, http://, https:// 协议'
+                },
+                common: {
+                    add: '添加',
+                    cancel: '取消',
+                    search: '搜索...',
+                    delete: '删除',
+                    confirm: '确认'
+                }
+            },
+            en: {
+                nav: {
+                    dashboard: 'Dashboard',
+                    trackers: 'Trackers',
+                    ranking: 'Ranking',
+                    logs: 'Logs',
+                    config: 'Config'
+                },
+                stats: {
+                    total: 'Total',
+                    alive: 'Online',
+                    ipv4: 'IPv4',
+                    ipv6: 'IPv6'
+                },
+                tracker: {
+                    title: 'Tracker List',
+                    domain: 'Domain',
+                    ip: 'IP Address',
+                    country: 'Country',
+                    isp: 'ISP',
+                    status: 'Status',
+                    latency: 'Latency',
+                    lastCheck: 'Last Check',
+                    ips: 'IPs',
+                    empty: 'No trackers yet'
+                },
+                ranking: {
+                    '24h': '24 Hours',
+                    '7d': '7 Days',
+                    '30d': '30 Days',
+                    empty: 'No 100% uptime trackers'
+                },
+                logs: {
+                    title: 'System Logs',
+                    clear: 'Clear',
+                    empty: 'No logs yet'
+                },
+                config: {
+                    title: 'Configuration',
+                    monitorTitle: 'Monitor Settings',
+                    displayTitle: 'Display Settings',
+                    proxyTitle: 'Proxy Settings',
+                    checkInterval: 'Check Interval',
+                    checkIntervalDesc: 'Time interval to check all trackers',
+                    timeout: 'Connection Timeout',
+                    timeoutDesc: 'TCP/UDP connection wait timeout',
+                    retryInterval: 'Retry Interval',
+                    retryIntervalDesc: 'Wait time before retry on first failure',
+                    autoRefresh: 'Auto Refresh',
+                    autoRefreshDesc: 'Web page auto refresh interval',
+                    logToDisk: 'Save Logs to Disk',
+                    logToDiskDesc: 'Logs will persist after restart',
+                    enable: 'Enable',
+                    httpProxy: 'HTTP Proxy',
+                    httpProxyPlaceholder: 'http://127.0.0.1:7890 or socks5://127.0.0.1:1080',
+                    httpProxyDesc: 'Supports HTTP, HTTPS, SOCKS5 proxies',
+                    udpProxy: 'UDP Proxy',
+                    udpProxyPlaceholder: 'socks5://127.0.0.1:1080',
+                    udpProxyDesc: 'UDP proxy usually only supports SOCKS5',
+                    seconds: 's',
+                    second: 's',
+                    minute: 'min',
+                    minutes: 'mins',
+                    hour: 'hour',
+                    disabled: 'Disabled'
+                },
+                modal: {
+                    addTracker: 'Add Tracker',
+                    trackerUrl: 'Tracker URL',
+                    urlPlaceholder: 'udp://tracker.example.com:80/announce',
+                    urlExample: 'Supports udp://, http://, https://'
+                },
+                common: {
+                    add: 'Add',
+                    cancel: 'Cancel',
+                    search: 'Search...',
+                    delete: 'Delete',
+                    confirm: 'Confirm'
+                }
+            },
+            ru: {
+                nav: {
+                    dashboard: 'Панель',
+                    trackers: 'Трекеры',
+                    ranking: 'Рейтинг',
+                    logs: 'Логи',
+                    config: 'Настройки'
+                },
+                stats: {
+                    total: 'Всего',
+                    alive: 'Онлайн',
+                    ipv4: 'IPv4',
+                    ipv6: 'IPv6'
+                },
+                tracker: {
+                    title: 'Список трекеров',
+                    domain: 'Домен',
+                    ip: 'IP адрес',
+                    country: 'Страна',
+                    isp: 'Провайдер',
+                    status: 'Статус',
+                    latency: 'Задержка',
+                    lastCheck: 'Последняя проверка',
+                    ips: 'IP',
+                    empty: 'Нет трекеров'
+                },
+                ranking: {
+                    '24h': '24 часа',
+                    '7d': '7 дней',
+                    '30d': '30 дней',
+                    empty: 'Нет трекеров со 100% доступностью'
+                },
+                logs: {
+                    title: 'Системные логи',
+                    clear: 'Очистить',
+                    empty: 'Нет логов'
+                },
+                config: {
+                    title: 'Настройки',
+                    monitorTitle: 'Настройки мониторинга',
+                    displayTitle: 'Настройки отображения',
+                    proxyTitle: 'Настройки прокси',
+                    checkInterval: 'Интервал проверки',
+                    checkIntervalDesc: 'Интервал автоматической проверки всех трекеров',
+                    timeout: 'Таймаут соединения',
+                    timeoutDesc: 'Время ожидания ответа TCP/UDP',
+                    retryInterval: 'Интервал повтора',
+                    retryIntervalDesc: 'Время ожидания перед повторной попыткой',
+                    autoRefresh: 'Автообновление',
+                    autoRefreshDesc: 'Интервал автообновления страницы',
+                    logToDisk: 'Сохранять логи на диск',
+                    logToDiskDesc: 'Логи сохранятся после перезагрузки',
+                    enable: 'Включить',
+                    httpProxy: 'HTTP прокси',
+                    httpProxyPlaceholder: 'http://127.0.0.1:7890 или socks5://127.0.0.1:1080',
+                    httpProxyDesc: 'Поддержка HTTP, HTTPS, SOCKS5 прокси',
+                    udpProxy: 'UDP прокси',
+                    udpProxyPlaceholder: 'socks5://127.0.0.1:1080',
+                    udpProxyDesc: 'UDP прокси обычно поддерживает только SOCKS5',
+                    seconds: 'сек',
+                    second: 'сек',
+                    minute: 'мин',
+                    minutes: 'мин',
+                    hour: 'час',
+                    disabled: 'Отключено'
+                },
+                modal: {
+                    addTracker: 'Добавить трекер',
+                    trackerUrl: 'URL трекера',
+                    urlPlaceholder: 'udp://tracker.example.com:80/announce',
+                    urlExample: 'Поддерживает udp://, http://, https://'
+                },
+                common: {
+                    add: 'Добавить',
+                    cancel: 'Отмена',
+                    search: 'Поиск...',
+                    delete: 'Удалить',
+                    confirm: 'Подтвердить'
+                }
+            },
+            fr: {
+                nav: {
+                    dashboard: 'Tableau de bord',
+                    trackers: 'Trackers',
+                    ranking: 'Classement',
+                    logs: 'Journaux',
+                    config: 'Configuration'
+                },
+                stats: {
+                    total: 'Total',
+                    alive: 'En ligne',
+                    ipv4: 'IPv4',
+                    ipv6: 'IPv6'
+                },
+                tracker: {
+                    title: 'Liste des trackers',
+                    domain: 'Domaine',
+                    ip: 'Adresse IP',
+                    country: 'Pays',
+                    isp: 'FAI',
+                    status: 'Statut',
+                    latency: 'Latence',
+                    lastCheck: 'Dernière vérification',
+                    ips: 'IPs',
+                    empty: 'Aucun tracker'
+                },
+                ranking: {
+                    '24h': '24 heures',
+                    '7d': '7 jours',
+                    '30d': '30 jours',
+                    empty: 'Aucun tracker à 100% de disponibilité'
+                },
+                logs: {
+                    title: 'Journaux système',
+                    clear: 'Effacer',
+                    empty: 'Aucun journal'
+                },
+                config: {
+                    title: 'Configuration',
+                    monitorTitle: 'Paramètres de surveillance',
+                    displayTitle: 'Paramètres d\'affichage',
+                    proxyTitle: 'Paramètres du proxy',
+                    checkInterval: 'Intervalle de vérification',
+                    checkIntervalDesc: 'Intervalle de vérification automatique de tous les trackers',
+                    timeout: 'Délai d\'attente',
+                    timeoutDesc: 'Temps d\'attente de réponse TCP/UDP',
+                    retryInterval: 'Intervalle de nouvelle tentative',
+                    retryIntervalDesc: 'Temps d\'attente avant nouvelle tentative',
+                    autoRefresh: 'Actualisation auto',
+                    autoRefreshDesc: 'Intervalle d\'actualisation de la page',
+                    logToDisk: 'Enregistrer les journaux',
+                    logToDiskDesc: 'Les journaux persistent après redémarrage',
+                    enable: 'Activer',
+                    httpProxy: 'Proxy HTTP',
+                    httpProxyPlaceholder: 'http://127.0.0.1:7890 ou socks5://127.0.0.1:1080',
+                    httpProxyDesc: 'Supporte les proxies HTTP, HTTPS, SOCKS5',
+                    udpProxy: 'Proxy UDP',
+                    udpProxyPlaceholder: 'socks5://127.0.0.1:1080',
+                    udpProxyDesc: 'Le proxy UDP ne supporte généralement que SOCKS5',
+                    seconds: 's',
+                    second: 's',
+                    minute: 'min',
+                    minutes: 'mins',
+                    hour: 'heure',
+                    disabled: 'Désactivé'
+                },
+                modal: {
+                    addTracker: 'Ajouter un tracker',
+                    trackerUrl: 'URL du tracker',
+                    urlPlaceholder: 'udp://tracker.example.com:80/announce',
+                    urlExample: 'Supporte udp://, http://, https://'
+                },
+                common: {
+                    add: 'Ajouter',
+                    cancel: 'Annuler',
+                    search: 'Rechercher...',
+                    delete: 'Supprimer',
+                    confirm: 'Confirmer'
+                }
+            },
+            ja: {
+                nav: {
+                    dashboard: 'ダッシュボード',
+                    trackers: 'トラッカー',
+                    ranking: 'ランキング',
+                    logs: 'ログ',
+                    config: '設定'
+                },
+                stats: {
+                    total: '合計',
+                    alive: 'オンライン',
+                    ipv4: 'IPv4',
+                    ipv6: 'IPv6'
+                },
+                tracker: {
+                    title: 'トラッカーリスト',
+                    domain: 'ドメイン',
+                    ip: 'IPアドレス',
+                    country: '国',
+                    isp: 'ISP',
+                    status: 'ステータス',
+                    latency: '遅延',
+                    lastCheck: '最終確認',
+                    ips: 'IPs',
+                    empty: 'トラッカーがありません'
+                },
+                ranking: {
+                    '24h': '24時間',
+                    '7d': '7日',
+                    '30d': '30日',
+                    empty: '100%可用性のトラッカーがありません'
+                },
+                logs: {
+                    title: 'システムログ',
+                    clear: 'クリア',
+                    empty: 'ログがありません'
+                },
+                config: {
+                    title: '設定',
+                    monitorTitle: '監視設定',
+                    displayTitle: '表示設定',
+                    proxyTitle: 'プロキシ設定',
+                    checkInterval: 'チェック間隔',
+                    checkIntervalDesc: 'すべてのトラッカーを自動チェックする間隔',
+                    timeout: '接続タイムアウト',
+                    timeoutDesc: 'TCP/UDP接続待ち受けタイムアウト時間',
+                    retryInterval: '再試行間隔',
+                    retryIntervalDesc: '最初の失敗後の自動再試行までの待機時間',
+                    autoRefresh: '自動更新',
+                    autoRefreshDesc: 'ウェブページの自動更新間隔',
+                    logToDisk: 'ログをディスクに保存',
+                    logToDiskDesc: '再起動後もログが保持されます',
+                    enable: '有効',
+                    httpProxy: 'HTTPプロキシ',
+                    httpProxyPlaceholder: 'http://127.0.0.1:7890 または socks5://127.0.0.1:1080',
+                    httpProxyDesc: 'HTTP、HTTPS、SOCKS5プロキシをサポート',
+                    udpProxy: 'UDPプロキシ',
+                    udpProxyPlaceholder: 'socks5://127.0.0.1:1080',
+                    udpProxyDesc: 'UDPプロキシは通常SOCKS5のみサポート',
+                    seconds: '秒',
+                    second: '秒',
+                    minute: '分',
+                    minutes: '分',
+                    hour: '時間',
+                    disabled: '無効'
+                },
+                modal: {
+                    addTracker: 'トラッカーを追加',
+                    trackerUrl: 'トラッカーURL',
+                    urlPlaceholder: 'udp://tracker.example.com:80/announce',
+                    urlExample: 'udp://, http://, https:// をサポート'
+                },
+                common: {
+                    add: '追加',
+                    cancel: 'キャンセル',
+                    search: '検索...',
+                    delete: '削除',
+                    confirm: '確認'
+                }
+            },
+            ko: {
+                nav: {
+                    dashboard: '대시보드',
+                    trackers: '트래커',
+                    ranking: '순위',
+                    logs: '로그',
+                    config: '설정'
+                },
+                stats: {
+                    total: '전체',
+                    alive: '온라인',
+                    ipv4: 'IPv4',
+                    ipv6: 'IPv6'
+                },
+                tracker: {
+                    title: '트래커 목록',
+                    domain: '도메인',
+                    ip: 'IP 주소',
+                    country: '국가',
+                    isp: 'ISP',
+                    status: '상태',
+                    latency: '지연',
+                    lastCheck: '마지막 확인',
+                    ips: 'IPs',
+                    empty: '트래커가 없습니다'
+                },
+                ranking: {
+                    '24h': '24시간',
+                    '7d': '7일',
+                    '30d': '30일',
+                    empty: '100% 가용률 트래커 없음'
+                },
+                logs: {
+                    title: '시스템 로그',
+                    clear: '지우기',
+                    empty: '로그 없음'
+                },
+                config: {
+                    title: '설정',
+                    monitorTitle: '모니터링 설정',
+                    displayTitle: '표시 설정',
+                    proxyTitle: '프록시 설정',
+                    checkInterval: '확인 간격',
+                    checkIntervalDesc: '모든 트래커를 자동으로 확인하는 간격',
+                    timeout: '연결 시간 초과',
+                    timeoutDesc: 'TCP/UDP 연결 대기 시간 초과',
+                    retryInterval: '재시도 간격',
+                    retryIntervalDesc: '첫 실패 후 자동 재시도 전 대기 시간',
+                    autoRefresh: '자동 새로고침',
+                    autoRefreshDesc: '웹 페이지 자동 새로고침 간격',
+                    logToDisk: '로그를 디스크에 저장',
+                    logToDiskDesc: '재시작 후 로그가 유지됩니다',
+                    enable: '활성화',
+                    httpProxy: 'HTTP 프록시',
+                    httpProxyPlaceholder: 'http://127.0.0.1:7890 또는 socks5://127.0.0.1:1080',
+                    httpProxyDesc: 'HTTP, HTTPS, SOCKS5 프록시 지원',
+                    udpProxy: 'UDP 프록시',
+                    udpProxyPlaceholder: 'socks5://127.0.0.1:1080',
+                    udpProxyDesc: 'UDP 프록시는 일반적으로 SOCKS5만 지원',
+                    seconds: '초',
+                    second: '초',
+                    minute: '분',
+                    minutes: '분',
+                    hour: '시간',
+                    disabled: '비활성화'
+                },
+                modal: {
+                    addTracker: '트래커 추가',
+                    trackerUrl: '트래커 URL',
+                    urlPlaceholder: 'udp://tracker.example.com:80/announce',
+                    urlExample: 'udp://, http://, https:// 지원'
+                },
+                common: {
+                    add: '추가',
+                    cancel: '취소',
+                    search: '검색...',
+                    delete: '삭제',
+                    confirm: '확인'
+                }
+            }
+        };
+
+        // 创建i18n实例
+        const i18n = createI18n({
+            legacy: false,
+            locale: 'zh',
+            fallbackLocale: 'zh',
+            messages
+        });
+
+        const app = createApp({
+            setup() {
+                const currentTab = ref('dashboard');
+                const currentLocale = ref('zh');
+                const loading = ref(true);
+                const trackers = ref({});
+                const stats = ref({ total: 0, alive: 0, ipv4: 0, ipv6: 0 });
+                const expandedDomains = ref([]);
+                const searchQuery = ref('');
+                const showAddModal = ref(false);
+                const newTrackerUrl = ref('');
+                const adding = ref(false);
+                const ranking = ref([]);
+                const rankingPeriod = ref('24h');
+                const logs = ref([]);
+                const config = ref({
+                    log_to_disk: false,
+                    check_interval: 30,
+                    timeout: 5,
+                    retry_interval: 5,
+                    http_proxy: '',
+                    udp_proxy: '',
+                    proxy_enabled: false
+                });
+                const autoRefresh = ref(true);
+                const autoRefreshInterval = ref(30000);
+
+                // 计算属性
+                const filteredTrackers = computed(() => {
+                    if (!searchQuery.value) return trackers.value;
+
+                    const query = searchQuery.value.toLowerCase();
+                    const result = {};
+
+                    for (const [domain, data] of Object.entries(trackers.value)) {
+                        if (domain.toLowerCase().includes(query)) {
+                            result[domain] = data;
+                        } else {
+                            // 检查IP
+                            const matchedIPs = data.ips.filter(ip =>
+                                ip.ip.toLowerCase().includes(query) ||
+                                ip.country?.country?.toLowerCase().includes(query)
+                            );
+                            if (matchedIPs.length > 0) {
+                                result[domain] = { ...data, ips: matchedIPs };
+                            }
+                        }
+                    }
+
+                    return result;
+                });
+
+                // 方法
+                const loadTrackers = async () => {
+                    try {
+                        const response = await axios.get('/api/trackers');
+                        trackers.value = response.data;
+                    } catch (error) {
+                        console.error('Failed to load trackers:', error);
+                    }
+                };
+
+                const loadStats = async () => {
+                    try {
+                        const response = await axios.get('/api/stats');
+                        stats.value = response.data;
+                    } catch (error) {
+                        console.error('Failed to load stats:', error);
+                    }
+                };
+
+                const loadRanking = async () => {
+                    try {
+                        const response = await axios.get(`/api/ranking/${rankingPeriod.value}`);
+                        ranking.value = response.data.ranking;
+                    } catch (error) {
+                        console.error('Failed to load ranking:', error);
+                    }
+                };
+
+                const loadLogs = async () => {
+                    try {
+                        const response = await axios.get('/api/logs?limit=100');
+                        logs.value = response.data;
+                    } catch (error) {
+                        console.error('Failed to load logs:', error);
+                    }
+                };
+
+                const loadConfig = async () => {
+                    try {
+                        const response = await axios.get('/api/config');
+                        config.value = response.data;
+                    } catch (error) {
+                        console.error('Failed to load config:', error);
+                    }
+                };
+
+                const toggleExpand = (domain) => {
+                    const index = expandedDomains.value.indexOf(domain);
+                    if (index > -1) {
+                        expandedDomains.value.splice(index, 1);
+                    } else {
+                        expandedDomains.value.push(domain);
+                    }
+                };
+
+                const addTracker = async () => {
+                    if (!newTrackerUrl.value) return;
+
+                    adding.value = true;
+                    try {
+                        const response = await axios.post('/api/tracker/add', { url: newTrackerUrl.value });
+                        if (response.data.success) {
+                            showAddModal.value = false;
+                            newTrackerUrl.value = '';
+                            await loadTrackers();
+                            await loadStats();
+                        } else {
+                            alert(response.data.error || '添加失败');
+                        }
+                    } catch (error) {
+                        alert(error.response?.data?.error || '添加失败');
+                    }
+                    adding.value = false;
+                };
+
+                const deleteTracker = async (domain) => {
+                    if (!confirm(`确定删除 ${domain} 吗?`)) return;
+
+                    try {
+                        await axios.post('/api/tracker/delete', { domain });
+                        await loadTrackers();
+                        await loadStats();
+                    } catch (error) {
+                        alert('删除失败');
+                    }
+                };
+
+                const checkNow = async (domain) => {
+                    try {
+                        await axios.post('/api/tracker/check', { domain });
+                        await loadTrackers();
+                    } catch (error) {
+                        alert('检查失败');
+                    }
+                };
+
+                const clearLogs = async () => {
+                    try {
+                        await axios.post('/api/logs/clear');
+                        logs.value = [];
+                    } catch (error) {
+                        alert('清空失败');
+                    }
+                };
+
+                const saveConfig = async () => {
+                    try {
+                        await axios.post('/api/config', {
+                            log_to_disk: config.value.log_to_disk,
+                            check_interval: config.value.check_interval,
+                            timeout: config.value.timeout,
+                            retry_interval: config.value.retry_interval,
+                            http_proxy: config.value.http_proxy,
+                            udp_proxy: config.value.udp_proxy,
+                            proxy_enabled: config.value.proxy_enabled
+                        });
+                    } catch (error) {
+                        alert('保存失败');
+                    }
+                };
+
+                const changeLocale = () => {
+                    // 保存到cookie
+                    document.cookie = `locale=${currentLocale.value};path=/;max-age=31536000`;
+                    i18n.global.locale.value = currentLocale.value;
+                };
+
+                const getUptime = (tracker) => {
+                    const history = tracker.history_24h || [];
+                    if (history.length === 0) return 0;
+                    return (history.filter(h => h === 1).length / history.length) * 100;
+                };
+
+                const getUptimeClass = (uptime) => {
+                    if (uptime >= 100) return 'uptime-100';
+                    if (uptime >= 90) return 'uptime-high';
+                    return 'uptime-low';
+                };
+
+                const getStatusClass = (status) => {
+                    if (status === 'online') return 'status-online';
+                    if (status === 'offline') return 'status-offline';
+                    return 'status-unknown';
+                };
+
+                const getStatusIcon = (status) => {
+                    if (status === 'online') return 'bi-check-circle-fill';
+                    if (status === 'offline') return 'bi-x-circle-fill';
+                    return 'bi-question-circle-fill';
+                };
+
+                const getStatusText = (status) => {
+                    if (status === 'online') return 'Online';
+                    if (status === 'offline') return 'Offline';
+                    return 'Unknown';
+                };
+
+                const getLatencyClass = (latency) => {
+                    if (latency < 0) return '';
+                    if (latency < 100) return '';
+                    if (latency < 300) return 'slow';
+                    return 'very-slow';
+                };
+
+                const getLatencyWidth = (latency) => {
+                    if (latency < 0) return '0%';
+                    if (latency > 1000) return '100%';
+                    return `${Math.min(latency / 10, 100)}%`;
+                };
+
+                const formatTime = (timeStr) => {
+                    if (!timeStr) return '-';
+                    const date = new Date(timeStr);
+                    return date.toLocaleTimeString();
+                };
+
+                const formatLogTime = (timeStr) => {
+                    if (!timeStr) return '';
+                    const date = new Date(timeStr);
+                    return date.toLocaleString();
+                };
+
+                const getFlag = (countryCode) => {
+                    if (!countryCode || countryCode === 'XX') return '🌐';
+                    // 使用emoji国旗
+                    const codePoints = countryCode
+                        .toUpperCase()
+                        .split('')
+                        .map(char => 127397 + char.charCodeAt(0));
+                    return String.fromCodePoint(...codePoints);
+                };
+
+                const toggleAutoRefresh = () => {
+                    if (autoRefresh.value && autoRefreshInterval.value > 0) {
+                        startAutoRefresh();
+                    } else {
+                        stopAutoRefresh();
+                    }
+                };
+
+                let refreshInterval = null;
+
+                const startAutoRefresh = () => {
+                    if (refreshInterval) clearInterval(refreshInterval);
+                    if (autoRefreshInterval.value <= 0) return;
+                    refreshInterval = setInterval(async () => {
+                        await loadTrackers();
+                        await loadStats();
+                        if (currentTab.value === 'ranking') {
+                            await loadRanking();
+                        }
+                        if (currentTab.value === 'logs') {
+                            await loadLogs();
+                        }
+                    }, autoRefreshInterval.value);
+                };
+
+                const stopAutoRefresh = () => {
+                    if (refreshInterval) {
+                        clearInterval(refreshInterval);
+                        refreshInterval = null;
+                    }
+                };
+
+                // 初始化
+                onMounted(async () => {
+                    // 从cookie读取语言
+                    const cookies = document.cookie.split(';');
+                    for (const cookie of cookies) {
+                        const [key, value] = cookie.trim().split('=');
+                        if (key === 'locale') {
+                            currentLocale.value = value;
+                            i18n.global.locale.value = value;
+                            break;
+                        }
+                    }
+
+                    loading.value = true;
+                    await Promise.all([
+                        loadTrackers(),
+                        loadStats(),
+                        loadRanking(),
+                        loadLogs(),
+                        loadConfig()
+                    ]);
+                    loading.value = false;
+
+                    // 启动自动刷新
+                    if (autoRefresh.value) {
+                        startAutoRefresh();
+                    }
+                });
+
+                // 监听标签页切换
+                watch(currentTab, async (newTab) => {
+                    if (newTab === 'ranking') {
+                        await loadRanking();
+                    } else if (newTab === 'logs') {
+                        await loadLogs();
+                    }
+                });
+
+                return {
+                    currentTab,
+                    currentLocale,
+                    loading,
+                    trackers,
+                    stats,
+                    expandedDomains,
+                    searchQuery,
+                    showAddModal,
+                    newTrackerUrl,
+                    adding,
+                    ranking,
+                    rankingPeriod,
+                    logs,
+                    config,
+                    autoRefresh,
+                    autoRefreshInterval,
+                    filteredTrackers,
+                    loadRanking,
+                    toggleExpand,
+                    addTracker,
+                    deleteTracker,
+                    checkNow,
+                    clearLogs,
+                    saveConfig,
+                    changeLocale,
+                    getUptime,
+                    getUptimeClass,
+                    getStatusClass,
+                    getStatusIcon,
+                    getStatusText,
+                    getLatencyClass,
+                    getLatencyWidth,
+                    formatTime,
+                    formatLogTime,
+                    getFlag,
+                    toggleAutoRefresh,
+                    t: (key) => i18n.global.t(key)
+                };
+            }
+        });
+
+        app.use(i18n);
+        app.mount('#app');
+    </script>
+
+<style>
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+.inland-security-footer {
+  position: fixed;
+  z-index: 10;
+  bottom: 0;
+  right: 0;
+  width: fit-content;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.tooltip-container {
+  position: relative;
+}
+
+.trigger-content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  background-color: transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.minimax-link {
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 300;
+  color: #adadad;
+  text-decoration: none;
+}
+
+.minimax-link:visited {
+  color: #adadad;
+}
+
+.minimax-link:hover {
+  color: #666666;
+}
+
+.tooltip-content {
+  position: absolute;
+  bottom: 100%;
+  right: 0;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  padding-bottom: 16px; /* 8px 内容间距 + 8px 用于鼠标移动的透明区域 */
+  font-size: 12px;
+  line-height: 17px;
+  background-color: #fafafa;
+  border-radius: 12px;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  color: #171717;
+}
+
+/* 创建透明的连接区域，让鼠标可以平滑移动到 tooltip */
+.tooltip-content::after {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  left: 0;
+  right: 0;
+  height: 16px;
+}
+
+.tooltip-container:hover .tooltip-content {
+  display: flex;
+}
+
+.info-section {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+
+.beian-link {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+  color: #171717;
+}
+
+.beian-icon {
+  width: 14px;
+  height: 14px;
+  margin-right: 2px;
+}
+
+.underline-text {
+  color: #171717;
+  text-decoration: underline;
+}
+
+.underline-text:hover {
+  color: #000000;
+}
+
+/* 深色模式支持 */
+@media (prefers-color-scheme: dark) {
+  .trigger-content {
+    background-color: transparent;
+  }
+
+  .minimax-link,
+  .minimax-link:visited {
+    color: #666666;
+  }
+
+  .minimax-link:hover {
+    color: #adadad;
+  }
+
+  .tooltip-content {
+    background-color: #262626;
+    color: #ededed;
+  }
+
+  .beian-link,
+  .underline-text {
+    color: #ededed;
+  }
+
+  .underline-text:hover {
+    color: #ffffff;
+  }
+}
+
+</style>
+<div class="inland-security-footer">
+  <div class="tooltip-container">
+    <div class="trigger-content">
+      <a href="https://www.minimaxi.com/" target="_blank" rel="noreferrer" class="minimax-link">
+        <span>© 2026 MiniMax</span>
+      </a>
+    </div>
+    <div class="tooltip-content">
+      <section class="info-section">
+        <span>上海稀宇科技有限公司</span>
+      </section>
+
+      <section class="info-section">
+        <a class="beian-link" href="https://www.beian.gov.cn/portal/registerSystemInfo?recordcode=31010402010179" target="_blank" rel="noreferrer">
+          <img alt="hailuo-beian-icon" src="https://cdn.hailuoai.com/hailuo-video-web/public_assets/223037d3-79fd-4db0-a456-749f38a6a14b.png" class="beian-icon">
+          <span class="underline-text">沪公网安备31010402010179号</span>
+        </a>
+        <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer" class="underline-text">
+          沪ICP备2023003282号-38
+        </a>
+      </section>
+
+      <section class="info-section">
+        <span>模型名称：MiniMax</span>
+        <span>备案号：Shanghai-MiniMax-202505230046</span>
+      </section>
+
+      <section class="info-section">
+        <a href="https://agent.minimaxi.com/doc/zh/terms-of-service.html" target="_blank" rel="noreferrer" class="underline-text">
+          用户协议
+        </a>
+        <a href="https://agent.minimaxi.com/doc/zh/privacy-policy.html" target="_blank" rel="noreferrer" class="underline-text">
+          隐私政策
+        </a>
+      </section>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
