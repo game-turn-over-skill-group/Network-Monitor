@@ -40,7 +40,6 @@ DEFAULT_CONFIG = {
     'dns_custom': '8.8.8.8',   # 自定义DNS时使用，支持多个用逗号分隔
     'max_log_entries': 2000,    # 日志最大条目数
     'page_refresh_ms': 30000,   # 前端页面自动刷新间隔(ms)，0=禁用
-    'cache_history': True,      # 是否缓存历史可用率到JSON（重启不丢失）
     'tracker_stat_period': '24h', # 监控列表可用率统计周期：24h | 7d | 30d
     'rank_stat_period': '24h',    # 可用率排行统计周期：24h | 7d | 30d
 }
@@ -55,7 +54,7 @@ def load_config():
             for k in ['check_interval','timeout','retry_mode','retry_interval',
                       'log_to_disk','console_log_level',
                       'http_proxy','udp_proxy','proxy_enabled',
-                      'dns_mode','dns_custom','max_log_entries','page_refresh_ms','tracker_stat_period','rank_stat_period','cache_history']:
+                      'dns_mode','dns_custom','max_log_entries','page_refresh_ms','tracker_stat_period','rank_stat_period']:
                 if k in saved:
                     cfg[k] = saved[k]
     except Exception:
@@ -67,7 +66,7 @@ def persist_config(cfg):
         savable = {k: cfg[k] for k in ['check_interval','timeout','retry_mode','retry_interval',
                                         'log_to_disk','console_log_level',
                                         'http_proxy','udp_proxy','proxy_enabled',
-                                        'dns_mode','dns_custom','max_log_entries','page_refresh_ms','tracker_stat_period','rank_stat_period','cache_history']}
+                                        'dns_mode','dns_custom','max_log_entries','page_refresh_ms','tracker_stat_period','rank_stat_period']}
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(savable, f, indent=2, ensure_ascii=False)
     except Exception:
@@ -198,19 +197,17 @@ class TrackerDB:
     def get_stats(self):
         with self.lock: return dict(self.stats)
 
-    def get_ranking(self, period='24h', limit=200, min_uptime=0.0):
+    def get_ranking(self, period='24h', limit=200, only_100=True):
         out = []
         with self.lock:
             for domain, d in self.trackers.items():
                 h = d.get(f'history_{period}', [])
-                uptime = (sum(h)/len(h)*100) if h else None
-                if uptime is None and min_uptime > 0: continue
-                if uptime is not None and uptime < min_uptime: continue
+                uptime = (sum(h)/len(h)*100) if h else 0.0
+                if only_100 and uptime < 100.0: continue
                 out.append({'domain': domain, 'port': d.get('port',80),
                             'protocol': d.get('protocol','tcp'),
-                            'uptime': round(uptime,2) if uptime is not None else None,
-                            'ip_count': len(d['ips'])})
-        out.sort(key=lambda x: (-(x['uptime'] if x['uptime'] is not None else -1), x['domain']))
+                            'uptime': round(uptime,2), 'ip_count': len(d['ips'])})
+        out.sort(key=lambda x: (-x['uptime'], x['domain']))
         return out[:limit]
 
     # ---------- 日志 ----------
@@ -270,20 +267,11 @@ class TrackerDB:
     def _save(self):
         try:
             data = {}
-            cache_hist = CONFIG.get('cache_history', True)
             with self.lock:
                 for d, t in self.trackers.items():
-                    entry = {'domain':d,'port':t.get('port',80),
-                             'protocol':t.get('protocol','tcp'),
-                             'ips':t['ips'],'added_time':t['added_time']}
-                    if cache_hist:
-                        # 存紧凑计数器格式，避免几万行 0/1 撑大文件
-                        for key in ('history_24h','history_7d','history_30d'):
-                            h = t.get(key, [])
-                            total = len(h)
-                            ok    = sum(h)
-                            entry[key] = {'total': total, 'ok': ok, 'fail': total - ok}
-                    data[d] = entry
+                    data[d] = {'domain':d,'port':t.get('port',80),
+                               'protocol':t.get('protocol','tcp'),
+                               'ips':t['ips'],'added_time':t['added_time']}
             with open(CONFIG['data_file'], 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception: pass
@@ -301,23 +289,10 @@ class TrackerDB:
                     removed_count = len(t.get('ips', [])) - len(clean_ips)
                     if removed_count:
                         cprint(f"[load] {d}: 清除 {removed_count} 个过时IP", 'debug')
-                    def _restore(raw, maxlen):
-                        """从计数器或原始数组恢复滚动数组"""
-                        if isinstance(raw, dict):
-                            ok   = int(raw.get('ok', 0))
-                            fail = int(raw.get('fail', 0))
-                            # 重建：先排失败再排成功（尾部是最新数据）
-                            arr = [0]*fail + [1]*ok
-                            return arr[-maxlen:] if len(arr) > maxlen else arr
-                        elif isinstance(raw, list):
-                            return raw[-maxlen:] if len(raw) > maxlen else raw
-                        return []
                     self.trackers[d] = {
                         'domain':d,'port':t.get('port',80),
                         'protocol':t.get('protocol','tcp'),'ips':clean_ips,
-                        'history_24h': _restore(t.get('history_24h',[]), CONFIG['max_history']),
-                        'history_7d':  _restore(t.get('history_7d',[]),  20160),
-                        'history_30d': _restore(t.get('history_30d',[]), 86400),
+                        'history_24h':[],'history_7d':[],'history_30d':[],
                         'added_time':t.get('added_time',datetime.now().isoformat()),
                         'dns_error': t.get('dns_error', False)
                     }
@@ -975,8 +950,6 @@ def monitor_loop():
                        f"在线:{s['alive']} [v4:{s['alive_v4']} v6:{s['alive_v6']}]")
             db.add_log(summary, 'info')
             cprint(summary, 'info')
-            if CONFIG.get('cache_history', True):
-                db._save()  # 每轮检测完持久化历史数据
 
         except Exception as e:
             msg = f"监控线程错误: {type(e).__name__}: {e}"
@@ -1133,8 +1106,8 @@ def api_check():
 @app.route('/api/ranking/<period>')
 def api_ranking(period):
     if period not in ('24h','7d','30d'): period='24h'
-    min_uptime = request.args.get('min_uptime', 0, type=float)
-    return jsonify({'period':period,'ranking':db.get_ranking(period, 200, min_uptime)})
+    only100 = request.args.get('only100','true').lower()=='true'
+    return jsonify({'period':period,'ranking':db.get_ranking(period,200,only100)})
 
 
 def _client_ip():
@@ -1167,108 +1140,23 @@ def api_clear_logs():
     db.clear_logs()
     return jsonify({'success':True})
 
-@app.route('/api/history/clear', methods=['POST'])
-def api_clear_history():
-    """清空 JSON 文件中的历史可用率缓存，内存统计不受影响，重启后生效。"""
-    try:
-        if os.path.exists(CONFIG['data_file']):
-            with open(CONFIG['data_file'], 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            for entry in data.values():
-                entry.pop('history_24h', None)
-                entry.pop('history_7d',  None)
-                entry.pop('history_30d', None)
-            with open(CONFIG['data_file'], 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-        cprint('[history/clear] JSON缓存已清空，重启后统计将从零开始', 'info')
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-
-@app.route('/api/history/status', methods=['GET'])
-def api_history_status():
-    """检查 JSON 文件中是否存在历史缓存数据"""
-    try:
-        if not os.path.exists(CONFIG['data_file']):
-            return jsonify({'has_cache': False})
-        with open(CONFIG['data_file'], 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        def _has_data(v):
-            if not v: return False
-            if isinstance(v, dict): return v.get('total', 0) > 0
-            if isinstance(v, list): return len(v) > 0
-            return False
-        has_cache = any(
-            _has_data(entry.get('history_24h')) or
-            _has_data(entry.get('history_7d'))  or
-            _has_data(entry.get('history_30d'))
-            for entry in data.values()
-        )
-        return jsonify({'has_cache': has_cache})
-    except Exception as e:
-        return jsonify({'has_cache': False, 'error': str(e)})
-
 @app.route('/api/config', methods=['GET','POST'])
 def api_config():
     if request.method == 'POST':
         data = request.json or {}
-        keys = ['check_interval','timeout','retry_mode','retry_interval',
-                'log_to_disk','console_log_level','http_proxy','udp_proxy','proxy_enabled',
-                'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
-                'tracker_stat_period','rank_stat_period','cache_history']
-
-        # 字段的人可读标签
-        labels = {
-            'check_interval':      '监控间隔',
-            'timeout':             '连接超时',
-            'retry_mode':          '重试模式',
-            'retry_interval':      '重试间隔',
-            'log_to_disk':         '日志存盘',
-            'console_log_level':   '控制台日志',
-            'http_proxy':          'HTTP代理',
-            'udp_proxy':           'UDP代理',
-            'proxy_enabled':       '代理开关',
-            'dns_mode':            'DNS模式',
-            'dns_custom':          '自定义DNS',
-            'max_log_entries':     '最大日志条数',
-            'page_refresh_ms':     '页面刷新间隔',
-            'tracker_stat_period': '监控统计周期',
-            'rank_stat_period':    '排行统计周期',
-            'cache_history':       '缓存统计可用率',
-        }
-        # 单位后缀
-        suffixes = {
-            'check_interval': 's', 'timeout': 's', 'retry_interval': 's',
-            'page_refresh_ms': 'ms',
-        }
-        # 布尔值显示
-        bool_fmt = {True: '开', False: '关'}
-
-        changes = []
-        for k in keys:
-            if k not in data: continue
-            old_val = CONFIG.get(k)
-            new_val = data[k]
-            if old_val == new_val: continue   # 没变化不记录
-            CONFIG[k] = new_val
-            label  = labels.get(k, k)
-            suffix = suffixes.get(k, '')
-            if isinstance(new_val, bool):
-                val_str = bool_fmt.get(new_val, str(new_val))
-            else:
-                val_str = f"{new_val}{suffix}"
-            changes.append(f"{label}={val_str}")
-
+        for k in ['check_interval','timeout','retry_mode','retry_interval',
+                  'log_to_disk','console_log_level','http_proxy','udp_proxy','proxy_enabled',
+                  'dns_mode','dns_custom','max_log_entries','page_refresh_ms','tracker_stat_period','rank_stat_period']:
+            if k in data:
+                CONFIG[k] = data[k]
         persist_config(CONFIG)
-
-        if changes:
-            msg = f"配置已更新: {' | '.join(changes)}"
-        else:
-            msg = "配置保存（无变更）"
+        msg = f"配置已更新: console_log={CONFIG['console_log_level']} retry_mode={CONFIG['retry_mode']}"
         db.add_log(msg, 'info')
         cprint(msg, 'info')
-
-        return jsonify({'success':True,'config':{k:CONFIG[k] for k in keys}})
+        return jsonify({'success':True,'config':{k:CONFIG[k] for k in
+            ['check_interval','timeout','retry_mode','retry_interval',
+             'log_to_disk','console_log_level','http_proxy','udp_proxy','proxy_enabled',
+             'dns_mode','dns_custom','max_log_entries','page_refresh_ms','tracker_stat_period','rank_stat_period']}})
     safe = {k:v for k,v in CONFIG.items() if k not in ('data_file','log_file')}
     return jsonify(safe)
 

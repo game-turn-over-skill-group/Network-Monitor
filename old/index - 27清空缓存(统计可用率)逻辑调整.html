@@ -877,34 +877,26 @@ createApp({
             toast.value = {show:true, msg, type};
             _toastTimer = setTimeout(() => { toast.value = {...toast.value, show:false}; }, ms);
         };
-        // setup 内部翻译快捷方法（避免依赖 return 中的 t）
-        const _t = (key) => i18n.global.t(key);
 
         const clearHistory = async () => {
             // 前置检查1：缓存开关必须关闭
             if (cfg.value.cache_history) {
-                showToast(_t('config.clearCacheNeedOff'), 'warn', 5000);
+                showToast(t('config.clearCacheNeedOff'), 'warn', 5000);
                 return;
             }
             // 前置检查2：检查 JSON 中是否有缓存数据
-            let hasCacheRes;
             try {
-                hasCacheRes = await axios.get('/api/history/status');
-            } catch(e) {
-                showToast(_t('config.clearCacheEmpty'), 'info');
-                return;
-            }
-            if (!hasCacheRes.data.has_cache) {
-                showToast(_t('config.clearCacheEmpty'), 'info');
-                return;
-            }
+                const res = await axios.get('/api/history/status');
+                if (!res.data.has_cache) {
+                    showToast(t('config.clearCacheEmpty'), 'info');
+                    return;
+                }
+            } catch(e) { showToast('检查缓存失败', 'error'); return; }
             // 执行清空
             try {
                 await axios.post('/api/history/clear');
-                showToast(_t('config.clearHistoryDone'), 'ok', 4000);
-            } catch(e) {
-                showToast('清空失败: ' + e, 'error');
-            }
+                showToast(t('config.clearHistoryDone'), 'ok', 4000);
+            } catch(e) { showToast('清空失败: ' + e, 'error'); }
         };
         const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString() : '-';
         const fmtFullTime = (ts) => {

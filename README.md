@@ -68,7 +68,7 @@ pause
 | `check_interval` | 30 | 监控间隔（秒） |
 | `timeout` | 5 | TCP/UDP连接超时（秒） |
 | `retry_interval` | 5 | 失败重试间隔（秒） |
-| `max_history` | 288 | 历史点数量（24h × 12点/h） |
+| `max_history` | 2880 | 历史点数量 history_24h 上限：24h × 3600s ÷ 30s间隔 = 2880点 |
 | `log_to_disk` | False | 日志是否写入磁盘 |
 | `http_proxy` | 空 | HTTP代理地址 |
 | `udp_proxy` | 空 | UDP代理地址（SOCKS5） |

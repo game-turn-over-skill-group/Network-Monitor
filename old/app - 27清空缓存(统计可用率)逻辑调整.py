@@ -1193,15 +1193,8 @@ def api_history_status():
             return jsonify({'has_cache': False})
         with open(CONFIG['data_file'], 'r', encoding='utf-8') as f:
             data = json.load(f)
-        def _has_data(v):
-            if not v: return False
-            if isinstance(v, dict): return v.get('total', 0) > 0
-            if isinstance(v, list): return len(v) > 0
-            return False
         has_cache = any(
-            _has_data(entry.get('history_24h')) or
-            _has_data(entry.get('history_7d'))  or
-            _has_data(entry.get('history_30d'))
+            entry.get('history_24h') or entry.get('history_7d') or entry.get('history_30d')
             for entry in data.values()
         )
         return jsonify({'has_cache': has_cache})
@@ -1212,63 +1205,19 @@ def api_history_status():
 def api_config():
     if request.method == 'POST':
         data = request.json or {}
-        keys = ['check_interval','timeout','retry_mode','retry_interval',
-                'log_to_disk','console_log_level','http_proxy','udp_proxy','proxy_enabled',
-                'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
-                'tracker_stat_period','rank_stat_period','cache_history']
-
-        # 字段的人可读标签
-        labels = {
-            'check_interval':      '监控间隔',
-            'timeout':             '连接超时',
-            'retry_mode':          '重试模式',
-            'retry_interval':      '重试间隔',
-            'log_to_disk':         '日志存盘',
-            'console_log_level':   '控制台日志',
-            'http_proxy':          'HTTP代理',
-            'udp_proxy':           'UDP代理',
-            'proxy_enabled':       '代理开关',
-            'dns_mode':            'DNS模式',
-            'dns_custom':          '自定义DNS',
-            'max_log_entries':     '最大日志条数',
-            'page_refresh_ms':     '页面刷新间隔',
-            'tracker_stat_period': '监控统计周期',
-            'rank_stat_period':    '排行统计周期',
-            'cache_history':       '缓存统计可用率',
-        }
-        # 单位后缀
-        suffixes = {
-            'check_interval': 's', 'timeout': 's', 'retry_interval': 's',
-            'page_refresh_ms': 'ms',
-        }
-        # 布尔值显示
-        bool_fmt = {True: '开', False: '关'}
-
-        changes = []
-        for k in keys:
-            if k not in data: continue
-            old_val = CONFIG.get(k)
-            new_val = data[k]
-            if old_val == new_val: continue   # 没变化不记录
-            CONFIG[k] = new_val
-            label  = labels.get(k, k)
-            suffix = suffixes.get(k, '')
-            if isinstance(new_val, bool):
-                val_str = bool_fmt.get(new_val, str(new_val))
-            else:
-                val_str = f"{new_val}{suffix}"
-            changes.append(f"{label}={val_str}")
-
+        for k in ['check_interval','timeout','retry_mode','retry_interval',
+                  'log_to_disk','console_log_level','http_proxy','udp_proxy','proxy_enabled',
+                  'dns_mode','dns_custom','max_log_entries','page_refresh_ms','tracker_stat_period','rank_stat_period']:
+            if k in data:
+                CONFIG[k] = data[k]
         persist_config(CONFIG)
-
-        if changes:
-            msg = f"配置已更新: {' | '.join(changes)}"
-        else:
-            msg = "配置保存（无变更）"
+        msg = f"配置已更新: console_log={CONFIG['console_log_level']} retry_mode={CONFIG['retry_mode']}"
         db.add_log(msg, 'info')
         cprint(msg, 'info')
-
-        return jsonify({'success':True,'config':{k:CONFIG[k] for k in keys}})
+        return jsonify({'success':True,'config':{k:CONFIG[k] for k in
+            ['check_interval','timeout','retry_mode','retry_interval',
+             'log_to_disk','console_log_level','http_proxy','udp_proxy','proxy_enabled',
+             'dns_mode','dns_custom','max_log_entries','page_refresh_ms','tracker_stat_period','rank_stat_period']}})
     safe = {k:v for k,v in CONFIG.items() if k not in ('data_file','log_file')}
     return jsonify(safe)
 
