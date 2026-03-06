@@ -4,7 +4,6 @@
 Windows部署: pip install Flask flask-cors dnspython requests waitress && python app.py
 """
 
-import queue
 import os
 import json
 import time
@@ -342,68 +341,18 @@ class _ProxyConnectError(OSError):
 
 class Socks5ProxySession:
     """
-    SOCKS5 代理会话：一个固定 UDP socket，所有线程共享同一源端口。
-
-    原因：SOCKS5 relay 会做 source port filter——只转发来自
-    UDP Associate 时注册的那个源端口的包。每次 bind 新端口
-    relay 会丢弃，导致所有包超时。
-
-    多路复用：每个线程用唯一的 transaction_id 区分自己的包。
-    接收循环：共享 socket 由调用线程自己 recvfrom，用 tid 过滤。
-    线程安全：sendto 用锁串行化（UDP 发包本身不可中断），
-              recvfrom 各线程独立等待，非目标包重新入队（pending）。
+    SOCKS5 代理会话：缓存 TCP 控制连接 + relay 地址。
+    每个线程调用 make_udp_socket() 获得自己的 UDP socket，不共享。
+    TCP 控制连接由后台线程监控，断开时 session 失效。
     """
     def __init__(self, tcp_ctrl, relay_addr, af, timeout):
-        self._tcp_ctrl   = tcp_ctrl
-        self.relay_addr  = relay_addr
-        self.af          = af
-        self.timeout     = timeout
-        self.valid       = True
-
-        # 共享 UDP socket（固定源端口）
-        self._udp        = socket.socket(af, socket.SOCK_DGRAM)
-        try:
-            self._udp.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
-        except OSError:
-            pass
-        bind_addr = '::' if af == socket.AF_INET6 else ''
-        self._udp.bind((bind_addr, 0))
-        self._udp.settimeout(0.1)   # 短超时，让 recv 线程可以定期检查 valid
-
-        # 多路复用：tid(bytes) → queue.Queue，各调用线程等自己的包
-        self._pending     = {}        # {tid: Queue}
-        self._pend_lock   = threading.Lock()
-        self._send_lock   = threading.Lock()
-
-        # 启动后台接收分发线程
-        self._recv_thread = threading.Thread(target=self._recv_loop, daemon=True)
-        self._recv_thread.start()
-
-        # 监控 TCP 控制连接
-        self._ctrl_thread = threading.Thread(target=self._monitor, daemon=True)
-        self._ctrl_thread.start()
-
-    # ── 后台线程 ──────────────────────────────────────────────────────────
-
-    def _recv_loop(self):
-        """持续接收 UDP 包，按 tid 分发给等待的线程"""
-        while self.valid:
-            try:
-                raw, _ = self._udp.recvfrom(1324)
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-            # 剥离 SOCKS5 UDP 头
-            data = _socks5_strip(raw)
-            if not data or len(data) < 8:
-                continue
-            tid = data[4:8]
-            with self._pend_lock:
-                q = self._pending.get(tid)
-            if q:
-                q.put(data)
-            # 无人等待的包直接丢弃（过期包/乱序包）
+        self._tcp_ctrl  = tcp_ctrl
+        self.relay_addr = relay_addr
+        self.af         = af
+        self.timeout    = timeout
+        self.valid      = True
+        t = threading.Thread(target=self._monitor, daemon=True)
+        t.start()
 
     def _monitor(self):
         """TCP 控制连接断开时将 session 标记为失效"""
@@ -411,8 +360,8 @@ class Socks5ProxySession:
             self._tcp_ctrl.settimeout(self.timeout)
             while self.valid:
                 try:
-                    b = self._tcp_ctrl.recv(1)
-                    if b == b'':
+                    data = self._tcp_ctrl.recv(1)
+                    if data == b'':
                         break
                 except socket.timeout:
                     continue
@@ -420,57 +369,25 @@ class Socks5ProxySession:
                     break
         finally:
             self.valid = False
-            try: self._udp.close()
-            except: pass
             try: self._tcp_ctrl.close()
             except: pass
-            # 唤醒所有等待线程
-            with self._pend_lock:
-                for q in self._pending.values():
-                    q.put(None)   # None = session 失效信号
 
-    # ── 公开 API（供 udp_ping 调用）─────────────────────────────────────
-
-    def send_and_recv(self, packet: bytes, dst: tuple, timeout: float) -> bytes:
-        """
-        发送 UDP tracker 包并等待对应 tid 的回包。
-        返回 payload bytes；超时抛 socket.timeout；session 失效抛 OSError。
-        """
-        tid = packet[12:16]
-        q   = queue.Queue()
-
-        with self._pend_lock:
-            self._pending[tid] = q
+    def make_udp_socket(self) -> socket.socket:
+        """为当前线程创建一个新的 UDP socket，绑定到空闲端口"""
+        udp = socket.socket(self.af, socket.SOCK_DGRAM)
         try:
-            # 串行化发包（保证 SOCKS5 UDP 头完整发出）
-            with self._send_lock:
-                _socks5_sendto(self._udp, packet, dst, self.relay_addr)
-
-            deadline = time.time() + timeout
-            while True:
-                remaining = deadline - time.time()
-                if remaining <= 0:
-                    raise socket.timeout()
-                try:
-                    data = q.get(timeout=min(remaining, 0.1))
-                except queue.Empty:
-                    if not self.valid:
-                        raise OSError("SOCKS5 session 已失效")
-                    continue
-                if data is None:
-                    raise OSError("SOCKS5 session 已失效")
-                return data
-        finally:
-            with self._pend_lock:
-                self._pending.pop(tid, None)
+            # 加大接收缓冲区
+            udp.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
+        except OSError:
+            pass
+        bind_addr = '::' if self.af == socket.AF_INET6 else ''
+        udp.bind((bind_addr, 0))
+        return udp
 
     def close(self):
         self.valid = False
         try: self._tcp_ctrl.close()
         except: pass
-        try: self._udp.close()
-        except: pass
-
 
 
 class Socks5ProxyPool:
@@ -1172,25 +1089,54 @@ def udp_ping(ip, port):
             return False, -1, f"代理不可用({reason})"
 
         for attempt in range(2):
+            udp = None
             try:
+                # 获取 session（复用 TCP 控制连接，锁外建连不阻塞其他线程）
                 session = _socks5_pool.acquire_session(udp_proxy, timeout)
                 if not session.valid:
-                    raise _ProxyConnectError("session 已失效")
+                    raise OSError("session 已失效")
 
+                # 每线程独立 UDP socket → 不会互相抢包
+                udp = session.make_udp_socket()
+                udp.settimeout(timeout)
+
+                # 发包
                 t_start = time.time()
                 cprint(f'[SOCKS5] → {ip}:{port} relay={session.relay_addr}', 'debug')
-                data = session.send_and_recv(packet, (ip, port), timeout)
+                _socks5_sendto(udp, packet, (ip, port), session.relay_addr)
+
+                # 收包并校验 transaction_id
+                deadline = time.time() + timeout
+                while True:
+                    remaining = deadline - time.time()
+                    if remaining <= 0:
+                        raise socket.timeout()
+                    udp.settimeout(max(remaining, 0.05))
+                    raw, _ = udp.recvfrom(1324)
+                    data = _socks5_strip(raw)
+                    if data and len(data) >= 8 and data[4:8] == tid:
+                        break
 
                 lat = int((time.time() - t_start) * 1000)
+                udp.close()
+
                 if len(data) >= 16 and struct.unpack('!L', data[:4])[0] == 0:
                     _socks5_pool.report_success()
                     return True, lat, None
                 return False, -1, "无效响应"
 
             except socket.timeout:
+                # 目标不响应，不是代理问题，不计入失败
+                if udp:
+                    try: udp.close()
+                    except: pass
                 return False, -1, f"超时(>{timeout}s)"
 
             except _ProxyConnectError as e:
+                # 建连/等待失败：只在 attempt==1 才计入（首次可能是并发等待抖动）
+                if udp:
+                    try: udp.close()
+                    except: pass
                 if attempt == 0:
                     cprint(f'[SOCKS5Pool] 建连失败，重试: {e}', 'debug')
                     time.sleep(0.2)
@@ -1199,11 +1145,15 @@ def udp_ping(ip, port):
                 return False, -1, f"代理连接失败: {e}"
 
             except Exception as e:
+                if udp:
+                    try: udp.close()
+                    except: pass
                 err_str = f"{type(e).__name__}: {e}"
                 _socks5_pool.report_failure(err_str)
                 if attempt == 0:
                     cprint(f'[SOCKS5Pool] 通信异常，重建后重试: {err_str}', 'debug')
                     packet = _udp_tracker_packet()
+                    tid    = packet[12:16]
                     continue
                 return False, -1, f"代理通信失败: {err_str}"
 

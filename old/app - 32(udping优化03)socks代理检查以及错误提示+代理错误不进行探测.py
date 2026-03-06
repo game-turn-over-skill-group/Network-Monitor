@@ -4,7 +4,6 @@
 Windows部署: pip install Flask flask-cors dnspython requests waitress && python app.py
 """
 
-import queue
 import os
 import json
 import time
@@ -331,331 +330,113 @@ db = TrackerDB()
 # ==================== SOCKS5 UDP Associate（手动实现，支持IPv4/IPv6）====================
 # ==================== SOCKS5 UDP 连接池 ====================
 # 代理故障冷却时间（秒）：代理连续失败后暂停探测，避免 120 线程全部堆积重试
+_PROXY_COOLDOWN = 30
 
-# 代理连接/握手失败专用异常（区别于 UDP 探测超时）
-class _ProxyConnectError(OSError):
-    pass
-
-
-# 代理故障冷却时间（秒）
-
-
-class Socks5ProxySession:
+class Socks5ConnectionPool:
     """
-    SOCKS5 代理会话：一个固定 UDP socket，所有线程共享同一源端口。
-
-    原因：SOCKS5 relay 会做 source port filter——只转发来自
-    UDP Associate 时注册的那个源端口的包。每次 bind 新端口
-    relay 会丢弃，导致所有包超时。
-
-    多路复用：每个线程用唯一的 transaction_id 区分自己的包。
-    接收循环：共享 socket 由调用线程自己 recvfrom，用 tid 过滤。
-    线程安全：sendto 用锁串行化（UDP 发包本身不可中断），
-              recvfrom 各线程独立等待，非目标包重新入队（pending）。
+    全局 SOCKS5 UDP 连接池（单例）。
+    维护一条长连接 Socks5UdpSocket，所有 udp_ping 线程复用。
+    连接断开时自动重建；代理配置变更时销毁旧连接。
+    内置代理健康状态机：连续失败进入冷却期，期间所有探测直接短路返回
+    「代理不可用」，避免 120 线程全部堆积在失败的握手上。
+    线程安全：读写均加锁。
     """
-    def __init__(self, tcp_ctrl, relay_addr, af, timeout):
-        self._tcp_ctrl   = tcp_ctrl
-        self.relay_addr  = relay_addr
-        self.af          = af
-        self.timeout     = timeout
-        self.valid       = True
-
-        # 共享 UDP socket（固定源端口）
-        self._udp        = socket.socket(af, socket.SOCK_DGRAM)
-        try:
-            self._udp.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4 * 1024 * 1024)
-        except OSError:
-            pass
-        bind_addr = '::' if af == socket.AF_INET6 else ''
-        self._udp.bind((bind_addr, 0))
-        self._udp.settimeout(0.1)   # 短超时，让 recv 线程可以定期检查 valid
-
-        # 多路复用：tid(bytes) → queue.Queue，各调用线程等自己的包
-        self._pending     = {}        # {tid: Queue}
-        self._pend_lock   = threading.Lock()
-        self._send_lock   = threading.Lock()
-
-        # 启动后台接收分发线程
-        self._recv_thread = threading.Thread(target=self._recv_loop, daemon=True)
-        self._recv_thread.start()
-
-        # 监控 TCP 控制连接
-        self._ctrl_thread = threading.Thread(target=self._monitor, daemon=True)
-        self._ctrl_thread.start()
-
-    # ── 后台线程 ──────────────────────────────────────────────────────────
-
-    def _recv_loop(self):
-        """持续接收 UDP 包，按 tid 分发给等待的线程"""
-        while self.valid:
-            try:
-                raw, _ = self._udp.recvfrom(1324)
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-            # 剥离 SOCKS5 UDP 头
-            data = _socks5_strip(raw)
-            if not data or len(data) < 8:
-                continue
-            tid = data[4:8]
-            with self._pend_lock:
-                q = self._pending.get(tid)
-            if q:
-                q.put(data)
-            # 无人等待的包直接丢弃（过期包/乱序包）
-
-    def _monitor(self):
-        """TCP 控制连接断开时将 session 标记为失效"""
-        try:
-            self._tcp_ctrl.settimeout(self.timeout)
-            while self.valid:
-                try:
-                    b = self._tcp_ctrl.recv(1)
-                    if b == b'':
-                        break
-                except socket.timeout:
-                    continue
-                except OSError:
-                    break
-        finally:
-            self.valid = False
-            try: self._udp.close()
-            except: pass
-            try: self._tcp_ctrl.close()
-            except: pass
-            # 唤醒所有等待线程
-            with self._pend_lock:
-                for q in self._pending.values():
-                    q.put(None)   # None = session 失效信号
-
-    # ── 公开 API（供 udp_ping 调用）─────────────────────────────────────
-
-    def send_and_recv(self, packet: bytes, dst: tuple, timeout: float) -> bytes:
-        """
-        发送 UDP tracker 包并等待对应 tid 的回包。
-        返回 payload bytes；超时抛 socket.timeout；session 失效抛 OSError。
-        """
-        tid = packet[12:16]
-        q   = queue.Queue()
-
-        with self._pend_lock:
-            self._pending[tid] = q
-        try:
-            # 串行化发包（保证 SOCKS5 UDP 头完整发出）
-            with self._send_lock:
-                _socks5_sendto(self._udp, packet, dst, self.relay_addr)
-
-            deadline = time.time() + timeout
-            while True:
-                remaining = deadline - time.time()
-                if remaining <= 0:
-                    raise socket.timeout()
-                try:
-                    data = q.get(timeout=min(remaining, 0.1))
-                except queue.Empty:
-                    if not self.valid:
-                        raise OSError("SOCKS5 session 已失效")
-                    continue
-                if data is None:
-                    raise OSError("SOCKS5 session 已失效")
-                return data
-        finally:
-            with self._pend_lock:
-                self._pending.pop(tid, None)
-
-    def close(self):
-        self.valid = False
-        try: self._tcp_ctrl.close()
-        except: pass
-        try: self._udp.close()
-        except: pass
-
-
-
-class Socks5ProxyPool:
-    """
-    SOCKS5 代理连接池。
-    缓存一个 ProxySession（TCP 控制连接 + relay 地址），
-    每次探测用 session.make_udp_socket() 获取独立 UDP socket，
-    彻底避免多线程共享同一 socket 互相抢包的问题。
-
-    健康状态机：连续建连失败进入冷却期，期间快速失败不堆积。
-    """
-    _COOLDOWN = 30
-
     def __init__(self):
-        self._lock           = threading.Lock()
-        self._session        = None
-        self._proxy          = ''
-        self._timeout        = 0
-        self._healthy        = True
-        self._cooldown_until = 0.0
-        self._fail_count     = 0
-        self._building       = False   # 正在建连中，其他线程不重复建
+        self._lock         = threading.Lock()
+        self._sock         = None   # 当前连接
+        self._proxy        = ''     # 上次连接用的代理地址
+        self._timeout      = 0      # 上次连接用的超时
+        # 健康状态
+        self._healthy      = True   # False = 代理当前不可用
+        self._cooldown_until = 0.0  # 冷却结束时间戳
+        self._fail_count   = 0      # 连续建连失败次数
 
     # ── 公开 API ──────────────────────────────────────────────────────────
 
-    def check_healthy(self):
-        """返回 (is_healthy, reason_str)"""
+    def check_healthy(self) -> tuple[bool, str]:
+        """
+        返回 (is_healthy, reason)。
+        调用方在 is_healthy=False 时应立即短路，不发送 UDP 包。
+        """
         with self._lock:
             if not self._healthy:
                 remaining = self._cooldown_until - time.time()
                 if remaining > 0:
                     return False, f"代理不可用，{remaining:.0f}s 后重试"
-                self._healthy    = True
-                self._fail_count = 0
+                else:
+                    # 冷却结束，允许重试一次
+                    self._healthy   = True
+                    self._fail_count = 0
             return True, ''
 
-    def acquire_session(self, proxy_url: str, timeout: int) -> 'Socks5ProxySession':
-        """
-        获取有效 session。若无有效 session 则在锁外建连。
-        同时只允许一个线程建连，其他线程等待结果。
-        等待超时抛 _WaitTimeout（不计入代理失败计数）。
-        """
-        # 快路径：session 有效直接返回
+    def get(self, proxy_url: str, timeout: int) -> 'Socks5UdpSocket':
+        """获取可用连接，必要时新建或重建。调用前应先 check_healthy()。"""
         with self._lock:
-            if (self._session and self._session.valid
-                    and self._proxy == proxy_url
-                    and self._timeout == timeout):
-                return self._session
-            if self._building:
-                building = True
-            else:
-                self._building = True
-                building = False
+            # 代理或超时变了 → 销毁旧连接
+            if self._sock and (self._proxy != proxy_url or self._timeout != timeout):
+                self._destroy_locked()
 
-        if building:
-            # 等待建连完成，等待时间 = timeout * 2（建连本身最多用 timeout）
-            deadline = time.time() + timeout * 2
-            while time.time() < deadline:
-                time.sleep(0.05)
-                with self._lock:
-                    if not self._building:
-                        if self._session and self._session.valid:
-                            return self._session
-                        # 建连线程失败了
-                        raise _ProxyConnectError("代理建连失败")
-            raise _ProxyConnectError("等待代理建连超时")
+            # 连接不存在或已被监控线程关闭 → 新建
+            if not self._sock or self._sock._closed or self._sock._tcp_ctrl is None:
+                self._build_locked(proxy_url, timeout)   # 若抛异常会向上传播
 
-        # 本线程负责建连（锁外执行网络IO，不持锁）
-        try:
-            proxy_host, proxy_port = parse_proxy_addr(proxy_url)
-            session = self._do_connect(proxy_host, proxy_port, timeout)
-            with self._lock:
-                if self._session:
-                    self._session.close()
-                self._session  = session
-                self._proxy    = proxy_url
-                self._timeout  = timeout
-                self._building = False
-            cprint(f'[SOCKS5Pool] 连接已建立 → {proxy_host}:{proxy_port}', 'info')
-            return session
-        except Exception as e:
-            with self._lock:
-                self._session  = None
-                self._building = False
-            raise _ProxyConnectError(f"代理握手失败: {e}") from e
+            return self._sock
+
+    def report_failure(self, reason: str):
+        """
+        通知连接池本次探测因代理问题失败。
+        连续失败 2 次进入冷却期，期间 check_healthy() 返回 False。
+        同时记录一条 ERROR 日志（去重：冷却期内只记一次）。
+        """
+        with self._lock:
+            self._fail_count += 1
+            self._sock = None   # 标记连接失效，下次 get 重建
+            if self._fail_count >= 2 and self._healthy:
+                self._healthy        = False
+                self._cooldown_until = time.time() + _PROXY_COOLDOWN
+                msg = (f"[SOCKS5Pool] 代理连续失败 {self._fail_count} 次，"
+                       f"暂停 {_PROXY_COOLDOWN}s | 原因: {reason}")
+                cprint(msg, 'error')
+                db.add_log(msg, 'error')
 
     def report_success(self):
+        """探测成功，重置失败计数"""
         with self._lock:
             self._fail_count = 0
             self._healthy    = True
 
-    def report_failure(self, reason: str):
-        with self._lock:
-            if self._session:
-                try: self._session.close()
-                except: pass
-            self._session    = None
-            self._fail_count += 1
-            if self._fail_count >= 2 and self._healthy:
-                self._healthy        = False
-                self._cooldown_until = time.time() + self._COOLDOWN
-                msg = (f"[SOCKS5Pool] 代理连续失败 {self._fail_count} 次，"
-                       f"暂停 {self._COOLDOWN}s | 原因: {reason}")
-                cprint(msg, 'error')
-                db.add_log(msg, 'error')
-
     def invalidate(self):
+        """主动标记连接失效（配置变更时调用）"""
         with self._lock:
-            if self._session:
-                self._session.close()
-            self._session        = None
-            self._healthy        = True
-            self._fail_count     = 0
+            if self._sock:
+                self._sock._closed = True
+            self._sock       = None
+            self._healthy    = True
+            self._fail_count = 0
             self._cooldown_until = 0.0
-            self._building       = False
 
     # ── 内部方法 ──────────────────────────────────────────────────────────
 
-    @staticmethod
-    def _do_connect(proxy_host, proxy_port, timeout) -> 'Socks5ProxySession':
-        """建立 SOCKS5 TCP 控制连接，完成 UDP Associate 握手，返回 session"""
-        infos = socket.getaddrinfo(proxy_host, proxy_port,
-                                   socket.AF_UNSPEC, socket.SOCK_STREAM)
-        if not infos:
-            raise OSError(f"无法解析代理地址: {proxy_host}")
-        af, _, _, _, proxy_sockaddr = infos[0]
+    def _build_locked(self, proxy_url: str, timeout: int):
+        """在持锁状态下建立新连接，失败则向上抛异常"""
+        self._destroy_locked()
+        proxy_host, proxy_port = parse_proxy_addr(proxy_url)
+        s = Socks5UdpSocket(proxy_host, proxy_port, timeout=timeout)
+        s.connect()
+        s.settimeout(timeout)
+        self._sock    = s
+        self._proxy   = proxy_url
+        self._timeout = timeout
+        cprint(f'[SOCKS5Pool] 连接已建立 → {proxy_host}:{proxy_port}', 'debug')
 
-        tcp = socket.socket(af, socket.SOCK_STREAM)
-        tcp.settimeout(timeout)
-        tcp.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-        try:
-            if hasattr(socket, 'TCP_KEEPIDLE'):
-                tcp.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE,  max(1, timeout))
-                tcp.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5)
-                tcp.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT,   3)
-        except (OSError, AttributeError):
-            pass
-
-        try:
-            tcp.connect(proxy_sockaddr)
-            # 认证协商
-            tcp.sendall(b'\x05\x01\x00')
-            resp = Socks5ProxyPool._recv_exact(tcp, 2)
-            if resp[0] != 0x05 or resp[1] != 0x00:
-                raise OSError(f"SOCKS5 认证协商失败: {resp.hex()}")
-            # UDP ASSOCIATE
-            tcp.sendall(b'\x05\x03\x00\x01\x00\x00\x00\x00\x00\x00')
-            reply = Socks5ProxyPool._recv_exact(tcp, 4)
-            if reply[1] != 0x00:
-                raise OSError(f"SOCKS5 UDP Associate 被拒绝 REP={reply[1]:#x}")
-            atyp = reply[3]
-            if atyp == 0x01:
-                relay_ip   = socket.inet_ntop(socket.AF_INET, Socks5ProxyPool._recv_exact(tcp, 4))
-                relay_port = struct.unpack('!H', Socks5ProxyPool._recv_exact(tcp, 2))[0]
-            elif atyp == 0x04:
-                relay_ip   = socket.inet_ntop(socket.AF_INET6, Socks5ProxyPool._recv_exact(tcp, 16))
-                relay_port = struct.unpack('!H', Socks5ProxyPool._recv_exact(tcp, 2))[0]
-            elif atyp == 0x03:
-                nlen       = Socks5ProxyPool._recv_exact(tcp, 1)[0]
-                relay_ip   = Socks5ProxyPool._recv_exact(tcp, nlen).decode()
-                relay_port = struct.unpack('!H', Socks5ProxyPool._recv_exact(tcp, 2))[0]
-            else:
-                raise OSError(f"未知 ATYP: {atyp}")
-            if relay_ip in ('0.0.0.0', '::'):
-                relay_ip = proxy_sockaddr[0]
-            return Socks5ProxySession(tcp, (relay_ip, relay_port), af, timeout)
-        except Exception:
-            try: tcp.close()
+    def _destroy_locked(self):
+        if self._sock:
+            try: self._sock.close()
             except: pass
-            raise
-
-    @staticmethod
-    def _recv_exact(sock, n):
-        buf = b''
-        while len(buf) < n:
-            c = sock.recv(n - len(buf))
-            if not c:
-                raise OSError("SOCKS5 TCP 控制连接提前关闭")
-            buf += c
-        return buf
-
+            self._sock = None
 
 # 全局连接池单例
-_socks5_pool = Socks5ProxyPool()
-
+_socks5_pool = Socks5ConnectionPool()
 
 
 class Socks5UdpSocket:
@@ -1116,43 +897,6 @@ def _udp_tracker_packet():
     return struct.pack('!QLL', 0x41727101980, 0, random.randint(0, 0xFFFFFFFF))
 
 
-def _socks5_sendto(udp_sock: socket.socket, data: bytes,
-                   dst: tuple, relay_addr: tuple):
-    """封装 SOCKS5 UDP 头并发往 relay，支持 IPv4/IPv6 目标"""
-    dst_host, dst_port = dst
-    try:
-        socket.inet_pton(socket.AF_INET6, dst_host)
-        hdr = (b'\x00\x00\x00\x04'
-               + socket.inet_pton(socket.AF_INET6, dst_host)
-               + struct.pack('!H', dst_port))
-    except OSError:
-        try:
-            socket.inet_pton(socket.AF_INET, dst_host)
-            hdr = (b'\x00\x00\x00\x01'
-                   + socket.inet_pton(socket.AF_INET, dst_host)
-                   + struct.pack('!H', dst_port))
-        except OSError:
-            hb  = dst_host.encode()
-            hdr = (b'\x00\x00\x00\x03' + bytes([len(hb)]) + hb
-                   + struct.pack('!H', dst_port))
-    udp_sock.sendto(hdr + data, relay_addr)
-
-
-def _socks5_strip(raw: bytes) -> bytes | None:
-    """剥离 SOCKS5 UDP 头，返回 payload；格式错误返回 None"""
-    if len(raw) < 10:
-        return None
-    atyp = raw[3]
-    if atyp == 0x01:   # IPv4
-        return raw[10:] if len(raw) >= 10 else None
-    if atyp == 0x04:   # IPv6
-        return raw[22:] if len(raw) >= 22 else None
-    if atyp == 0x03:   # 域名
-        nlen = raw[4]
-        return raw[7 + nlen:] if len(raw) >= 7 + nlen else None
-    return None
-
-
 def udp_ping(ip, port):
     """UDP Tracker BEP 15 握手检测。
     代理路径: 使用 Socks5UdpSocket（手动SOCKS5协议，支持IPv4/IPv6目标，不依赖PySocks）。
@@ -1163,47 +907,51 @@ def udp_ping(ip, port):
     timeout = CONFIG['timeout']
     tid     = packet[12:16]  # transaction_id bytes，用于校验响应
 
-    # ── SOCKS5 代理路径：每线程独立 UDP socket，共享 TCP 控制连接 ─────────
+    # ── SOCKS5 代理路径：复用连接池，不再每次新建/销毁 ──────────────────
     if udp_proxy and 'socks5' in udp_proxy.lower():
 
-        # 健康检查：代理冷却中 → 直接短路
+        # 健康检查：代理冷却中 → 直接短路，不发包
         healthy, reason = _socks5_pool.check_healthy()
         if not healthy:
             return False, -1, f"代理不可用({reason})"
 
-        for attempt in range(2):
+        for attempt in range(2):   # 失败时重建连接重试一次
             try:
-                session = _socks5_pool.acquire_session(udp_proxy, timeout)
-                if not session.valid:
-                    raise _ProxyConnectError("session 已失效")
+                s = _socks5_pool.get(udp_proxy, timeout)
+                s.settimeout(timeout)
 
-                t_start = time.time()
-                cprint(f'[SOCKS5] → {ip}:{port} relay={session.relay_addr}', 'debug')
-                data = session.send_and_recv(packet, (ip, port), timeout)
+                t = time.time()
+                s.sendto(packet, (ip, port))
 
-                lat = int((time.time() - t_start) * 1000)
+                # 接收并校验 transaction_id（过滤旧包/预热包）
+                deadline = time.time() + timeout
+                while True:
+                    remaining = deadline - time.time()
+                    if remaining <= 0:
+                        raise socket.timeout()
+                    s.settimeout(max(remaining, 0.05))
+                    data, _ = s.recvfrom(1024)
+                    if len(data) >= 8 and data[4:8] == tid:
+                        break
+
+                lat = int((time.time() - t) * 1000)
                 if len(data) >= 16 and struct.unpack('!L', data[:4])[0] == 0:
                     _socks5_pool.report_success()
                     return True, lat, None
                 return False, -1, "无效响应"
 
             except socket.timeout:
+                # 超时 = 目标不响应，不是代理问题，不计入代理失败
                 return False, -1, f"超时(>{timeout}s)"
-
-            except _ProxyConnectError as e:
-                if attempt == 0:
-                    cprint(f'[SOCKS5Pool] 建连失败，重试: {e}', 'debug')
-                    time.sleep(0.2)
-                    continue
-                _socks5_pool.report_failure(str(e))
-                return False, -1, f"代理连接失败: {e}"
 
             except Exception as e:
                 err_str = f"{type(e).__name__}: {e}"
-                _socks5_pool.report_failure(err_str)
+                _socks5_pool.report_failure(err_str)   # 计入代理失败计数
                 if attempt == 0:
-                    cprint(f'[SOCKS5Pool] 通信异常，重建后重试: {err_str}', 'debug')
+                    cprint(f'[SOCKS5Pool] 连接异常，重建后重试: {err_str}', 'debug')
+                    # 重新生成 packet（新 transaction_id）
                     packet = _udp_tracker_packet()
+                    tid    = packet[12:16]
                     continue
                 return False, -1, f"代理通信失败: {err_str}"
 
@@ -1544,7 +1292,7 @@ def api_check():
     results = []
     for ipi in ips_snap:
         if target_ip and ipi['ip'] != target_ip: continue
-        status, lat, err = check_ip(domain, ipi, retry=False)  # 手动重试不触发自动轮询等待
+        status, lat, err = check_ip(domain, ipi, retry=True)
         lat_s = f"{lat}ms" if lat>=0 else "N/A"
         reason = f" | {err}" if err and status=='offline' else ""
         res_msg = f"重试结果: {protocol.upper()}://{domain}:{port} ({ipi['ip']}) → {status} {lat_s}{reason}"
