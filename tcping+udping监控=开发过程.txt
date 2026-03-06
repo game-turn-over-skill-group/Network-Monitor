@@ -1299,7 +1299,37 @@ getaddrinfo("localhost", 42417) → [::1, 127.0.0.1]
 --------------------------------------
 
 
+根据我们之前所有的历史改动和更新 增加功能和修复BUG等
+系统性的 更新一下这个 README.md 文档
 
+----------
+
+相比旧版 README 主要更新了这些内容：
+新增/扩充的功能描述：
+
+SOCKS5 代理完整技术原理（固定源端口、tid 多路复用、source port filter 问题说明）
+代理健康状态机（冷却期、跳过逻辑、不污染可用率）
+localhost 双栈 fallback 机制
+亚健康颜色优先级逻辑
+延迟进度条三色阈值（500ms/1500ms）
+轮询重试模式（5→15→30→60s）
+监控列表与排行榜统计周期独立配置
+
+配置表更新：
+
+移除已废弃的  参数max_history
+新增 、、、、、、、retry_modedns_modedns_customtracker_stat_periodrank_stat_periodcache_historyconsole_log_levelpage_refresh_ms
+
+FAQ 新增：
+
+第 6、7、8 条（UDP 代理、localhost、冷却期误报）
+
+技术栈：
+
+Python 最低版本从 3.8 更正为 3.10+
+
+
+--------------------------------------
 
 
 
