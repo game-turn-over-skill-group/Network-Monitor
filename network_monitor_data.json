@@ -14,23 +14,23 @@
         },
         "status": "online",
         "latency": 0,
-        "last_check": "2026-03-06T14:51:10.034131"
+        "last_check": "2026-03-06T15:00:31.830511"
       }
     ],
     "added_time": "2026-03-05T14:03:09.679879",
     "history_24h": {
-      "total": 84,
-      "ok": 84,
+      "total": 91,
+      "ok": 91,
       "fail": 0
     },
     "history_7d": {
-      "total": 84,
-      "ok": 84,
+      "total": 91,
+      "ok": 91,
       "fail": 0
     },
     "history_30d": {
-      "total": 84,
-      "ok": 84,
+      "total": 91,
+      "ok": 91,
       "fail": 0
     }
   },
@@ -49,23 +49,23 @@
         },
         "status": "online",
         "latency": 0,
-        "last_check": "2026-03-06T14:51:10.034436"
+        "last_check": "2026-03-06T15:00:31.831235"
       }
     ],
     "added_time": "2026-03-05T14:05:11.714156",
     "history_24h": {
-      "total": 86,
-      "ok": 86,
+      "total": 93,
+      "ok": 93,
       "fail": 0
     },
     "history_7d": {
-      "total": 86,
-      "ok": 86,
+      "total": 93,
+      "ok": 93,
       "fail": 0
     },
     "history_30d": {
-      "total": 86,
-      "ok": 86,
+      "total": 93,
+      "ok": 93,
       "fail": 0
     }
   },
@@ -83,8 +83,8 @@
           "isp": "The Infrastructure Group B.V."
         },
         "status": "online",
-        "latency": 194,
-        "last_check": "2026-03-06T14:51:10.228200"
+        "latency": 165,
+        "last_check": "2026-03-06T15:00:31.995527"
       },
       {
         "ip": "2a04:52c0:129:4157::a80",
@@ -95,24 +95,24 @@
           "isp": "The Infrastructure Group B.V."
         },
         "status": "online",
-        "latency": 266,
-        "last_check": "2026-03-06T14:51:10.300675"
+        "latency": 193,
+        "last_check": "2026-03-06T15:00:32.023170"
       }
     ],
     "added_time": "2026-03-06T14:34:33.702357",
     "history_24h": {
-      "total": 36,
-      "ok": 36,
+      "total": 50,
+      "ok": 50,
       "fail": 0
     },
     "history_7d": {
-      "total": 36,
-      "ok": 36,
+      "total": 50,
+      "ok": 50,
       "fail": 0
     },
     "history_30d": {
-      "total": 36,
-      "ok": 36,
+      "total": 50,
+      "ok": 50,
       "fail": 0
     }
   },
@@ -130,8 +130,8 @@
           "isp": "Tetaneutral.net Association declaree"
         },
         "status": "online",
-        "latency": 265,
-        "last_check": "2026-03-06T14:51:10.299630"
+        "latency": 277,
+        "last_check": "2026-03-06T15:00:32.107700"
       },
       {
         "ip": "89.234.156.205",
@@ -142,8 +142,9 @@
           "isp": "Tetaneutral.net hosting"
         },
         "status": "online",
-        "latency": 238,
-        "last_check": "2026-03-06T14:51:30.286140"
+        "latency": 259,
+        "last_check": "2026-03-06T15:00:32.090588",
+        "removed": true
       },
       {
         "ip": "91.216.110.53",
@@ -154,25 +155,24 @@
           "isp": "Grenode"
         },
         "status": "online",
-        "latency": 256,
-        "last_check": "2026-03-06T14:51:10.291129",
-        "removed": true
+        "latency": 204,
+        "last_check": "2026-03-06T15:00:32.035578"
       }
     ],
     "added_time": "2026-03-06T14:34:35.141660",
     "history_24h": {
-      "total": 49,
-      "ok": 49,
+      "total": 70,
+      "ok": 70,
       "fail": 0
     },
     "history_7d": {
-      "total": 49,
-      "ok": 49,
+      "total": 70,
+      "ok": 70,
       "fail": 0
     },
     "history_30d": {
-      "total": 49,
-      "ok": 49,
+      "total": 70,
+      "ok": 70,
       "fail": 0
     }
   },
@@ -190,8 +190,8 @@
           "isp": "Grenode"
         },
         "status": "online",
-        "latency": 183,
-        "last_check": "2026-03-06T14:51:45.232577"
+        "latency": 204,
+        "last_check": "2026-03-06T15:00:32.035939"
       },
       {
         "ip": "2001:912:800:208::53",
@@ -202,24 +202,24 @@
           "isp": "Grenode"
         },
         "status": "online",
-        "latency": 257,
-        "last_check": "2026-03-06T14:51:10.291985"
+        "latency": 306,
+        "last_check": "2026-03-06T15:00:32.137927"
       }
     ],
     "added_time": "2026-03-06T14:34:35.899971",
     "history_24h": {
-      "total": 36,
-      "ok": 36,
+      "total": 50,
+      "ok": 50,
       "fail": 0
     },
     "history_7d": {
-      "total": 36,
-      "ok": 36,
+      "total": 50,
+      "ok": 50,
       "fail": 0
     },
     "history_30d": {
-      "total": 36,
-      "ok": 36,
+      "total": 50,
+      "ok": 50,
       "fail": 0
     }
   },
@@ -237,24 +237,24 @@
           "isp": "\"Domain names registrar REG.RU\", Ltd"
         },
         "status": "online",
-        "latency": 191,
-        "last_check": "2026-03-06T14:51:10.226495"
+        "latency": 170,
+        "last_check": "2026-03-06T15:00:32.001337"
       }
     ],
     "added_time": "2026-03-06T14:34:36.694083",
     "history_24h": {
-      "total": 18,
-      "ok": 18,
+      "total": 25,
+      "ok": 25,
       "fail": 0
     },
     "history_7d": {
-      "total": 18,
-      "ok": 18,
+      "total": 25,
+      "ok": 25,
       "fail": 0
     },
     "history_30d": {
-      "total": 18,
-      "ok": 18,
+      "total": 25,
+      "ok": 25,
       "fail": 0
     }
   },
@@ -272,24 +272,24 @@
           "isp": "Gigahost"
         },
         "status": "online",
-        "latency": 282,
-        "last_check": "2026-03-06T14:51:10.317239"
+        "latency": 312,
+        "last_check": "2026-03-06T15:00:32.143940"
       }
     ],
     "added_time": "2026-03-06T14:34:37.375416",
     "history_24h": {
-      "total": 18,
-      "ok": 18,
+      "total": 25,
+      "ok": 25,
       "fail": 0
     },
     "history_7d": {
-      "total": 18,
-      "ok": 18,
+      "total": 25,
+      "ok": 25,
       "fail": 0
     },
     "history_30d": {
-      "total": 18,
-      "ok": 18,
+      "total": 25,
+      "ok": 25,
       "fail": 0
     }
   },
@@ -307,24 +307,24 @@
           "isp": "Chinanet"
         },
         "status": "online",
-        "latency": 30,
-        "last_check": "2026-03-06T14:51:10.065822"
+        "latency": 36,
+        "last_check": "2026-03-06T15:00:51.874035"
       }
     ],
     "added_time": "2026-03-06T14:34:38.130807",
     "history_24h": {
-      "total": 18,
-      "ok": 18,
+      "total": 25,
+      "ok": 25,
       "fail": 0
     },
     "history_7d": {
-      "total": 18,
-      "ok": 18,
+      "total": 25,
+      "ok": 25,
       "fail": 0
     },
     "history_30d": {
-      "total": 18,
-      "ok": 18,
+      "total": 25,
+      "ok": 25,
       "fail": 0
     }
   },
@@ -342,24 +342,24 @@
           "isp": "OVH SAS"
         },
         "status": "online",
-        "latency": 277,
-        "last_check": "2026-03-06T14:51:10.312891"
+        "latency": 266,
+        "last_check": "2026-03-06T15:00:32.098567"
       }
     ],
     "added_time": "2026-03-06T14:34:38.874171",
     "history_24h": {
-      "total": 18,
-      "ok": 18,
+      "total": 25,
+      "ok": 25,
       "fail": 0
     },
     "history_7d": {
-      "total": 18,
-      "ok": 18,
+      "total": 25,
+      "ok": 25,
       "fail": 0
     },
     "history_30d": {
-      "total": 18,
-      "ok": 18,
+      "total": 25,
+      "ok": 25,
       "fail": 0
     }
   },
@@ -377,24 +377,24 @@
           "isp": "Alexhost SRL"
         },
         "status": "online",
-        "latency": 249,
-        "last_check": "2026-03-06T14:51:10.284182"
+        "latency": 220,
+        "last_check": "2026-03-06T15:00:32.052186"
       }
     ],
     "added_time": "2026-03-06T14:34:39.613354",
     "history_24h": {
-      "total": 18,
-      "ok": 18,
+      "total": 25,
+      "ok": 25,
       "fail": 0
     },
     "history_7d": {
-      "total": 18,
-      "ok": 18,
+      "total": 25,
+      "ok": 25,
       "fail": 0
     },
     "history_30d": {
-      "total": 18,
-      "ok": 18,
+      "total": 25,
+      "ok": 25,
       "fail": 0
     }
   },
@@ -412,24 +412,24 @@
           "isp": "Lanta Networks"
         },
         "status": "online",
-        "latency": 292,
-        "last_check": "2026-03-06T14:51:10.327542"
+        "latency": 291,
+        "last_check": "2026-03-06T15:00:32.122870"
       }
     ],
     "added_time": "2026-03-06T14:34:40.378572",
     "history_24h": {
-      "total": 18,
-      "ok": 17,
+      "total": 25,
+      "ok": 24,
       "fail": 1
     },
     "history_7d": {
-      "total": 18,
-      "ok": 17,
+      "total": 25,
+      "ok": 24,
       "fail": 1
     },
     "history_30d": {
-      "total": 18,
-      "ok": 17,
+      "total": 25,
+      "ok": 24,
       "fail": 1
     }
   },
@@ -447,8 +447,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 283,
-        "last_check": "2026-03-06T14:51:10.319019"
+        "latency": 158,
+        "last_check": "2026-03-06T15:00:31.990836"
       },
       {
         "ip": "104.19.22.26",
@@ -459,8 +459,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 316,
-        "last_check": "2026-03-06T14:51:10.352273"
+        "latency": 180,
+        "last_check": "2026-03-06T15:00:32.012626"
       },
       {
         "ip": "104.19.22.24",
@@ -471,8 +471,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 587,
-        "last_check": "2026-03-06T14:51:10.623335"
+        "latency": 173,
+        "last_check": "2026-03-06T15:00:32.005406"
       },
       {
         "ip": "104.19.22.29",
@@ -483,8 +483,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 248,
-        "last_check": "2026-03-06T14:51:10.284729"
+        "latency": 271,
+        "last_check": "2026-03-06T15:00:32.103591"
       },
       {
         "ip": "104.19.22.27",
@@ -495,8 +495,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 181,
-        "last_check": "2026-03-06T14:51:10.217633"
+        "latency": 312,
+        "last_check": "2026-03-06T15:00:32.145269"
       },
       {
         "ip": "104.19.22.30",
@@ -507,8 +507,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 581,
-        "last_check": "2026-03-06T14:51:10.617286"
+        "latency": 164,
+        "last_check": "2026-03-06T15:00:31.997341"
       },
       {
         "ip": "104.19.22.31",
@@ -519,8 +519,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 198,
-        "last_check": "2026-03-06T14:51:10.235186"
+        "latency": 178,
+        "last_check": "2026-03-06T15:00:32.010966"
       },
       {
         "ip": "104.19.22.23",
@@ -531,8 +531,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 184,
-        "last_check": "2026-03-06T14:51:10.220641"
+        "latency": 269,
+        "last_check": "2026-03-06T15:00:32.102480"
       },
       {
         "ip": "104.19.22.22",
@@ -543,8 +543,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 181,
-        "last_check": "2026-03-06T14:51:10.217708"
+        "latency": 175,
+        "last_check": "2026-03-06T15:00:32.008562"
       },
       {
         "ip": "104.19.22.28",
@@ -555,8 +555,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 182,
-        "last_check": "2026-03-06T14:51:10.218924"
+        "latency": 180,
+        "last_check": "2026-03-06T15:00:32.013488"
       },
       {
         "ip": "104.19.22.32",
@@ -567,24 +567,24 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 256,
-        "last_check": "2026-03-06T14:51:10.292913"
+        "latency": 180,
+        "last_check": "2026-03-06T15:00:32.014159"
       }
     ],
     "added_time": "2026-03-06T14:34:48.539563",
     "history_24h": {
-      "total": 187,
-      "ok": 187,
+      "total": 264,
+      "ok": 264,
       "fail": 0
     },
     "history_7d": {
-      "total": 187,
-      "ok": 187,
+      "total": 264,
+      "ok": 264,
       "fail": 0
     },
     "history_30d": {
-      "total": 187,
-      "ok": 187,
+      "total": 264,
+      "ok": 264,
       "fail": 0
     }
   },
@@ -602,24 +602,24 @@
           "isp": "Hetzner Online GmbH"
         },
         "status": "online",
-        "latency": 291,
-        "last_check": "2026-03-06T14:51:10.328642"
+        "latency": 316,
+        "last_check": "2026-03-06T15:00:32.149661"
       }
     ],
     "added_time": "2026-03-06T14:34:49.277724",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -637,8 +637,8 @@
           "isp": "FranTech Solutions"
         },
         "status": "online",
-        "latency": 183,
-        "last_check": "2026-03-06T14:51:10.220524"
+        "latency": 169,
+        "last_check": "2026-03-06T15:00:32.003097"
       },
       {
         "ip": "2605:6400:20:6c::",
@@ -649,24 +649,24 @@
           "isp": "FranTech Solutions"
         },
         "status": "online",
-        "latency": 214,
-        "last_check": "2026-03-06T14:51:10.251651"
+        "latency": 193,
+        "last_check": "2026-03-06T15:00:32.026705"
       }
     ],
     "added_time": "2026-03-06T14:34:50.771777",
     "history_24h": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_7d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_30d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     }
   },
@@ -684,24 +684,24 @@
           "isp": "OVH SAS"
         },
         "status": "online",
-        "latency": 285,
-        "last_check": "2026-03-06T14:51:10.322766"
+        "latency": 280,
+        "last_check": "2026-03-06T15:00:32.113513"
       }
     ],
     "added_time": "2026-03-06T14:34:51.524889",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -719,24 +719,24 @@
           "isp": "Internet Archive"
         },
         "status": "online",
-        "latency": 185,
-        "last_check": "2026-03-06T14:51:10.222864"
+        "latency": 146,
+        "last_check": "2026-03-06T15:00:31.979887"
       }
     ],
     "added_time": "2026-03-06T14:34:52.277104",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -755,23 +755,23 @@
         },
         "status": "online",
         "latency": 0,
-        "last_check": "2026-03-06T14:51:10.037635"
+        "last_check": "2026-03-06T15:00:31.834045"
       }
     ],
     "added_time": "2026-03-06T14:34:53.044684",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -789,24 +789,24 @@
           "isp": "Teslatel LLC"
         },
         "status": "online",
-        "latency": 216,
-        "last_check": "2026-03-06T14:51:10.253363"
+        "latency": 232,
+        "last_check": "2026-03-06T15:00:32.066470"
       }
     ],
     "added_time": "2026-03-06T14:34:53.794205",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -824,8 +824,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1879,
-        "last_check": "2026-03-06T14:51:11.917260"
+        "latency": 2048,
+        "last_check": "2026-03-06T15:00:33.882293"
       },
       {
         "ip": "104.21.58.176",
@@ -836,8 +836,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1041,
-        "last_check": "2026-03-06T14:51:11.078898"
+        "latency": 1082,
+        "last_check": "2026-03-06T15:00:32.916604"
       },
       {
         "ip": "2606:4700:3032::6815:3ab0",
@@ -848,8 +848,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1029,
-        "last_check": "2026-03-06T14:51:11.067374"
+        "latency": 1084,
+        "last_check": "2026-03-06T15:00:32.919224"
       },
       {
         "ip": "2606:4700:3037::ac43:a266",
@@ -860,24 +860,24 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1043,
-        "last_check": "2026-03-06T14:51:11.080991"
+        "latency": 1090,
+        "last_check": "2026-03-06T15:00:32.925304"
       }
     ],
     "added_time": "2026-03-06T14:34:56.778854",
     "history_24h": {
-      "total": 68,
-      "ok": 68,
+      "total": 96,
+      "ok": 96,
       "fail": 0
     },
     "history_7d": {
-      "total": 68,
-      "ok": 68,
+      "total": 96,
+      "ok": 96,
       "fail": 0
     },
     "history_30d": {
-      "total": 68,
-      "ok": 68,
+      "total": 96,
+      "ok": 96,
       "fail": 0
     }
   },
@@ -895,8 +895,8 @@
           "isp": "FranTech Solutions"
         },
         "status": "online",
-        "latency": 174,
-        "last_check": "2026-03-06T14:51:10.212762"
+        "latency": 206,
+        "last_check": "2026-03-06T15:00:32.041459"
       },
       {
         "ip": "2605:6400:30:f8f3:1f:b20a:a8c1:1337",
@@ -907,24 +907,24 @@
           "isp": "FranTech Solutions"
         },
         "status": "online",
-        "latency": 274,
-        "last_check": "2026-03-06T14:51:10.312322"
+        "latency": 258,
+        "last_check": "2026-03-06T15:00:32.092839"
       }
     ],
     "added_time": "2026-03-06T14:34:58.149694",
     "history_24h": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_7d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_30d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     }
   },
@@ -942,8 +942,8 @@
           "isp": "Google LLC"
         },
         "status": "online",
-        "latency": 227,
-        "last_check": "2026-03-06T14:51:10.265587"
+        "latency": 237,
+        "last_check": "2026-03-06T15:00:32.071883"
       },
       {
         "ip": "2600:1900:4001:4b5:8000::",
@@ -954,24 +954,24 @@
           "isp": "Google LLC"
         },
         "status": "online",
-        "latency": 253,
-        "last_check": "2026-03-06T14:51:10.291884"
+        "latency": 240,
+        "last_check": "2026-03-06T15:00:32.075388"
       }
     ],
     "added_time": "2026-03-06T14:34:59.581492",
     "history_24h": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_7d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_30d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     }
   },
@@ -989,8 +989,8 @@
           "isp": "FranTech Solutions"
         },
         "status": "online",
-        "latency": 168,
-        "last_check": "2026-03-06T14:51:10.206761"
+        "latency": 186,
+        "last_check": "2026-03-06T15:00:32.021527"
       },
       {
         "ip": "2605:6400:30:f922:35d4:58f4:75eb:1337",
@@ -1001,24 +1001,24 @@
           "isp": "FranTech Solutions"
         },
         "status": "online",
-        "latency": 268,
-        "last_check": "2026-03-06T14:51:10.307178"
+        "latency": 289,
+        "last_check": "2026-03-06T15:00:32.124816"
       }
     ],
     "added_time": "2026-03-06T14:35:01.086371",
     "history_24h": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_7d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_30d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     }
   },
@@ -1036,24 +1036,24 @@
           "isp": "HostPapa"
         },
         "status": "online",
-        "latency": 183,
-        "last_check": "2026-03-06T14:51:10.222074"
+        "latency": 190,
+        "last_check": "2026-03-06T15:00:32.025921"
       }
     ],
     "added_time": "2026-03-06T14:35:01.836890",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -1071,8 +1071,8 @@
           "isp": "Fredrik Holmqvist"
         },
         "status": "online",
-        "latency": 240,
-        "last_check": "2026-03-06T14:51:10.278782"
+        "latency": 208,
+        "last_check": "2026-03-06T15:00:32.044173"
       },
       {
         "ip": "2a00:16b0:242:25::14",
@@ -1083,24 +1083,24 @@
           "isp": "Fredrik Holmqvist"
         },
         "status": "online",
-        "latency": 280,
-        "last_check": "2026-03-06T14:51:10.319166"
+        "latency": 260,
+        "last_check": "2026-03-06T15:00:32.096304"
       }
     ],
     "added_time": "2026-03-06T14:35:03.268008",
     "history_24h": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_7d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_30d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     }
   },
@@ -1118,24 +1118,24 @@
           "isp": "OVH SAS"
         },
         "status": "online",
-        "latency": 263,
-        "last_check": "2026-03-06T14:51:10.302610"
+        "latency": 255,
+        "last_check": "2026-03-06T15:00:32.091420"
       }
     ],
     "added_time": "2026-03-06T14:35:04.045444",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -1153,24 +1153,24 @@
           "isp": "OVH SAS"
         },
         "status": "online",
-        "latency": 266,
-        "last_check": "2026-03-06T14:51:10.305642"
+        "latency": 255,
+        "last_check": "2026-03-06T15:00:32.091742"
       }
     ],
     "added_time": "2026-03-06T14:35:04.794433",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -1188,24 +1188,24 @@
           "isp": "Gigahost AS"
         },
         "status": "online",
-        "latency": 265,
-        "last_check": "2026-03-06T14:51:10.304729"
+        "latency": 262,
+        "last_check": "2026-03-06T15:00:32.098100"
       }
     ],
     "added_time": "2026-03-06T14:35:05.548049",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -1223,24 +1223,24 @@
           "isp": "AFRIHOST SP (PTY) LTD"
         },
         "status": "online",
-        "latency": 449,
-        "last_check": "2026-03-06T14:51:10.489716"
+        "latency": 430,
+        "last_check": "2026-03-06T15:00:32.267114"
       }
     ],
     "added_time": "2026-03-06T14:35:06.323971",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -1258,24 +1258,24 @@
           "isp": "Telia Company AB"
         },
         "status": "online",
-        "latency": 199,
-        "last_check": "2026-03-06T14:51:10.239600"
+        "latency": 206,
+        "last_check": "2026-03-06T15:00:32.043087"
       }
     ],
     "added_time": "2026-03-06T14:35:07.082153",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -1293,24 +1293,24 @@
           "isp": "Alexhost SRL"
         },
         "status": "online",
-        "latency": 191,
-        "last_check": "2026-03-06T14:51:10.231622"
+        "latency": 173,
+        "last_check": "2026-03-06T15:00:32.009998"
       }
     ],
     "added_time": "2026-03-06T14:35:07.832266",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -1328,24 +1328,24 @@
           "isp": "Oracle Corporation"
         },
         "status": "online",
-        "latency": 208,
-        "last_check": "2026-03-06T14:51:10.248312"
+        "latency": 200,
+        "last_check": "2026-03-06T15:00:32.037681"
       }
     ],
     "added_time": "2026-03-06T14:35:08.584509",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -1363,8 +1363,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 2911,
-        "last_check": "2026-03-06T14:51:12.952020"
+        "latency": 3150,
+        "last_check": "2026-03-06T15:00:34.987770"
       },
       {
         "ip": "2606:4700:3034::6815:36ba",
@@ -1375,8 +1375,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1015,
-        "last_check": "2026-03-06T14:51:11.055981"
+        "latency": 2923,
+        "last_check": "2026-03-06T15:00:34.760033"
       },
       {
         "ip": "162.159.91.250",
@@ -1387,8 +1387,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1748,
-        "last_check": "2026-03-06T14:51:11.788628",
+        "latency": 1046,
+        "last_check": "2026-03-06T15:00:32.884074",
         "removed": true
       },
       {
@@ -1400,8 +1400,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1040,
-        "last_check": "2026-03-06T14:51:11.081539",
+        "latency": 1045,
+        "last_check": "2026-03-06T15:00:32.882259",
         "removed": true
       },
       {
@@ -1413,8 +1413,8 @@
           "isp": "Q2 Software, Inc."
         },
         "status": "online",
-        "latency": 176,
-        "last_check": "2026-03-06T14:51:10.217411",
+        "latency": 175,
+        "last_check": "2026-03-06T15:00:32.012932",
         "removed": true
       },
       {
@@ -1426,8 +1426,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1025,
-        "last_check": "2026-03-06T14:51:11.065843",
+        "latency": 4069,
+        "last_check": "2026-03-06T15:00:35.906862",
         "removed": true
       },
       {
@@ -1439,8 +1439,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1048,
-        "last_check": "2026-03-06T14:51:11.089340",
+        "latency": 1024,
+        "last_check": "2026-03-06T15:00:32.862134",
         "removed": true
       },
       {
@@ -1452,8 +1452,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 873,
-        "last_check": "2026-03-06T14:51:10.914215",
+        "latency": 3930,
+        "last_check": "2026-03-06T15:00:35.768112",
         "removed": true
       },
       {
@@ -1465,8 +1465,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1009,
-        "last_check": "2026-03-06T14:51:11.050264",
+        "latency": 860,
+        "last_check": "2026-03-06T15:00:32.698491",
         "removed": true
       },
       {
@@ -1478,8 +1478,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 176,
-        "last_check": "2026-03-06T14:51:10.217536",
+        "latency": 1044,
+        "last_check": "2026-03-06T15:00:32.882608",
         "removed": true
       },
       {
@@ -1491,8 +1491,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1876,
-        "last_check": "2026-03-06T14:51:11.917714",
+        "latency": 4050,
+        "last_check": "2026-03-06T15:00:35.888520",
         "removed": true
       },
       {
@@ -1504,8 +1504,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1047,
-        "last_check": "2026-03-06T14:51:11.089092",
+        "latency": 1077,
+        "last_check": "2026-03-06T15:00:32.916028",
         "removed": true
       },
       {
@@ -1517,8 +1517,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1992,
-        "last_check": "2026-03-06T14:51:12.034228",
+        "latency": 1037,
+        "last_check": "2026-03-06T15:00:32.875418",
         "removed": true
       },
       {
@@ -1530,8 +1530,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 842,
-        "last_check": "2026-03-06T14:51:10.884721",
+        "latency": 2097,
+        "last_check": "2026-03-06T15:00:33.935393",
         "removed": true
       },
       {
@@ -1543,8 +1543,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1037,
-        "last_check": "2026-03-06T14:51:11.078973",
+        "latency": 1081,
+        "last_check": "2026-03-06T15:00:32.920293",
         "removed": true
       },
       {
@@ -1556,8 +1556,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1014,
-        "last_check": "2026-03-06T14:51:11.056436",
+        "latency": 1046,
+        "last_check": "2026-03-06T15:00:32.884720",
         "removed": true
       },
       {
@@ -1570,7 +1570,7 @@
         },
         "status": "online",
         "latency": 1066,
-        "last_check": "2026-03-06T14:51:11.108791",
+        "last_check": "2026-03-06T15:00:32.904998",
         "removed": true
       },
       {
@@ -1582,8 +1582,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1053,
-        "last_check": "2026-03-06T14:51:11.095227",
+        "latency": 2025,
+        "last_check": "2026-03-06T15:00:33.864424",
         "removed": true
       },
       {
@@ -1595,9 +1595,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1871,
-        "last_check": "2026-03-06T14:51:11.914291",
-        "removed": true
+        "latency": 1074,
+        "last_check": "2026-03-06T15:00:32.913090"
       },
       {
         "ip": "162.159.233.248",
@@ -1608,9 +1607,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 849,
-        "last_check": "2026-03-06T14:51:10.892280",
-        "removed": true
+        "latency": 1024,
+        "last_check": "2026-03-06T15:00:32.863622"
       },
       {
         "ip": "162.159.233.79",
@@ -1621,8 +1619,8 @@
           "isp": "Unknown"
         },
         "status": "online",
-        "latency": 746,
-        "last_check": "2026-03-06T14:51:10.789324"
+        "latency": 1865,
+        "last_check": "2026-03-06T15:00:33.704432"
       },
       {
         "ip": "162.159.233.69",
@@ -1633,8 +1631,8 @@
           "isp": "Unknown"
         },
         "status": "online",
-        "latency": 908,
-        "last_check": "2026-03-06T14:51:10.951265"
+        "latency": 1858,
+        "last_check": "2026-03-06T15:00:33.698048"
       },
       {
         "ip": "162.159.233.250",
@@ -1645,9 +1643,8 @@
           "isp": "Unknown"
         },
         "status": "online",
-        "latency": 841,
-        "last_check": "2026-03-06T14:51:10.883765",
-        "removed": true
+        "latency": 1041,
+        "last_check": "2026-03-06T15:00:32.881303"
       },
       {
         "ip": "162.159.233.185",
@@ -1658,8 +1655,8 @@
           "isp": "Unknown"
         },
         "status": "online",
-        "latency": 1897,
-        "last_check": "2026-03-06T14:51:11.939839"
+        "latency": 1866,
+        "last_check": "2026-03-06T15:00:33.706302"
       },
       {
         "ip": "172.64.75.13",
@@ -1670,9 +1667,8 @@
           "isp": "Unknown"
         },
         "status": "online",
-        "latency": 843,
-        "last_check": "2026-03-06T14:51:10.886808",
-        "removed": true
+        "latency": 859,
+        "last_check": "2026-03-06T15:00:32.698924"
       },
       {
         "ip": "162.159.233.173",
@@ -1683,8 +1679,8 @@
           "isp": "Unknown"
         },
         "status": "online",
-        "latency": 1041,
-        "last_check": "2026-03-06T14:51:11.084582"
+        "latency": 1081,
+        "last_check": "2026-03-06T15:00:32.921419"
       },
       {
         "ip": "162.159.232.236",
@@ -1695,8 +1691,8 @@
           "isp": "Unknown"
         },
         "status": "online",
-        "latency": 2880,
-        "last_check": "2026-03-06T14:51:12.923884"
+        "latency": 1788,
+        "last_check": "2026-03-06T15:00:33.628080"
       },
       {
         "ip": "162.159.233.205",
@@ -1707,8 +1703,8 @@
           "isp": "Unknown"
         },
         "status": "online",
-        "latency": 1874,
-        "last_check": "2026-03-06T14:51:11.917600"
+        "latency": 933,
+        "last_check": "2026-03-06T15:00:32.773318"
       },
       {
         "ip": "162.159.233.230",
@@ -1719,8 +1715,8 @@
           "isp": "Unknown"
         },
         "status": "online",
-        "latency": 1043,
-        "last_check": "2026-03-06T14:51:11.086803"
+        "latency": 1825,
+        "last_check": "2026-03-06T15:00:33.665008"
       },
       {
         "ip": "172.64.74.127",
@@ -1731,9 +1727,8 @@
           "isp": "Unknown"
         },
         "status": "online",
-        "latency": 1039,
-        "last_check": "2026-03-06T14:51:11.082800",
-        "removed": true
+        "latency": 872,
+        "last_check": "2026-03-06T15:00:32.712295"
       },
       {
         "ip": "172.64.75.74",
@@ -1744,9 +1739,8 @@
           "isp": "Unknown"
         },
         "status": "online",
-        "latency": 1047,
-        "last_check": "2026-03-06T14:51:11.090954",
-        "removed": true
+        "latency": 546,
+        "last_check": "2026-03-06T15:00:32.387025"
       },
       {
         "ip": "162.159.232.221",
@@ -1757,8 +1751,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 848,
-        "last_check": "2026-03-06T14:51:10.892529"
+        "latency": 1859,
+        "last_check": "2026-03-06T15:00:33.700238"
       },
       {
         "ip": "162.159.232.184",
@@ -1769,8 +1763,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1057,
-        "last_check": "2026-03-06T14:51:11.101801"
+        "latency": 1043,
+        "last_check": "2026-03-06T15:00:32.883521"
       },
       {
         "ip": "162.159.232.5",
@@ -1781,8 +1775,9 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1041,
-        "last_check": "2026-03-06T14:51:11.085396"
+        "latency": 1017,
+        "last_check": "2026-03-06T15:00:32.857797",
+        "removed": true
       },
       {
         "ip": "162.159.232.95",
@@ -1793,8 +1788,9 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1878,
-        "last_check": "2026-03-06T14:51:11.922682"
+        "latency": 1848,
+        "last_check": "2026-03-06T15:00:33.688823",
+        "removed": true
       },
       {
         "ip": "162.159.232.67",
@@ -1805,8 +1801,9 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1046,
-        "last_check": "2026-03-06T14:51:11.090843"
+        "latency": 3076,
+        "last_check": "2026-03-06T15:00:34.917520",
+        "removed": true
       },
       {
         "ip": "162.159.232.77",
@@ -1817,8 +1814,9 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1894,
-        "last_check": "2026-03-06T14:51:11.939049"
+        "latency": 1034,
+        "last_check": "2026-03-06T15:00:32.875053",
+        "removed": true
       },
       {
         "ip": "162.159.232.123",
@@ -1829,8 +1827,9 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 2022,
-        "last_check": "2026-03-06T14:51:12.066937"
+        "latency": 1014,
+        "last_check": "2026-03-06T15:00:32.855521",
+        "removed": true
       },
       {
         "ip": "162.159.232.103",
@@ -1841,8 +1840,9 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 627,
-        "last_check": "2026-03-06T14:51:10.671536"
+        "latency": 1842,
+        "last_check": "2026-03-06T15:00:33.683584",
+        "removed": true
       },
       {
         "ip": "172.64.76.117",
@@ -1853,8 +1853,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1059,
-        "last_check": "2026-03-06T14:51:11.103698",
+        "latency": 2888,
+        "last_check": "2026-03-06T15:00:34.729699",
         "removed": true
       },
       {
@@ -1866,8 +1866,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1038,
-        "last_check": "2026-03-06T14:51:11.083374",
+        "latency": 1026,
+        "last_check": "2026-03-06T15:00:32.867969",
         "removed": true
       },
       {
@@ -1879,8 +1879,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 850,
-        "last_check": "2026-03-06T14:51:10.895249",
+        "latency": 1038,
+        "last_check": "2026-03-06T15:00:32.879754",
         "removed": true
       },
       {
@@ -1892,8 +1892,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1067,
-        "last_check": "2026-03-06T14:51:11.112922",
+        "latency": 3080,
+        "last_check": "2026-03-06T15:00:34.922355",
         "removed": true
       },
       {
@@ -1905,8 +1905,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 3043,
-        "last_check": "2026-03-06T14:51:13.088106",
+        "latency": 1039,
+        "last_check": "2026-03-06T15:00:32.880781",
         "removed": true
       },
       {
@@ -1918,8 +1918,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 852,
-        "last_check": "2026-03-06T14:51:10.897521",
+        "latency": 2881,
+        "last_check": "2026-03-06T15:00:34.723495",
         "removed": true
       },
       {
@@ -1931,8 +1931,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1062,
-        "last_check": "2026-03-06T14:51:11.108149",
+        "latency": 930,
+        "last_check": "2026-03-06T15:00:32.772448",
         "removed": true
       },
       {
@@ -1944,8 +1944,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1044,
-        "last_check": "2026-03-06T14:51:11.089761",
+        "latency": 1029,
+        "last_check": "2026-03-06T15:00:32.871716",
         "removed": true
       },
       {
@@ -1957,8 +1957,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1993,
-        "last_check": "2026-03-06T14:51:12.039118",
+        "latency": 2117,
+        "last_check": "2026-03-06T15:00:33.959674",
         "removed": true
       },
       {
@@ -1970,8 +1970,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 3062,
-        "last_check": "2026-03-06T14:51:13.107835",
+        "latency": 780,
+        "last_check": "2026-03-06T15:00:32.622440",
         "removed": true
       },
       {
@@ -1983,8 +1983,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1029,
-        "last_check": "2026-03-06T14:51:11.075327",
+        "latency": 2044,
+        "last_check": "2026-03-06T15:00:33.887239",
         "removed": true
       },
       {
@@ -1996,25 +1996,103 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1033,
-        "last_check": "2026-03-06T14:51:11.079334",
+        "latency": 1075,
+        "last_check": "2026-03-06T15:00:32.918001",
+        "removed": true
+      },
+      {
+        "ip": "172.64.188.248",
+        "version": "ipv4",
+        "country": {
+          "country": "Canada",
+          "country_code": "CA",
+          "isp": "Cloudflare, Inc."
+        },
+        "status": "online",
+        "latency": 1086,
+        "last_check": "2026-03-06T15:00:32.928632",
+        "removed": true
+      },
+      {
+        "ip": "172.64.188.146",
+        "version": "ipv4",
+        "country": {
+          "country": "Canada",
+          "country_code": "CA",
+          "isp": "Cloudflare, Inc."
+        },
+        "status": "online",
+        "latency": 1015,
+        "last_check": "2026-03-06T15:00:32.858221",
+        "removed": true
+      },
+      {
+        "ip": "172.64.188.205",
+        "version": "ipv4",
+        "country": {
+          "country": "Canada",
+          "country_code": "CA",
+          "isp": "Cloudflare, Inc."
+        },
+        "status": "online",
+        "latency": 1835,
+        "last_check": "2026-03-06T15:00:33.678629",
+        "removed": true
+      },
+      {
+        "ip": "172.64.185.132",
+        "version": "ipv4",
+        "country": {
+          "country": "Canada",
+          "country_code": "CA",
+          "isp": "Cloudflare, Inc."
+        },
+        "status": "online",
+        "latency": 926,
+        "last_check": "2026-03-06T15:00:32.769319",
+        "removed": true
+      },
+      {
+        "ip": "172.64.189.17",
+        "version": "ipv4",
+        "country": {
+          "country": "Canada",
+          "country_code": "CA",
+          "isp": "Cloudflare, Inc."
+        },
+        "status": "online",
+        "latency": 863,
+        "last_check": "2026-03-06T15:00:32.706318",
+        "removed": true
+      },
+      {
+        "ip": "172.64.188.177",
+        "version": "ipv4",
+        "country": {
+          "country": "Canada",
+          "country_code": "CA",
+          "isp": "Cloudflare, Inc."
+        },
+        "status": "online",
+        "latency": 858,
+        "last_check": "2026-03-06T15:00:32.701762",
         "removed": true
       }
     ],
     "added_time": "2026-03-06T14:35:21.198893",
     "history_24h": {
-      "total": 684,
-      "ok": 684,
+      "total": 1071,
+      "ok": 1071,
       "fail": 0
     },
     "history_7d": {
-      "total": 684,
-      "ok": 684,
+      "total": 1071,
+      "ok": 1071,
       "fail": 0
     },
     "history_30d": {
-      "total": 684,
-      "ok": 684,
+      "total": 1071,
+      "ok": 1071,
       "fail": 0
     }
   },
@@ -2032,8 +2110,8 @@
           "isp": "Proxad / Free SAS"
         },
         "status": "online",
-        "latency": 309,
-        "last_check": "2026-03-06T14:51:10.354903"
+        "latency": 348,
+        "last_check": "2026-03-06T15:00:32.191820"
       },
       {
         "ip": "2a01:e0a:ebd:2640:ba27:ebff:fe2c:db88",
@@ -2044,24 +2122,24 @@
           "isp": "Free SAS"
         },
         "status": "online",
-        "latency": 356,
-        "last_check": "2026-03-06T14:51:10.402562"
+        "latency": 391,
+        "last_check": "2026-03-06T15:00:32.235159"
       }
     ],
     "added_time": "2026-03-06T14:35:22.721738",
     "history_24h": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_7d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_30d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     }
   },
@@ -2079,24 +2157,24 @@
           "isp": "Fastnet Data Inc"
         },
         "status": "online",
-        "latency": 177,
-        "last_check": "2026-03-06T14:51:10.223366"
+        "latency": 170,
+        "last_check": "2026-03-06T15:00:32.013775"
       }
     ],
     "added_time": "2026-03-06T14:35:23.515439",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -2114,24 +2192,24 @@
           "isp": "DHI TECHNICAL SERVICES LLC"
         },
         "status": "online",
-        "latency": 361,
-        "last_check": "2026-03-06T14:51:10.408260"
+        "latency": 285,
+        "last_check": "2026-03-06T15:00:32.129478"
       }
     ],
     "added_time": "2026-03-06T14:35:24.191256",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -2149,24 +2227,24 @@
           "isp": "Serverius Holding B.V."
         },
         "status": "online",
-        "latency": 173,
-        "last_check": "2026-03-06T14:51:10.219878"
+        "latency": 227,
+        "last_check": "2026-03-06T15:00:32.071489"
       }
     ],
     "added_time": "2026-03-06T14:35:24.933896",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -2184,8 +2262,8 @@
           "isp": "RedSwitches Pty LTD."
         },
         "status": "online",
-        "latency": 262,
-        "last_check": "2026-03-06T14:51:10.309091"
+        "latency": 259,
+        "last_check": "2026-03-06T15:00:32.103131"
       },
       {
         "ip": "2406:4fc0:1002::137",
@@ -2196,24 +2274,24 @@
           "isp": "RedSwitches Pty LTD."
         },
         "status": "online",
-        "latency": 288,
-        "last_check": "2026-03-06T14:51:10.335557"
+        "latency": 265,
+        "last_check": "2026-03-06T15:00:32.109787"
       }
     ],
     "added_time": "2026-03-06T14:35:26.468343",
     "history_24h": {
-      "total": 34,
-      "ok": 33,
+      "total": 48,
+      "ok": 47,
       "fail": 1
     },
     "history_7d": {
-      "total": 34,
-      "ok": 33,
+      "total": 48,
+      "ok": 47,
       "fail": 1
     },
     "history_30d": {
-      "total": 34,
-      "ok": 33,
+      "total": 48,
+      "ok": 47,
       "fail": 1
     }
   },
@@ -2231,24 +2309,24 @@
           "isp": "WorldStream B.V."
         },
         "status": "online",
-        "latency": 232,
-        "last_check": "2026-03-06T14:51:10.279212"
+        "latency": 224,
+        "last_check": "2026-03-06T15:00:32.068536"
       }
     ],
     "added_time": "2026-03-06T14:35:27.243214",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -2266,8 +2344,8 @@
           "isp": "Unknown"
         },
         "status": "online",
-        "latency": 1044,
-        "last_check": "2026-03-06T14:51:11.091487"
+        "latency": 853,
+        "last_check": "2026-03-06T15:00:32.698164"
       },
       {
         "ip": "104.21.18.88",
@@ -2278,8 +2356,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 851,
-        "last_check": "2026-03-06T14:51:10.898151"
+        "latency": 1013,
+        "last_check": "2026-03-06T15:00:32.858150"
       },
       {
         "ip": "2606:4700:3034::ac43:b584",
@@ -2290,8 +2368,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 2003,
-        "last_check": "2026-03-06T14:51:12.050494"
+        "latency": 851,
+        "last_check": "2026-03-06T15:00:32.695708"
       },
       {
         "ip": "2606:4700:3034::6815:1258",
@@ -2302,24 +2380,24 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1049,
-        "last_check": "2026-03-06T14:51:11.096980"
+        "latency": 867,
+        "last_check": "2026-03-06T15:00:32.711777"
       }
     ],
     "added_time": "2026-03-06T14:35:34.765224",
     "history_24h": {
-      "total": 68,
-      "ok": 68,
+      "total": 96,
+      "ok": 96,
       "fail": 0
     },
     "history_7d": {
-      "total": 68,
-      "ok": 68,
+      "total": 96,
+      "ok": 96,
       "fail": 0
     },
     "history_30d": {
-      "total": 68,
-      "ok": 68,
+      "total": 96,
+      "ok": 96,
       "fail": 0
     }
   },
@@ -2337,24 +2415,24 @@
           "isp": "Hangzhou Alibaba Advertising Co"
         },
         "status": "online",
-        "latency": 21,
-        "last_check": "2026-03-06T14:51:10.069285"
+        "latency": 19,
+        "last_check": "2026-03-06T15:00:31.864512"
       }
     ],
     "added_time": "2026-03-06T14:35:35.519689",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -2372,8 +2450,8 @@
           "isp": "Kawaii Networks LLC"
         },
         "status": "online",
-        "latency": 217,
-        "last_check": "2026-03-06T14:51:10.264562"
+        "latency": 224,
+        "last_check": "2026-03-06T15:00:32.089410"
       },
       {
         "ip": "2602:f93b:131:a:be24:11ff:fe79:fff7",
@@ -2384,24 +2462,24 @@
           "isp": "Kawaii Networks LLC"
         },
         "status": "online",
-        "latency": 215,
-        "last_check": "2026-03-06T14:51:10.262765"
+        "latency": 205,
+        "last_check": "2026-03-06T15:00:32.185922"
       }
     ],
     "added_time": "2026-03-06T14:35:36.957489",
     "history_24h": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_7d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_30d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     }
   },
@@ -2419,24 +2497,24 @@
           "isp": "GoCodeIT Inc"
         },
         "status": "online",
-        "latency": 275,
-        "last_check": "2026-03-06T14:51:10.323521"
+        "latency": 268,
+        "last_check": "2026-03-06T15:00:32.260146"
       }
     ],
     "added_time": "2026-03-06T14:35:37.719457",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -2454,24 +2532,24 @@
           "isp": "Amazon.com, Inc."
         },
         "status": "online",
-        "latency": 243,
-        "last_check": "2026-03-06T14:51:10.291235"
+        "latency": 240,
+        "last_check": "2026-03-06T15:00:32.236424"
       }
     ],
     "added_time": "2026-03-06T14:35:38.478568",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -2489,24 +2567,24 @@
           "isp": "DASABO OU"
         },
         "status": "online",
-        "latency": 222,
-        "last_check": "2026-03-06T14:51:10.270489"
+        "latency": 157,
+        "last_check": "2026-03-06T15:00:32.154895"
       }
     ],
     "added_time": "2026-03-06T14:35:39.235696",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -2524,24 +2602,24 @@
           "isp": "Freakhosting LTD"
         },
         "status": "online",
-        "latency": 188,
-        "last_check": "2026-03-06T14:51:10.236510"
+        "latency": 182,
+        "last_check": "2026-03-06T15:00:32.184612"
       }
     ],
     "added_time": "2026-03-06T14:35:39.998895",
     "history_24h": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_7d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     },
     "history_30d": {
-      "total": 17,
-      "ok": 17,
+      "total": 24,
+      "ok": 24,
       "fail": 0
     }
   },
@@ -2559,8 +2637,8 @@
           "isp": "FranTech Solutions"
         },
         "status": "online",
-        "latency": 219,
-        "last_check": "2026-03-06T14:51:10.284982"
+        "latency": 176,
+        "last_check": "2026-03-06T15:00:32.180166"
       },
       {
         "ip": "2605:6400:30:fad6::dead:c0d3",
@@ -2571,24 +2649,24 @@
           "isp": "FranTech Solutions"
         },
         "status": "online",
-        "latency": 245,
-        "last_check": "2026-03-06T14:51:10.315324"
+        "latency": 276,
+        "last_check": "2026-03-06T15:00:32.282382"
       }
     ],
     "added_time": "2026-03-06T14:35:41.499826",
     "history_24h": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_7d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     },
     "history_30d": {
-      "total": 34,
-      "ok": 34,
+      "total": 48,
+      "ok": 48,
       "fail": 0
     }
   },
@@ -2606,24 +2684,24 @@
           "isp": "CHINANET"
         },
         "status": "online",
-        "latency": 47,
-        "last_check": "2026-03-06T14:51:10.254680"
+        "latency": 53,
+        "last_check": "2026-03-06T15:00:32.062862"
       }
     ],
     "added_time": "2026-03-06T14:35:42.252028",
     "history_24h": {
-      "total": 16,
-      "ok": 16,
+      "total": 23,
+      "ok": 23,
       "fail": 0
     },
     "history_7d": {
-      "total": 16,
-      "ok": 16,
+      "total": 23,
+      "ok": 23,
       "fail": 0
     },
     "history_30d": {
-      "total": 16,
-      "ok": 16,
+      "total": 23,
+      "ok": 23,
       "fail": 0
     }
   },
@@ -2641,24 +2719,24 @@
           "isp": "OVH SAS"
         },
         "status": "online",
-        "latency": 386,
-        "last_check": "2026-03-06T14:51:10.599590"
+        "latency": 329,
+        "last_check": "2026-03-06T15:00:32.340294"
       }
     ],
     "added_time": "2026-03-06T14:35:42.953376",
     "history_24h": {
-      "total": 16,
-      "ok": 16,
+      "total": 23,
+      "ok": 23,
       "fail": 0
     },
     "history_7d": {
-      "total": 16,
-      "ok": 16,
+      "total": 23,
+      "ok": 23,
       "fail": 0
     },
     "history_30d": {
-      "total": 16,
-      "ok": 16,
+      "total": 23,
+      "ok": 23,
       "fail": 0
     }
   },
@@ -2675,9 +2753,9 @@
           "country_code": "US",
           "isp": "velia.net"
         },
-        "status": "online",
-        "latency": 252,
-        "last_check": "2026-03-06T14:51:10.470456"
+        "status": "offline",
+        "latency": -1,
+        "last_check": "2026-03-06T15:00:57.026539"
       },
       {
         "ip": "2a01:7a7:2:3ed6:225:90ff:fefb:3dfc",
@@ -2688,25 +2766,25 @@
           "isp": "velia.net Internetdienste GmbH"
         },
         "status": "online",
-        "latency": 265,
-        "last_check": "2026-03-06T14:51:10.483451"
+        "latency": 296,
+        "last_check": "2026-03-06T15:00:32.309044"
       }
     ],
     "added_time": "2026-03-06T14:35:44.501859",
     "history_24h": {
-      "total": 32,
-      "ok": 31,
-      "fail": 1
+      "total": 46,
+      "ok": 44,
+      "fail": 2
     },
     "history_7d": {
-      "total": 32,
-      "ok": 31,
-      "fail": 1
+      "total": 46,
+      "ok": 44,
+      "fail": 2
     },
     "history_30d": {
-      "total": 32,
-      "ok": 31,
-      "fail": 1
+      "total": 46,
+      "ok": 44,
+      "fail": 2
     }
   },
   "bandito.byterunner.io": {
@@ -2723,24 +2801,24 @@
           "isp": "The Infrastructure Group B.V."
         },
         "status": "online",
-        "latency": 248,
-        "last_check": "2026-03-06T14:51:30.469688"
+        "latency": 180,
+        "last_check": "2026-03-06T15:00:32.193663"
       }
     ],
     "added_time": "2026-03-06T14:35:45.285489",
     "history_24h": {
-      "total": 16,
-      "ok": 15,
+      "total": 23,
+      "ok": 22,
       "fail": 1
     },
     "history_7d": {
-      "total": 16,
-      "ok": 15,
+      "total": 23,
+      "ok": 22,
       "fail": 1
     },
     "history_30d": {
-      "total": 16,
-      "ok": 15,
+      "total": 23,
+      "ok": 22,
       "fail": 1
     }
   },
@@ -2758,24 +2836,24 @@
           "isp": "Vivo"
         },
         "status": "online",
-        "latency": 430,
-        "last_check": "2026-03-06T14:51:10.647959"
+        "latency": 353,
+        "last_check": "2026-03-06T15:00:32.367265"
       }
     ],
     "added_time": "2026-03-06T14:35:46.037925",
     "history_24h": {
-      "total": 16,
-      "ok": 16,
+      "total": 23,
+      "ok": 23,
       "fail": 0
     },
     "history_7d": {
-      "total": 16,
-      "ok": 16,
+      "total": 23,
+      "ok": 23,
       "fail": 0
     },
     "history_30d": {
-      "total": 16,
-      "ok": 16,
+      "total": 23,
+      "ok": 23,
       "fail": 0
     }
   },
@@ -2793,8 +2871,8 @@
           "isp": "ZAPPIE-HOST"
         },
         "status": "online",
-        "latency": 228,
-        "last_check": "2026-03-06T14:51:10.447492"
+        "latency": 202,
+        "last_check": "2026-03-06T15:00:32.217204"
       },
       {
         "ip": "2a06:1280:f115::2",
@@ -2805,25 +2883,25 @@
           "isp": "ZAPPIE-HOST"
         },
         "status": "online",
-        "latency": 281,
-        "last_check": "2026-03-06T14:51:10.501144"
+        "latency": 304,
+        "last_check": "2026-03-06T15:00:32.319629"
       }
     ],
     "added_time": "2026-03-06T14:35:47.522566",
     "history_24h": {
-      "total": 32,
-      "ok": 31,
-      "fail": 1
+      "total": 46,
+      "ok": 43,
+      "fail": 3
     },
     "history_7d": {
-      "total": 32,
-      "ok": 31,
-      "fail": 1
+      "total": 46,
+      "ok": 43,
+      "fail": 3
     },
     "history_30d": {
-      "total": 32,
-      "ok": 31,
-      "fail": 1
+      "total": 46,
+      "ok": 43,
+      "fail": 3
     }
   },
   "6ahddutb1ucc3cp.ru": {
@@ -2839,25 +2917,25 @@
           "country_code": "RU",
           "isp": "First Server Limited"
         },
-        "status": "offline",
-        "latency": -1,
-        "last_check": "2026-03-06T14:51:25.234710"
+        "status": "online",
+        "latency": 297,
+        "last_check": "2026-03-06T15:00:32.319260"
       }
     ],
     "added_time": "2026-03-06T14:35:48.312249",
     "history_24h": {
-      "total": 16,
-      "ok": 14,
+      "total": 23,
+      "ok": 21,
       "fail": 2
     },
     "history_7d": {
-      "total": 16,
-      "ok": 14,
+      "total": 23,
+      "ok": 21,
       "fail": 2
     },
     "history_30d": {
-      "total": 16,
-      "ok": 14,
+      "total": 23,
+      "ok": 21,
       "fail": 2
     }
   },
@@ -2875,8 +2953,8 @@
           "isp": "Aeza International LTD"
         },
         "status": "online",
-        "latency": 380,
-        "last_check": "2026-03-06T14:51:10.601085"
+        "latency": 247,
+        "last_check": "2026-03-06T15:00:32.271129"
       },
       {
         "ip": "91.186.213.204",
@@ -2887,24 +2965,24 @@
           "isp": "NetCrafters OU"
         },
         "status": "online",
-        "latency": 299,
-        "last_check": "2026-03-06T14:51:10.521205"
+        "latency": 277,
+        "last_check": "2026-03-06T15:00:32.304345"
       }
     ],
     "added_time": "2026-03-06T14:35:49.824416",
     "history_24h": {
-      "total": 32,
-      "ok": 30,
+      "total": 46,
+      "ok": 44,
       "fail": 2
     },
     "history_7d": {
-      "total": 32,
-      "ok": 30,
+      "total": 46,
+      "ok": 44,
       "fail": 2
     },
     "history_30d": {
-      "total": 32,
-      "ok": 30,
+      "total": 46,
+      "ok": 44,
       "fail": 2
     }
   },
@@ -2922,24 +3000,24 @@
           "isp": "Pedro Javier Pantoja Alcaraz"
         },
         "status": "online",
-        "latency": 265,
-        "last_check": "2026-03-06T14:51:10.488134"
+        "latency": 282,
+        "last_check": "2026-03-06T15:00:32.309933"
       }
     ],
     "added_time": "2026-03-06T14:35:50.493125",
     "history_24h": {
-      "total": 16,
-      "ok": 16,
+      "total": 23,
+      "ok": 23,
       "fail": 0
     },
     "history_7d": {
-      "total": 16,
-      "ok": 16,
+      "total": 23,
+      "ok": 23,
       "fail": 0
     },
     "history_30d": {
-      "total": 16,
-      "ok": 16,
+      "total": 23,
+      "ok": 23,
       "fail": 0
     }
   },
@@ -2957,8 +3035,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1033,
-        "last_check": "2026-03-06T14:51:11.256983"
+        "latency": 1068,
+        "last_check": "2026-03-06T15:00:33.104198"
       },
       {
         "ip": "172.67.216.25",
@@ -2969,8 +3047,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 808,
-        "last_check": "2026-03-06T14:51:11.035518"
+        "latency": 2107,
+        "last_check": "2026-03-06T15:00:34.144419"
       },
       {
         "ip": "2606:4700:3034::ac43:d819",
@@ -2981,8 +3059,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1056,
-        "last_check": "2026-03-06T14:51:11.285095"
+        "latency": 1027,
+        "last_check": "2026-03-06T15:00:33.065903"
       },
       {
         "ip": "2606:4700:3035::6815:35b3",
@@ -2993,24 +3071,24 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 720,
-        "last_check": "2026-03-06T14:51:10.952320"
+        "latency": 1043,
+        "last_check": "2026-03-06T15:00:33.085318"
       }
     ],
     "added_time": "2026-03-06T14:35:53.510815",
     "history_24h": {
-      "total": 64,
-      "ok": 64,
+      "total": 92,
+      "ok": 92,
       "fail": 0
     },
     "history_7d": {
-      "total": 64,
-      "ok": 64,
+      "total": 92,
+      "ok": 92,
       "fail": 0
     },
     "history_30d": {
-      "total": 64,
-      "ok": 64,
+      "total": 92,
+      "ok": 92,
       "fail": 0
     }
   },
@@ -3028,8 +3106,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 845,
-        "last_check": "2026-03-06T14:51:11.080806"
+        "latency": 859,
+        "last_check": "2026-03-06T15:00:32.902475"
       },
       {
         "ip": "104.21.56.230",
@@ -3040,8 +3118,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 848,
-        "last_check": "2026-03-06T14:51:11.084777"
+        "latency": 1089,
+        "last_check": "2026-03-06T15:00:33.133752"
       },
       {
         "ip": "172.66.140.230",
@@ -3052,8 +3130,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 175,
-        "last_check": "2026-03-06T14:51:10.414959"
+        "latency": 169,
+        "last_check": "2026-03-06T15:00:32.222494"
       },
       {
         "ip": "172.66.132.230",
@@ -3064,8 +3142,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 167,
-        "last_check": "2026-03-06T14:51:10.415737"
+        "latency": 163,
+        "last_check": "2026-03-06T15:00:32.227007"
       },
       {
         "ip": "2606:4700:3035::ac43:a410",
@@ -3076,8 +3154,8 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 1874,
-        "last_check": "2026-03-06T14:51:12.125816"
+        "latency": 1859,
+        "last_check": "2026-03-06T15:00:33.926143"
       },
       {
         "ip": "2606:4700:3036::6815:3985",
@@ -3088,24 +3166,24 @@
           "isp": "Cloudflare, Inc."
         },
         "status": "online",
-        "latency": 848,
-        "last_check": "2026-03-06T14:51:11.102247"
+        "latency": 677,
+        "last_check": "2026-03-06T15:00:32.746414"
       }
     ],
     "added_time": "2026-03-06T14:35:57.859124",
     "history_24h": {
-      "total": 96,
-      "ok": 96,
+      "total": 138,
+      "ok": 138,
       "fail": 0
     },
     "history_7d": {
-      "total": 96,
-      "ok": 96,
+      "total": 138,
+      "ok": 138,
       "fail": 0
     },
     "history_30d": {
-      "total": 96,
-      "ok": 96,
+      "total": 138,
+      "ok": 138,
       "fail": 0
     }
   }

@@ -600,10 +600,8 @@ class Socks5ProxyPool:
                                    socket.AF_UNSPEC, socket.SOCK_STREAM)
         if not infos:
             raise OSError(f"无法解析代理地址: {proxy_host}")
-        # IPv6 优先：AF_INET6=10 > AF_INET=2，按 af 降序
-        # IPv6 连接失败（端口未监听）时自动 fallback 到 IPv4
-        # getaddrinfo 已读取 hosts 文件，localhost → ::1/127.0.0.1 均来自 hosts
-        infos_sorted = sorted(infos, key=lambda x: x[0], reverse=True)
+        # IPv4 优先排序（AF_INET=2, AF_INET6=10，按 af 升序）
+        infos_sorted = sorted(infos, key=lambda x: x[0])
 
         last_err = None
         for af, _, _, _, proxy_sockaddr in infos_sorted:

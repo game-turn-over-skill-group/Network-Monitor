@@ -591,46 +591,26 @@ class Socks5ProxyPool:
 
     @staticmethod
     def _do_connect(proxy_host, proxy_port, timeout) -> 'Socks5ProxySession':
-        """建立 SOCKS5 TCP 控制连接，完成 UDP Associate 握手，返回 session。
-        地址族选择：优先 IPv4（大多数本地代理只监听 127.0.0.1），
-        IPv4 不可用时 fallback 到 IPv6。
-        避免 localhost 在双栈系统默认解析到 ::1 但代理只监听 127.0.0.1 的问题。
-        """
+        """建立 SOCKS5 TCP 控制连接，完成 UDP Associate 握手，返回 session"""
         infos = socket.getaddrinfo(proxy_host, proxy_port,
                                    socket.AF_UNSPEC, socket.SOCK_STREAM)
         if not infos:
             raise OSError(f"无法解析代理地址: {proxy_host}")
-        # IPv6 优先：AF_INET6=10 > AF_INET=2，按 af 降序
-        # IPv6 连接失败（端口未监听）时自动 fallback 到 IPv4
-        # getaddrinfo 已读取 hosts 文件，localhost → ::1/127.0.0.1 均来自 hosts
-        infos_sorted = sorted(infos, key=lambda x: x[0], reverse=True)
+        af, _, _, _, proxy_sockaddr = infos[0]
 
-        last_err = None
-        for af, _, _, _, proxy_sockaddr in infos_sorted:
-            tcp = socket.socket(af, socket.SOCK_STREAM)
-            tcp.settimeout(timeout)
-            tcp.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-            try:
-                if hasattr(socket, 'TCP_KEEPIDLE'):
-                    tcp.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE,  max(1, timeout))
-                    tcp.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5)
-                    tcp.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT,   3)
-            except (OSError, AttributeError):
-                pass
-            try:
-                tcp.connect(proxy_sockaddr)
-                break   # 连接成功，跳出循环
-            except OSError as e:
-                last_err = e
-                try: tcp.close()
-                except: pass
-                tcp = None
-                continue
-        else:
-            raise OSError(f"代理连接失败（已尝试所有地址）: {last_err}")
-
-        # TCP 连接成功，执行 SOCKS5 握手
+        tcp = socket.socket(af, socket.SOCK_STREAM)
+        tcp.settimeout(timeout)
+        tcp.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
         try:
+            if hasattr(socket, 'TCP_KEEPIDLE'):
+                tcp.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE,  max(1, timeout))
+                tcp.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 5)
+                tcp.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT,   3)
+        except (OSError, AttributeError):
+            pass
+
+        try:
+            tcp.connect(proxy_sockaddr)
             # 认证协商
             tcp.sendall(b'\x05\x01\x00')
             resp = Socks5ProxyPool._recv_exact(tcp, 2)

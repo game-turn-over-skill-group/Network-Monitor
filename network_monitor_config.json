@@ -3,7 +3,7 @@
   "timeout": 5,
   "retry_mode": "polling",
   "retry_interval": 5,
-  "log_to_disk": false,
+  "log_to_disk": true,
   "console_log_level": "error",
   "http_proxy": "",
   "udp_proxy": "socks5://localhost:22",
