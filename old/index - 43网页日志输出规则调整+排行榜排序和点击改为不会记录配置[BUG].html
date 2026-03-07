@@ -7,7 +7,6 @@
     <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/vue-i18n@9/dist/vue-i18n.global.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css" rel="stylesheet">
     <style>
@@ -97,7 +96,7 @@
             </a>
             <div class="collapse navbar-collapse">
                 <ul class="navbar-nav me-auto">
-                    <li class="nav-item" v-for="tab in visibleTabs" :key="tab">
+                    <li class="nav-item" v-for="tab in ['dashboard','trackers','ranking','logs','config']" :key="tab">
                         <a class="nav-link" :class="{active:currentTab===tab}"
                            @click.prevent="go(tab)"
                            :href="'/#/'+tab">
@@ -114,22 +113,7 @@
                         <option value="ja">日本語</option>
                         <option value="ko">한국어</option>
                     </select>
-                    <!-- 登录状态 -->
-                    <template v-if="authUser.logged_in">
-                        <span style="font-size:.8rem;color:#94a3b8;">
-                            <i class="bi bi-person-circle me-1"></i>{{ authUser.username }}
-                            <span :class="authUser.role==='admin'?'text-warning':authUser.role==='operator'?'text-info':'text-secondary'" style="font-size:.7rem;margin-left:3px;">[{{ authUser.role }}]</span>
-                        </span>
-                        <button class="btn btn-outline-secondary btn-sm" @click="doLogout" title="退出登录">
-                            <i class="bi bi-box-arrow-right"></i>
-                        </button>
-                    </template>
-                    <template v-else>
-                        <button class="btn btn-outline-primary btn-sm" @click="showLogin=true">
-                            <i class="bi bi-box-arrow-in-right me-1"></i>登录
-                        </button>
-                    </template>
-                    <button v-if="authUser.role==='admin'||authUser.role==='operator'" class="btn btn-primary btn-sm" @click="openAdd">
+                    <button class="btn btn-primary btn-sm" @click="openAdd">
                         <i class="bi bi-plus-lg"></i> {{ t('common.add') }}
                     </button>
                 </div>
@@ -137,143 +121,36 @@
         </div>
     </nav>
 
-    <!-- 登录弹窗 -->
-    <div v-if="showLogin" style="position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;" @click.self="showLogin=false">
-        <div class="card" style="width:340px;padding:24px;">
-            <h5 class="mb-4" style="text-align:center;"><i class="bi bi-shield-lock me-2"></i>登录</h5>
-            <div class="mb-3">
-                <input class="form-control" v-model="loginForm.username" placeholder="用户名" @keyup.enter="doLogin">
-            </div>
-            <div class="mb-3">
-                <input class="form-control" type="password" v-model="loginForm.password" placeholder="密码" @keyup.enter="doLogin">
-            </div>
-            <div v-if="loginError" class="alert alert-danger py-2 mb-3" style="font-size:.85rem;">{{ loginError }}</div>
-            <div class="d-flex gap-2">
-                <button class="btn btn-primary flex-grow-1" @click="doLogin" :disabled="loginLoading">
-                    <span v-if="loginLoading" class="spinner-border spinner-border-sm me-1"></span>
-                    登录
-                </button>
-                <button class="btn btn-outline-secondary" @click="showLogin=false">取消</button>
-            </div>
-        </div>
-    </div>
-
     <div class="container-fluid p-4">
 
         <!-- 仪表盘 -->
         <div v-if="currentTab==='dashboard'">
-            <!-- 顶部4格统计卡 -->
-            <div class="row mb-3">
-                <div class="col-md-3 col-6 mb-2">
+            <div class="row mb-4">
+                <div class="col-md-3 col-6">
                     <div class="card stat-card"><div class="stat-num">{{ stats.total }}</div><div class="stat-lbl">{{ t('stats.total') }}</div></div>
                 </div>
-                <div class="col-md-3 col-6 mb-2">
+                <div class="col-md-3 col-6">
                     <div class="card stat-card"><div class="stat-num ok">{{ stats.alive }}</div><div class="stat-lbl">{{ t('stats.alive') }}</div></div>
                 </div>
-                <div class="col-md-3 col-6 mb-2">
+                <div class="col-md-3 col-6">
                     <div class="card stat-card"><div class="stat-num ok">{{ stats.alive_v4 ?? stats.ipv4 }}</div><div class="stat-lbl">{{ t('stats.ipv4') }}</div></div>
                 </div>
-                <div class="col-md-3 col-6 mb-2">
+                <div class="col-md-3 col-6">
                     <div class="card stat-card"><div class="stat-num ok">{{ stats.alive_v6 ?? stats.ipv6 }}</div><div class="stat-lbl">{{ t('stats.ipv6') }}</div></div>
                 </div>
             </div>
-
-            <!-- 第一行：24h趋势折线 + IPv4/IPv6饼图 -->
-            <div class="row mb-3">
-                <div class="col-md-8 mb-3">
-                    <div class="card h-100">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-graph-up me-1"></i>24小时在线率趋势</span>
-                            <span style="font-size:.75rem;color:#64748b;">每点=1轮检测均值，最近100轮</span>
-                        </div>
-                        <div class="card-body p-2" style="height:200px;">
-                            <canvas ref="chartTrend" style="width:100%;height:100%;"></canvas>
-                        </div>
-                    </div>
+            <div class="card mt-2">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-clock-history me-1"></i>最近日志</span>
+                    <button class="btn btn-sm btn-outline-secondary" @click="go('logs')">查看全部</button>
                 </div>
-                <div class="col-md-4 mb-3">
-                    <div class="card h-100">
-                        <div class="card-header"><span><i class="bi bi-pie-chart me-1"></i>IPv4 / IPv6 占比</span></div>
-                        <div class="card-body d-flex align-items-center justify-content-center p-2" style="height:200px;">
-                            <canvas ref="chartPie" style="max-width:180px;max-height:180px;"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 第二行：可用率分布 + 延迟分布 -->
-            <div class="row mb-3">
-                <div class="col-md-6 mb-3">
-                    <div class="card h-100">
-                        <div class="card-header"><span><i class="bi bi-bar-chart me-1"></i>可用率分布（域名数）</span></div>
-                        <div class="card-body p-2" style="height:180px;">
-                            <canvas ref="chartUptime" style="width:100%;height:100%;"></canvas>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-6 mb-3">
-                    <div class="card h-100">
-                        <div class="card-header"><span><i class="bi bi-speedometer2 me-1"></i>延迟分布（在线IP数）</span></div>
-                        <div class="card-body p-2" style="height:180px;">
-                            <canvas ref="chartLatency" style="width:100%;height:100%;"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- 第三行：离线TOP5 + 最近错误日志 -->
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <div class="card h-100">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-exclamation-triangle me-1" style="color:var(--err);"></i>可用率最差 TOP10</span>
-                            <button class="btn btn-sm btn-outline-secondary" @click="go('ranking')">排行榜</button>
-                        </div>
-                        <div class="card-body p-2">
-                            <div v-if="!dashWorstTrackers.length" class="empty-st" style="padding:20px 0;"><p>暂无数据</p></div>
-                            <table v-else class="table table-sm mb-0" style="font-size:.82rem;">
-                                <thead><tr>
-                                    <th style="font-weight:normal;color:#64748b;font-size:.75rem;">域名</th>
-                                    <th style="font-weight:normal;color:#64748b;font-size:.75rem;text-align:right;">可用率</th>
-                                    <th style="font-weight:normal;color:#64748b;font-size:.75rem;text-align:right;">均延迟</th>
-                                    <th style="font-weight:normal;color:#64748b;font-size:.75rem;text-align:right;">状态</th>
-                                </tr></thead>
-                                <tbody>
-                                    <tr v-for="item in dashWorstTrackers" :key="item.domain" @click="go('trackers')" style="cursor:pointer;">
-                                        <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="item.domain">{{ item.domain }}</td>
-                                        <td style="width:65px;text-align:right;">
-                                            <span :class="item.cls" style="padding:1px 5px;border-radius:4px;font-size:.78rem;">
-                                                {{ item.uptime===null ? '?' : item.uptime.toFixed(1)+'%' }}
-                                            </span>
-                                        </td>
-                                        <td style="width:60px;text-align:right;color:#94a3b8;font-size:.78rem;">
-                                            {{ item.avg_latency > 0 ? item.avg_latency+'ms' : '-' }}
-                                        </td>
-                                        <td style="width:70px;text-align:right;font-size:.78rem;">
-                                            <span v-if="item.offline_count>0" style="color:var(--err);">{{ item.offline_count }} 离线</span>
-                                            <span v-else style="color:var(--ok);">全部在线</span>
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-6 mb-3">
-                    <div class="card h-100">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-journal-x me-1" style="color:var(--err);"></i>最近错误日志</span>
-                            <button class="btn btn-sm btn-outline-secondary" @click="go('logs')">查看全部</button>
-                        </div>
-                        <div class="card-body p-2" style="max-height:200px;overflow-y:auto;">
-                            <div v-if="!dashErrorLogs.length" class="empty-st" style="padding:20px 0;"><p>暂无错误</p></div>
-                            <div v-else>
-                                <div class="log-row" v-for="(l,i) in dashErrorLogs" :key="i">
-                                    <span class="log-time">{{ fmtLogTime(l.time) }}</span>
-                                    <span class="me-1 log-error">[ERROR]</span>
-                                    {{ l.message }}
-                                </div>
-                            </div>
+                <div class="card-body p-2" style="max-height:280px;overflow-y:auto;">
+                    <div v-if="!logs.length" class="empty-st"><p>暂无日志</p></div>
+                    <div v-else>
+                        <div class="log-row" v-for="(l,i) in logs.slice(-15).reverse()" :key="i">
+                            <span class="log-time">{{ fmtLogTime(l.time) }}</span>
+                            <span class="me-1" :class="'log-'+l.level">[{{ l.level.toUpperCase() }}]</span>
+                            {{ l.message }}
                         </div>
                     </div>
                 </div>
@@ -326,16 +203,6 @@
                                             <span v-else style="color:#475569;">⇅</span>
                                         </span>
                                     </th>
-                                    <th style="width:70px;">
-                                        端口
-                                    </th>
-                                    <th style="width:80px;">
-                                        <select v-model="protoFilter" class="form-select form-select-sm" style="font-size:.75rem;padding:1px 4px;background:transparent;border-color:#334155;color:#94a3b8;width:72px;">
-                                            <option value="">协议</option>
-                                            <option value="tcp">TCP</option>
-                                            <option value="udp">UDP</option>
-                                        </select>
-                                    </th>
                                     <th>{{ t('tracker.ip') }}</th>
                                     <th @click="cycleSort('uptime')" style="cursor:pointer;user-select:none;">
                                         {{ t('tracker.status') }}
@@ -362,10 +229,10 @@
                                         <td><span class="chevron" :class="{open:expanded.includes(domain)}"><i class="bi bi-chevron-right"></i></span></td>
                                         <td>
                                             <span class="domain-name">{{ domain }}</span>
+                                            <span class="port-tag ms-1">:{{ tr.port||80 }}</span>
+                                            <span class="proto-tag ms-1" :class="'proto-'+(tr.protocol||'tcp')">{{ (tr.protocol||'tcp').toUpperCase() }}</span>
                                             <span v-if="tr.dns_error" class="ms-1" style="color:#f87171;font-size:.75rem;font-weight:500;">⚠ Host not found</span>
                                         </td>
-                                        <td><span class="port-tag">:{{ tr.port||80 }}</span></td>
-                                        <td><span class="proto-tag" :class="'proto-'+(tr.protocol||'tcp')">{{ (tr.protocol||'tcp').toUpperCase() }}</span></td>
                                         <td><span class="text-secondary">{{ tr.ips.length }} {{ t('tracker.ips') }}</span></td>
                                         <td colspan="2">
                                             <span class="badge-up" :class="uptimeCls(tr)">{{ uptime(tr)===null ? '?' : uptime(tr).toFixed(2)+'%' }}</span>
@@ -376,13 +243,11 @@
                                         <td></td>
                                         <td>
                                             <button class="btn btn-sm btn-outline-primary me-1" @click.stop="retryDomain(domain)" title="重试全部IP"><i class="bi bi-arrow-repeat"></i></button>
-                                            <button v-if="authUser.role==='admin'||authUser.role==='operator'" class="btn btn-sm btn-outline-danger" @click.stop="delTracker(domain)" title="删除"><i class="bi bi-trash"></i></button>
+                                            <button class="btn btn-sm btn-outline-danger" @click.stop="delTracker(domain)" title="删除"><i class="bi bi-trash"></i></button>
                                         </td>
                                     </tr>
                                     <template v-if="expanded.includes(domain)">
                                         <tr v-for="ip in tr.ips" :key="ip.ip" class="ip-row" :style="ip.removed?'opacity:.45':''">
-                                            <td></td>
-                                            <td></td>
                                             <td></td>
                                             <td></td>
                                             <td class="ip-mono">
@@ -505,8 +370,8 @@
             </div>
         </div>
 
-        <!-- 配置 (仅admin可见) -->
-        <div v-if="currentTab==='config' && authUser.role==='admin'">
+        <!-- 配置 -->
+        <div v-if="currentTab==='config'">
             <!-- 监控配置 -->
             <div class="card mb-3">
                 <div class="card-header">{{ t('config.monitorTitle') }}</div>
@@ -710,61 +575,6 @@
                     </div>
                 </div>
             </div>
-
-            <!-- 用户管理 (仅admin) -->
-            <div class="card mb-3">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span><i class="bi bi-people me-1"></i>用户管理</span>
-                    <button class="btn btn-sm btn-outline-primary" @click="addUserRow">
-                        <i class="bi bi-plus-lg"></i> 添加用户
-                    </button>
-                </div>
-                <div class="card-body p-0">
-                    <table class="table table-sm mb-0" style="font-size:.85rem;">
-                        <thead><tr>
-                            <th style="width:160px;">用户名</th>
-                            <th style="width:160px;">新密码（留空=不改）</th>
-                            <th style="width:120px;">角色</th>
-                            <th style="font-size:.75rem;color:#64748b;">
-                                <span style="color:#f59e0b;">admin</span>=全权 &nbsp;
-                                <span style="color:#38bdf8;">operator</span>=增删+限速500ms &nbsp;
-                                <span style="color:#94a3b8;">viewer</span>=只读+限速1s
-                            </th>
-                            <th style="width:50px;"></th>
-                        </tr></thead>
-                        <tbody>
-                            <tr v-for="(u, idx) in userRows" :key="idx">
-                                <td><input class="form-control form-control-sm" v-model="u.username" placeholder="用户名"></td>
-                                <td><input class="form-control form-control-sm" type="password" v-model="u.password" placeholder="留空不改"></td>
-                                <td>
-                                    <select class="form-select form-select-sm" v-model="u.role">
-                                        <option value="admin">admin</option>
-                                        <option value="operator">operator</option>
-                                        <option value="viewer">viewer</option>
-                                    </select>
-                                </td>
-                                <td style="color:#64748b;font-size:.75rem;vertical-align:middle;">
-                                    <span v-if="u.role==='admin'" style="color:#f59e0b;"><i class="bi bi-shield-fill-check"></i> 全部权限，重试不限速</span>
-                                    <span v-else-if="u.role==='operator'" style="color:#38bdf8;"><i class="bi bi-person-gear"></i> 增删Tracker，重试500ms</span>
-                                    <span v-else style="color:#94a3b8;"><i class="bi bi-eye"></i> 只读，重试1s</span>
-                                </td>
-                                <td>
-                                    <button class="btn btn-sm btn-outline-danger" @click="removeUserRow(idx)" :disabled="userRows.length<=1" title="删除此行">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <div class="p-2 d-flex justify-content-end gap-2">
-                        <span v-if="userSaveMsg" :style="{color:userSaveMsg.ok?'var(--ok)':'var(--err)',fontSize:'.83rem'}">{{ userSaveMsg.text }}</span>
-                        <button class="btn btn-primary btn-sm" @click="saveUsers" :disabled="userSaving">
-                            <span v-if="userSaving" class="spinner-border spinner-border-sm me-1"></span>
-                            保存用户配置
-                        </button>
-                    </div>
-                </div>
-            </div>
         </div>
 
     </div><!-- /container -->
@@ -809,7 +619,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
 <script>
-const { createApp, ref, computed, onMounted, watch, nextTick } = Vue;
+const { createApp, ref, computed, onMounted, watch } = Vue;
 const { createI18n } = VueI18n;
 
 const msgs = {
@@ -853,77 +663,6 @@ createApp({
         });
         let timer = null;
 
-        // 协议筛选
-        const protoFilter = ref('');
-
-        // ── 认证状态 ──
-        const authUser = ref({logged_in: false, role: null, username: null});
-        const showLogin = ref(false);
-        const loginForm = ref({username:'', password:''});
-        const loginError = ref('');
-        const loginLoading = ref(false);
-
-        const visibleTabs = computed(() => {
-            const all = ['dashboard','trackers','ranking','logs','config'];
-            if (authUser.value.role === 'admin') return all;
-            return all.filter(t => t !== 'config');
-        });
-
-        const doLogin = async () => {
-            loginError.value = '';
-            loginLoading.value = true;
-            try {
-                const r = await axios.post('/api/auth/login', loginForm.value);
-                authUser.value = {logged_in: true, role: r.data.role, username: r.data.username};
-                showLogin.value = false;
-                loginForm.value = {username:'', password:''};
-                // operator/viewer 不能留在config页
-                if (currentTab.value==='config' && authUser.value.role !== 'admin') go('dashboard');
-            } catch(e) {
-                loginError.value = e.response?.data?.error || '登录失败';
-            } finally {
-                loginLoading.value = false;
-            }
-        };
-
-        const doLogout = async () => {
-            await axios.post('/api/auth/logout').catch(()=>{});
-            authUser.value = {logged_in: false, role: null, username: null};
-            if (currentTab.value === 'config') go('dashboard');
-        };
-
-        const loadWhoami = async () => {
-            try { const r = await axios.get('/api/auth/whoami'); authUser.value = r.data; } catch(e){}
-        };
-
-        // ── 用户管理 ──
-        const userRows = ref([]);
-        const userSaving = ref(false);
-        const userSaveMsg = ref(null);
-
-        const loadUsers = async () => {
-            try {
-                const r = await axios.get('/api/users');
-                userRows.value = r.data.map(u => ({username: u.username, role: u.role, password: ''}));
-            } catch(e){}
-        };
-
-        const addUserRow = () => userRows.value.push({username:'', role:'viewer', password:''});
-        const removeUserRow = (idx) => userRows.value.splice(idx, 1);
-
-        const saveUsers = async () => {
-            userSaving.value = true; userSaveMsg.value = null;
-            try {
-                await axios.post('/api/users', {users: userRows.value});
-                userSaveMsg.value = {ok:true, text:'✓ 已保存'};
-                setTimeout(()=>{ userSaveMsg.value=null; }, 3000);
-            } catch(e) {
-                userSaveMsg.value = {ok:false, text: e.response?.data?.error || '保存失败'};
-            } finally {
-                userSaving.value = false;
-            }
-        };
-
         const tabIcon = (t) => ({'dashboard':'bi-speedometer2','trackers':'bi-list-check','ranking':'bi-trophy','logs':'bi-journal-text','config':'bi-gear'}[t] || 'bi-circle');
 
         // URL hash 路由同步
@@ -959,19 +698,10 @@ createApp({
         };
 
         const filteredTrackers = computed(() => {
-            let base = trackers.value;
-            // 协议筛选
-            if (protoFilter.value) {
-                const pf = {};
-                for (const [d,data] of Object.entries(base)) {
-                    if ((data.protocol||'tcp') === protoFilter.value) pf[d] = data;
-                }
-                base = pf;
-            }
-            if (!searchQ.value) return base;
+            if (!searchQ.value) return trackers.value;
             const q = searchQ.value.toLowerCase();
             const r = {};
-            for (const [d,data] of Object.entries(base)) {
+            for (const [d,data] of Object.entries(trackers.value)) {
                 if (d.toLowerCase().includes(q)) { r[d]=data; continue; }
                 const ipMatch = data.ips.filter(ip =>
                     ip.ip.toLowerCase().includes(q) ||
@@ -1056,22 +786,7 @@ createApp({
             return list;
         });
 
-        let _firstTrackerLoad = true;
-        const loadTrackers = async () => {
-            try {
-                trackers.value = (await axios.get('/api/trackers')).data;
-                // 首次加载：IP数 ≤ 5 的域名自动展开
-                if (_firstTrackerLoad) {
-                    _firstTrackerLoad = false;
-                    for (const [domain, tr] of Object.entries(trackers.value)) {
-                        const activeCount = (tr.ips||[]).filter(ip=>!ip.removed).length;
-                        if (activeCount <= 5 && !expanded.value.includes(domain)) {
-                            expanded.value.push(domain);
-                        }
-                    }
-                }
-            } catch(e){}
-        };
+        const loadTrackers = async () => { try { trackers.value = (await axios.get('/api/trackers')).data; } catch(e){} };
         const loadStats = async () => { try { stats.value = (await axios.get('/api/stats')).data; } catch(e){} };
         const loadRanking = async () => { try { const min = filterEnabled.value ? filterThreshold.value : 0; ranking.value = (await axios.get(`/api/ranking/${rankPeriod.value}?min_uptime=${min}`)).data.ranking; } catch(e){} };
         const loadLogs = async () => { try { const lim=cfg.value.max_log_entries||2000; logs.value = (await axios.get(`/api/logs?limit=${lim}`)).data; } catch(e){} };
@@ -1106,21 +821,11 @@ createApp({
         };
 
         const retryDomain = async (domain) => {
-            try {
-                await axios.post('/api/tracker/check',{domain});
-                await loadTrackers();
-            } catch(e) {
-                if (e.response?.status === 429) showToast(e.response.data?.error || '操作过于频繁，请稍候', 'warn');
-            }
+            try { await axios.post('/api/tracker/check',{domain}); await loadTrackers(); } catch(e){}
         };
 
         const retryIp = async (domain,ip) => {
-            try {
-                await axios.post('/api/tracker/check',{domain,ip});
-                await loadTrackers();
-            } catch(e) {
-                if (e.response?.status === 429) showToast(e.response.data?.error || '操作过于频繁，请稍候', 'warn');
-            }
+            try { await axios.post('/api/tracker/check',{domain,ip}); await loadTrackers(); } catch(e){}
         };
 
         const clearLogs = async () => { try { await axios.post('/api/logs/clear'); logs.value=[]; } catch(e){} };
@@ -1242,207 +947,6 @@ createApp({
             catch(e) { return '🌐'; }
         };
 
-        // ── 仪表盘图表 refs ──
-        const chartTrend   = ref(null);
-        const chartPie     = ref(null);
-        const chartUptime  = ref(null);
-        const chartLatency = ref(null);
-        let _chartInstances = {};
-
-        // 仪表盘 computed：最差TOP10（颜色逻辑与 uptimeCls 一致 + 均延迟 + 全离线优先排前）
-        const dashWorstTrackers = computed(() => {
-            const entries = Object.entries(trackers.value);
-            return entries.map(([domain, tr]) => {
-                const h = tr.history_24h || [];
-                const u = h.length ? h.filter(x=>x===1).length/h.length*100 : null;
-                const activeIps = (tr.ips||[]).filter(ip=>!ip.removed);
-                const onlineIps = activeIps.filter(ip=>ip.status==='online');
-                const offlineIps = activeIps.filter(ip=>ip.status==='offline');
-                const offline_count = offlineIps.length;
-                const all_offline = activeIps.length > 0 && onlineIps.length === 0 && offlineIps.length > 0;
-                const mixed = onlineIps.length > 0 && offlineIps.length > 0;
-                // 均延迟：在线IP有效延迟均值
-                const lats = onlineIps.map(ip=>ip.latency).filter(l=>l>=0);
-                const avg_latency = lats.length ? Math.round(lats.reduce((a,b)=>a+b,0)/lats.length) : -1;
-                // 颜色逻辑与 uptimeCls 完全一致
-                let cls = 'up-unknown';
-                if (u !== null) {
-                    if (all_offline) cls = 'up-red';
-                    else if (mixed) cls = 'up-yellow';
-                    else if (u < 50) cls = 'up-red';
-                    else if (u <= 80) cls = 'up-yellow';
-                    else cls = 'up-green';
-                }
-                return { domain, uptime: u!==null ? Math.round(u*10)/10 : null,
-                         offline_count, all_offline, avg_latency, cls };
-            })
-            .filter(x => x.uptime !== null)
-            .sort((a,b) => {
-                // 全部离线排最前；其次可用率升序（最差靠前）
-                if (a.all_offline !== b.all_offline) return a.all_offline ? -1 : 1;
-                return (a.uptime??101) - (b.uptime??101);
-            })
-            .slice(0,10);
-        });
-
-        // 仪表盘 computed：最近10条error日志
-        const dashErrorLogs = computed(() =>
-            logs.value.filter(l=>l.level==='error').slice(-10).reverse()
-        );
-
-        const CHART_DEFAULTS = {
-            color: { grid:'rgba(100,116,139,.15)', text:'#94a3b8', ok:'#10b981', warn:'#f59e0b', err:'#ef4444', blue:'#3b82f6', purple:'#8b5cf6' }
-        };
-
-        const buildCharts = () => {
-            if (typeof Chart === 'undefined') return;
-            const C = CHART_DEFAULTS.color;
-            const chartOpts = { responsive:true, maintainAspectRatio:false, animation:{duration:0} };
-
-            // 1. 24h 趋势折线图：取每个tracker的history_24h，按时间轴对齐，计算每"列"的在线率
-            const buildTrend = () => {
-                const el = chartTrend.value; if (!el) return;
-                const allTr = Object.values(trackers.value);
-                // 取最长的数组长度，截取最近100个点
-                const maxLen = Math.min(100, Math.max(0, ...allTr.map(tr=>(tr.history_24h||[]).length)));
-                if (!maxLen) return;
-                const labels = Array.from({length:maxLen},(_,i)=>`-${maxLen-i}`);
-                // 对齐到最后maxLen个点，计算每个时间点所有tracker的平均在线率
-                const rates = Array.from({length:maxLen}, (_,i) => {
-                    let on=0,tot=0;
-                    for (const tr of allTr) {
-                        const h = tr.history_24h||[];
-                        if (!h.length) continue;
-                        const offset = h.length - maxLen;
-                        const idx = offset + i;
-                        if (idx >= 0 && idx < h.length) { on += h[idx]; tot++; }
-                    }
-                    return tot ? Math.round(on/tot*1000)/10 : null;
-                });
-                if (_chartInstances.trend) _chartInstances.trend.destroy();
-                _chartInstances.trend = new Chart(el, {
-                    type:'line',
-                    data:{
-                        labels,
-                        datasets:[
-                            {
-                                label:'在线率%', data:rates, borderColor:C.ok, backgroundColor:'rgba(16,185,129,.08)',
-                                fill:true, tension:.3, pointRadius:0, borderWidth:2, order:1
-                            },
-                            {
-                                label:'95%阈值', data:Array(labels.length).fill(95),
-                                borderColor:'rgba(239,68,68,.7)', borderDash:[6,4], borderWidth:1.5,
-                                pointRadius:0, fill:false, order:0
-                            }
-                        ]
-                    },
-                    options:{...chartOpts, scales:{
-                        x:{display:false, grid:{color:C.grid}},
-                        y:{min:0,max:100, ticks:{color:C.text,callback:v=>v+'%'}, grid:{color:C.grid}}
-                    }, plugins:{
-                        legend:{display:false},
-                        tooltip:{filter:i=>i.datasetIndex===0, callbacks:{label:c=>c.raw!==null?c.raw+'%':'N/A'}}
-                    }}
-                });
-            };
-
-            // 2. IPv4/IPv6 饼图：用 update('none') 代替 destroy/recreate，彻底消除刷新闪烁
-            const buildPie = () => {
-                const el = chartPie.value; if (!el) return;
-                const v4 = stats.value.ipv4||0, v6 = stats.value.ipv6||0;
-                if (_chartInstances.pie) {
-                    _chartInstances.pie.data.datasets[0].data = [v4, v6];
-                    _chartInstances.pie.update('none');
-                    return;
-                }
-                _chartInstances.pie = new Chart(el, {
-                    type:'doughnut',
-                    data:{
-                        labels:['IPv4','IPv6'],
-                        datasets:[{data:[v4,v6], backgroundColor:[C.blue,C.purple], borderWidth:0}]
-                    },
-                    options:{responsive:true, maintainAspectRatio:true, animation:{duration:0},
-                        plugins:{legend:{position:'bottom',labels:{color:C.text,boxWidth:12,padding:10}},
-                        tooltip:{callbacks:{label:c=>`${c.label}: ${c.raw}`}}}}
-                });
-            };
-
-            // 3. 可用率分布柱状图（域名维度）
-            const buildUptimeDist = () => {
-                const el = chartUptime.value; if (!el) return;
-                const bins = {'<60%':0,'60-80%':0,'80-95%':0,'95-99%':0,'100%':0,'无数据':0};
-                for (const tr of Object.values(trackers.value)) {
-                    const h = tr.history_24h||[];
-                    if (!h.length) { bins['无数据']++; continue; }
-                    const u = h.filter(x=>x===1).length/h.length*100;
-                    if (u===100) bins['100%']++;
-                    else if (u>=95) bins['95-99%']++;
-                    else if (u>=80) bins['80-95%']++;
-                    else if (u>=60) bins['60-80%']++;
-                    else bins['<60%']++;
-                }
-                const labels = Object.keys(bins);
-                const counts = Object.values(bins);
-                const total = counts.reduce((a,b)=>a+b,0);
-                const colors = [C.err, C.err, C.warn, C.ok, C.ok, 'rgba(100,116,139,.4)'];
-                if (_chartInstances.uptimeDist) _chartInstances.uptimeDist.destroy();
-                _chartInstances.uptimeDist = new Chart(el, {
-                    type:'bar',
-                    data:{labels, datasets:[{label:'域名数', data:counts, backgroundColor:colors, borderRadius:4}]},
-                    options:{...chartOpts, scales:{
-                        x:{ticks:{color:C.text}, grid:{display:false}},
-                        y:{ticks:{color:C.text,stepSize:1}, grid:{color:C.grid}}
-                    }, plugins:{legend:{display:false}, tooltip:{callbacks:{
-                        label: c => `${c.raw} 个 (${total?Math.round(c.raw/total*100):'0'}%)`
-                    }}}}
-                });
-            };
-
-            // 4. 延迟分布柱状图（在线IP维度）
-            const buildLatencyDist = () => {
-                const el = chartLatency.value; if (!el) return;
-                const bins = {'≤100ms':0,'101-300':0,'301-500':0,'501-1000':0,'1000-1500':0,'>1500ms':0};
-                for (const tr of Object.values(trackers.value)) {
-                    for (const ip of (tr.ips||[])) {
-                        if (ip.status !== 'online' || ip.removed) continue;
-                        const l = ip.latency;
-                        if (l<=100) bins['≤100ms']++;
-                        else if (l<=300) bins['101-300']++;
-                        else if (l<=500) bins['301-500']++;
-                        else if (l<=1000) bins['501-1000']++;
-                        else if (l<=1500) bins['1000-1500']++;
-                        else bins['>1500ms']++;
-                    }
-                }
-                const colors = [C.ok, C.ok, C.warn, C.warn, C.err, C.err];
-                if (_chartInstances.latDist) _chartInstances.latDist.destroy();
-                _chartInstances.latDist = new Chart(el, {
-                    type:'bar',
-                    data:{labels:Object.keys(bins), datasets:[{label:'IP数', data:Object.values(bins), backgroundColor:colors, borderRadius:4}]},
-                    options:{...chartOpts, scales:{
-                        x:{ticks:{color:C.text,font:{size:11}}, grid:{display:false}},
-                        y:{ticks:{color:C.text,stepSize:1}, grid:{color:C.grid}}
-                    }, plugins:{legend:{display:false}, tooltip:{callbacks:{
-                        label: (c) => {
-                            const total = c.dataset.data.reduce((a,b)=>a+b,0);
-                            const pct = total ? (c.raw/total*100).toFixed(1) : 0;
-                            return ` ${c.raw} 个  (${pct}%)`;
-                        }
-                    }}}}
-                });
-            };
-
-            buildTrend(); buildPie(); buildUptimeDist(); buildLatencyDist();
-        };
-
-        // 切换到仪表盘时或数据更新时重绘图表
-        watch([currentTab, trackers, stats], async ([tab]) => {
-            if (tab === 'dashboard') {
-                await nextTick();
-                buildCharts();
-            }
-        }, {deep:false});
-
         const resetRefresh = () => {
             if (timer) { clearInterval(timer); timer=null; }
             if (refreshMs.value>0) timer = setInterval(async()=>{ await loadTrackers(); await loadStats(); if(currentTab.value==='ranking') await loadRanking(); if(currentTab.value==='logs') await loadLogs(); }, refreshMs.value);
@@ -1456,18 +960,14 @@ createApp({
             readHash();
             window.addEventListener('popstate', readHash);
             loading.value=true;
-            await Promise.all([loadWhoami(), loadTrackers(), loadStats(), loadLogs(), loadCfg()]);
+            await Promise.all([loadTrackers(),loadStats(),loadLogs(),loadCfg()]);
             loading.value=false;
             resetRefresh();
-            // 如果是admin，同时加载用户列表
-            if (authUser.value.role === 'admin') loadUsers();
-            if (currentTab.value==='dashboard') { await nextTick(); buildCharts(); }
         });
 
         watch(currentTab, async (tab) => {
             if (tab==='ranking') await loadRanking();
             if (tab==='logs') await loadLogs();
-            if (tab==='config' && authUser.value.role==='admin') loadUsers();
         });
 
         return {
@@ -1476,14 +976,10 @@ createApp({
             showAdd, addUrl, adding, addMsg, ranking, rankPeriod, filterEnabled, filterThreshold,
             logs, logLvl, cfg, refreshMs,
             filteredTrackers, filteredLogs,
-            protoFilter,
-            authUser, showLogin, loginForm, loginError, loginLoading, doLogin, doLogout, visibleTabs,
-            userRows, userSaving, userSaveMsg, addUserRow, removeUserRow, saveUsers,
             tabIcon, go, loadRanking, toggleExpand, openAdd, closeAdd, doAdd,
             delTracker, retryDomain, retryIp, clearLogs, saveCfg, changeLocale,
             uptime, uptimeCls, stCls, stIcon, stTxt, latCls, latW,
             fmtTime, fmtFullTime, fmtLogTime, flag, resetRefresh, clearHistory, clearHistoryMsg, toast, showToast,
-            dashWorstTrackers, dashErrorLogs, chartTrend, chartPie, chartUptime, chartLatency,
             t: (key) => i18n.global.t(key)
         };
     }

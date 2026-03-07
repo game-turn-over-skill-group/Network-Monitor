@@ -1,0 +1,35 @@
+{
+  "check_interval": 30,
+  "timeout": 5,
+  "retry_mode": "polling",
+  "retry_interval": 5,
+  "log_to_disk": true,
+  "log_level": "error",
+  "http_proxy": "",
+  "udp_proxy": "socks5://localhost:22",
+  "proxy_enabled": true,
+  "dns_mode": "system",
+  "dns_custom": "8.8.8.8",
+  "max_log_entries": 2000,
+  "page_refresh_ms": 30000,
+  "tracker_stat_period": "24h",
+  "rank_stat_period": "24h",
+  "cache_history": true,
+  "users": [
+    {
+      "username": "rer",
+      "role": "admin",
+      "password": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"
+    },
+    {
+      "username": "sakura",
+      "role": "operator",
+      "password": "d41dc6385e804fd6c6fe049ecd56a3c1bafa61e669d4f3b49082ff56f8ade10d"
+    },
+    {
+      "username": "zhuqiy",
+      "role": "operator",
+      "password": "cb41db3b6a032bcea4e2349d68e50228e4dee7701a70d71badfbde68d33d768c"
+    }
+  ]
+}

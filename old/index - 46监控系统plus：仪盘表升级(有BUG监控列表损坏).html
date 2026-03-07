@@ -84,6 +84,21 @@
         .nav-tabs .nav-link.active { background:var(--card); color:var(--text); border-color:var(--accent); border-bottom-color:var(--card); }
         .retry-sm { padding:1px 5px; font-size:.72rem; }
         .polling-badge { display:inline-block; background:rgba(245,158,11,.15); color:var(--warn); border:1px solid rgba(245,158,11,.3); border-radius:4px; padding:1px 6px; font-family:monospace; font-size:.76rem; margin-top:2px; }
+        .alert-card { border-left:3px solid var(--err); background:rgba(239,68,68,.06); border-radius:6px; padding:10px 14px; margin-bottom:8px; }
+        .alert-card.warn { border-left-color:var(--warn); background:rgba(245,158,11,.06); }
+        .alert-card-title { font-size:.88rem; font-weight:600; margin-bottom:2px; }
+        .alert-card-sub { font-size:.77rem; color:#94a3b8; }
+        .alert-status-online { color:var(--ok); font-size:.75rem; font-weight:600; }
+        .alert-status-offline { color:var(--err); font-size:.75rem; font-weight:600; }
+        .tab-pill { display:inline-flex; border-radius:6px; overflow:hidden; border:1px solid #334155; }
+        .tab-pill button { background:transparent; border:none; color:#94a3b8; padding:3px 12px; font-size:.78rem; cursor:pointer; transition:all .15s; }
+        .tab-pill button.active { background:rgba(15,52,96,.9); color:var(--text); }
+        .tab-pill button:hover:not(.active) { background:rgba(255,255,255,.05); }
+        .qs-table td { font-size:.8rem; padding:5px 8px !important; vertical-align:middle; }
+        .qs-table th { font-size:.75rem; padding:4px 8px !important; color:#64748b; font-weight:normal; }
+        .qs-search-input { background:#0d2446; border:1px solid var(--accent); color:var(--text); border-radius:6px; padding:6px 32px 6px 10px; font-size:.85rem; width:100%; }
+        .qs-search-input:focus { outline:none; border-color:#2a5a8a; }
+
     </style>
 </head>
 <body>
@@ -178,80 +193,48 @@
                 </div>
             </div>
 
-            <!-- 第一行：24h趋势折线 + IPv4/IPv6饼图 -->
-            <div class="row mb-3">
-                <div class="col-md-8 mb-3">
-                    <div class="card h-100">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-graph-up me-1"></i>24小时在线率趋势</span>
-                            <span style="font-size:.75rem;color:#64748b;">每点=1轮检测均值，最近100轮</span>
-                        </div>
-                        <div class="card-body p-2" style="height:200px;">
-                            <canvas ref="chartTrend" style="width:100%;height:100%;"></canvas>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4 mb-3">
-                    <div class="card h-100">
-                        <div class="card-header"><span><i class="bi bi-pie-chart me-1"></i>IPv4 / IPv6 占比</span></div>
-                        <div class="card-body d-flex align-items-center justify-content-center p-2" style="height:200px;">
-                            <canvas ref="chartPie" style="max-width:180px;max-height:180px;"></canvas>
-                        </div>
-                    </div>
-                </div>
             </div>
 
-            <!-- 第二行：可用率分布 + 延迟分布 -->
-            <div class="row mb-3">
-                <div class="col-md-6 mb-3">
-                    <div class="card h-100">
-                        <div class="card-header"><span><i class="bi bi-bar-chart me-1"></i>可用率分布（域名数）</span></div>
-                        <div class="card-body p-2" style="height:180px;">
-                            <canvas ref="chartUptime" style="width:100%;height:100%;"></canvas>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-6 mb-3">
-                    <div class="card h-100">
-                        <div class="card-header"><span><i class="bi bi-speedometer2 me-1"></i>延迟分布（在线IP数）</span></div>
-                        <div class="card-body p-2" style="height:180px;">
-                            <canvas ref="chartLatency" style="width:100%;height:100%;"></canvas>
-                        </div>
-                    </div>
-                </div>
-            </div>
 
-            <!-- 第三行：离线TOP5 + 最近错误日志 -->
-            <div class="row">
-                <div class="col-md-6 mb-3">
+            <!-- 三栏：可用率排行 | 告警中心 | 最近错误日志 -->
+            <div class="row mb-3">
+                <!-- 可用率排行 TOP10（最差/最好切换） -->
+                <div class="col-xl-4 col-lg-5 mb-3">
                     <div class="card h-100">
                         <div class="card-header d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-exclamation-triangle me-1" style="color:var(--err);"></i>可用率最差 TOP10</span>
-                            <button class="btn btn-sm btn-outline-secondary" @click="go('ranking')">排行榜</button>
+                            <span><i class="bi bi-trophy me-1" style="color:var(--warn);"></i>可用率排行 TOP10</span>
+                            <div class="d-flex align-items-center gap-2">
+                                <div class="tab-pill">
+                                    <button :class="{active:dashRankMode==='worst'}" @click="dashRankMode='worst'">最差</button>
+                                    <button :class="{active:dashRankMode==='best'}" @click="dashRankMode='best'">最佳</button>
+                                </div>
+                                <button class="btn btn-sm btn-outline-secondary" @click="go('ranking')" style="padding:2px 8px;font-size:.75rem;">排行榜</button>
+                            </div>
                         </div>
-                        <div class="card-body p-2">
-                            <div v-if="!dashWorstTrackers.length" class="empty-st" style="padding:20px 0;"><p>暂无数据</p></div>
-                            <table v-else class="table table-sm mb-0" style="font-size:.82rem;">
+                        <div class="card-body p-2" style="overflow-y:auto;max-height:380px;">
+                            <div v-if="!dashRankList.length" class="empty-st" style="padding:20px 0;"><p>暂无数据</p></div>
+                            <table v-else class="table table-sm mb-0 qs-table">
                                 <thead><tr>
-                                    <th style="font-weight:normal;color:#64748b;font-size:.75rem;">域名</th>
-                                    <th style="font-weight:normal;color:#64748b;font-size:.75rem;text-align:right;">可用率</th>
-                                    <th style="font-weight:normal;color:#64748b;font-size:.75rem;text-align:right;">均延迟</th>
-                                    <th style="font-weight:normal;color:#64748b;font-size:.75rem;text-align:right;">状态</th>
+                                    <th style="width:24px;">#</th>
+                                    <th>域名</th>
+                                    <th style="text-align:right;">可用率</th>
+                                    <th style="text-align:right;">故障IP</th>
+                                    <th style="text-align:right;">均延迟</th>
                                 </tr></thead>
                                 <tbody>
-                                    <tr v-for="item in dashWorstTrackers" :key="item.domain" @click="go('trackers')" style="cursor:pointer;">
-                                        <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="item.domain">{{ item.domain }}</td>
-                                        <td style="width:65px;text-align:right;">
+                                    <tr v-for="(item,idx) in dashRankList" :key="item.domain" @click="go('trackers')" style="cursor:pointer;">
+                                        <td style="color:#64748b;font-size:.75rem;">{{ idx+1 }}</td>
+                                        <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="item.domain">{{ item.domain }}</td>
+                                        <td style="text-align:right;">
                                             <span :class="item.cls" style="padding:1px 5px;border-radius:4px;font-size:.78rem;">
                                                 {{ item.uptime===null ? '?' : item.uptime.toFixed(1)+'%' }}
                                             </span>
                                         </td>
-                                        <td style="width:60px;text-align:right;color:#94a3b8;font-size:.78rem;">
-                                            {{ item.avg_latency > 0 ? item.avg_latency+'ms' : '-' }}
+                                        <td style="text-align:right;font-size:.78rem;">
+                                            <span :style="{color: item.fail_count>0 ? 'var(--err)' : '#64748b'}">{{ item.fail_count }}</span>
                                         </td>
-                                        <td style="width:70px;text-align:right;font-size:.78rem;">
-                                            <span v-if="item.offline_count>0" style="color:var(--err);">{{ item.offline_count }} 离线</span>
-                                            <span v-else style="color:var(--ok);">全部在线</span>
+                                        <td style="text-align:right;color:#94a3b8;font-size:.78rem;">
+                                            {{ item.avg_latency > 0 ? item.avg_latency+'ms' : '-' }}
                                         </td>
                                     </tr>
                                 </tbody>
@@ -259,22 +242,147 @@
                         </div>
                     </div>
                 </div>
-                <div class="col-md-6 mb-3">
+
+                <!-- 告警中心 -->
+                <div class="col-xl-4 col-lg-4 mb-3">
                     <div class="card h-100">
                         <div class="card-header d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-journal-x me-1" style="color:var(--err);"></i>最近错误日志</span>
-                            <button class="btn btn-sm btn-outline-secondary" @click="go('logs')">查看全部</button>
+                            <span>
+                                <i class="bi bi-bell me-1" style="color:var(--err);"></i>告警中心
+                                <span v-if="dashAlerts.length" class="badge ms-1" style="background:var(--err);font-size:.68rem;padding:1px 5px;border-radius:10px;">{{ dashAlerts.length }}</span>
+                            </span>
+                            <span style="font-size:.72rem;color:#64748b;">连续失败 ≥5次触发</span>
                         </div>
-                        <div class="card-body p-2" style="max-height:200px;overflow-y:auto;">
-                            <div v-if="!dashErrorLogs.length" class="empty-st" style="padding:20px 0;"><p>暂无错误</p></div>
+                        <div class="card-body p-2" style="overflow-y:auto;max-height:380px;">
+                            <div v-if="!dashAlerts.length" class="empty-st" style="padding:30px 0;">
+                                <i class="bi bi-shield-check" style="font-size:2rem;color:var(--ok);"></i>
+                                <p class="mt-2" style="font-size:.85rem;">全部正常，暂无告警</p>
+                            </div>
                             <div v-else>
-                                <div class="log-row" v-for="(l,i) in dashErrorLogs" :key="i">
-                                    <span class="log-time">{{ fmtLogTime(l.time) }}</span>
-                                    <span class="me-1 log-error">[ERROR]</span>
-                                    {{ l.message }}
+                                <div v-for="a in dashAlerts" :key="a.domain+a.ip"
+                                     class="alert-card" :class="{warn: a.consec_fail < 10}">
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div class="alert-card-title">
+                                            <i class="bi bi-exclamation-circle me-1" style="color:var(--err);font-size:.85rem;"></i>{{ a.domain }}
+                                        </div>
+                                        <span :class="a.status==='online'?'alert-status-online':'alert-status-offline'">
+                                            <i class="bi" :class="a.status==='online'?'bi-check-circle-fill':'bi-x-circle-fill'"></i>
+                                            {{ a.status==='online'?'当前在线':'当前离线' }}
+                                        </span>
+                                    </div>
+                                    <div class="alert-card-sub mt-1">
+                                        <span class="font-monospace" style="font-size:.76rem;color:#94a3b8;">{{ a.ip }}</span>
+                                        <span class="mx-1" style="color:#334155;">·</span>
+                                        <span style="color:var(--err);font-weight:600;">连续失败 {{ a.consec_fail }} 次</span>
+                                        <span class="mx-1" style="color:#334155;">·</span>
+                                        <span>{{ a.avg_latency > 0 ? a.avg_latency+'ms' : '超时' }}</span>
+                                    </div>
+                                    <div class="alert-card-sub mt-1" style="color:#475569;">
+                                        <i class="bi bi-geo-alt me-1"></i>{{ a.country || '未知归属' }}
+                                        <span v-if="a.isp" class="ms-1">· {{ a.isp }}</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
+                    </div>
+                </div>
+
+                <!-- 最近错误日志 -->
+                <div class="col-xl-4 col-lg-3 mb-3">
+                    <div class="card h-100">
+                        <div class="card-header d-flex justify-content-between align-items-center">
+                            <span><i class="bi bi-journal-x me-1" style="color:var(--err);"></i>最近错误日志</span>
+                            <div class="d-flex gap-1">
+                                <button class="btn btn-sm btn-outline-secondary" @click="exportErrorLog" style="padding:2px 8px;font-size:.75rem;" title="导出 error.log">
+                                    <i class="bi bi-download"></i> 导出
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" @click="go('logs')" style="padding:2px 8px;font-size:.75rem;">查看全部</button>
+                            </div>
+                        </div>
+                        <div class="card-body p-2" style="overflow-y:auto;max-height:380px;">
+                            <div v-if="!dashErrorGroups.length" class="empty-st" style="padding:20px 0;"><p>暂无错误</p></div>
+                            <div v-else>
+                                <div v-for="(g,i) in dashErrorGroups" :key="i" style="padding:5px 0;border-bottom:1px solid rgba(15,52,96,.4);">
+                                    <div style="display:flex;align-items:flex-start;gap:6px;flex-wrap:wrap;">
+                                        <span class="log-error" style="font-size:.74rem;font-weight:700;white-space:nowrap;">[ERROR]</span>
+                                        <span style="font-size:.78rem;word-break:break-all;flex:1;">{{ g.message }}</span>
+                                        <span v-if="g.count>1" style="font-size:.7rem;background:rgba(239,68,68,.18);color:var(--err);padding:0 5px;border-radius:10px;white-space:nowrap;">×{{ g.count }}</span>
+                                    </div>
+                                    <div style="font-size:.72rem;color:#64748b;margin-top:2px;display:flex;gap:8px;flex-wrap:wrap;">
+                                        <span><i class="bi bi-clock me-1"></i>{{ fmtLogTime(g.last_time) }}</span>
+                                        <span v-if="g.first_time !== g.last_time"><i class="bi bi-flag me-1"></i>首次 {{ fmtLogTime(g.first_time) }}</span>
+                                        <span v-if="g.geo"><i class="bi bi-geo me-1"></i>{{ g.geo }}</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 快速搜索 -->
+            <div class="card mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-search me-1"></i>快速搜索</span>
+                    <span style="font-size:.75rem;color:#64748b;">域名 / IP / 运营商 / 国家 / 状态</span>
+                </div>
+                <div class="card-body p-3">
+                    <div class="position-relative mb-3">
+                        <input class="qs-search-input" v-model="qsSearch" placeholder="输入域名、IP、国家、运营商、online/offline…">
+                        <span v-if="qsSearch" @click="qsSearch=''" style="position:absolute;right:10px;top:50%;transform:translateY(-50%);cursor:pointer;color:#64748b;">✕</span>
+                    </div>
+                    <div v-if="!qsSearch" class="empty-st" style="padding:16px 0;color:#475569;font-size:.85rem;">
+                        <i class="bi bi-search" style="font-size:1.5rem;"></i>
+                        <p class="mt-1">输入关键词搜索，支持域名、IP、运营商、国家、在线状态</p>
+                    </div>
+                    <div v-else-if="!qsResults.length" class="empty-st" style="padding:16px 0;"><p>无匹配结果</p></div>
+                    <div v-else class="table-responsive">
+                        <table class="table table-sm mb-0 qs-table">
+                            <thead><tr>
+                                <th>域名</th>
+                                <th>IP 地址</th>
+                                <th>端口/协议</th>
+                                <th>国家/运营商</th>
+                                <th>可用率</th>
+                                <th>当前延迟</th>
+                                <th>状态</th>
+                                <th style="width:90px;"></th>
+                            </tr></thead>
+                            <tbody>
+                                <tr v-for="row in qsResults" :key="row.domain+row.ip">
+                                    <td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="row.domain">{{ row.domain }}</td>
+                                    <td class="font-monospace" :style="{color: row.version==='ipv6'?'#38bdf8':'var(--ok)'}">{{ row.ip }}</td>
+                                    <td>
+                                        <span class="port-tag me-1">:{{ row.port }}</span>
+                                        <span class="proto-tag" :class="'proto-'+row.protocol">{{ row.protocol.toUpperCase() }}</span>
+                                    </td>
+                                    <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                                        <span v-if="row.country_code && row.country_code!=='XX'">{{ flag(row.country_code) }} {{ row.country }}</span>
+                                        <span v-else class="text-secondary">-</span>
+                                        <span v-if="row.isp" class="text-secondary" style="font-size:.74rem;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="row.isp">{{ row.isp }}</span>
+                                    </td>
+                                    <td>
+                                        <span :class="row.upcls" style="padding:1px 5px;border-radius:4px;font-size:.78rem;">
+                                            {{ row.uptime===null ? '?' : row.uptime.toFixed(1)+'%' }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span v-if="row.latency>=0" :class="{'text-warning':row.latency>500,'err':row.latency>1500}">{{ row.latency }}ms</span>
+                                        <span v-else class="text-secondary">-</span>
+                                    </td>
+                                    <td>
+                                        <span :class="stCls(row.status)">
+                                            <i class="bi" :class="stIcon(row.status)"></i> {{ stTxt(row.status) }}
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <button class="btn btn-outline-primary retry-sm me-1" @click="retryIp(row.domain,row.ip)" title="重试"><i class="bi bi-arrow-repeat"></i></button>
+                                        <button v-if="authUser.role==='admin'||authUser.role==='operator'" class="btn btn-outline-danger retry-sm" @click="delTracker(row.domain)" title="删除域名"><i class="bi bi-trash"></i></button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div style="font-size:.75rem;color:#64748b;padding:6px 0 0;">共 {{ qsResults.length }} 条结果</div>
                     </div>
                 </div>
             </div>
@@ -486,7 +594,7 @@
                             <option value="error">Error</option>
                             <option value="success">Success</option>
                         </select>
-                        <button class="btn btn-sm btn-outline-danger" @click="clearLogs"><i class="bi bi-trash"></i> {{ t('logs.clear') }}</button>
+                        <button v-if="authUser.role==='admin'" class="btn btn-sm btn-outline-danger" @click="clearLogs"><i class="bi bi-trash"></i> {{ t('logs.clear') }}</button>
                     </div>
                 </div>
                 <div class="card-body p-2" style="max-height:620px;overflow-y:auto;">
@@ -846,6 +954,10 @@ createApp({
         const logLvl = ref('');
         const logSearch = ref('');
         const cfg = ref({log_to_disk:false,check_interval:30,timeout:5,retry_mode:'polling',retry_interval:5,console_log_level:'info',http_proxy:'',udp_proxy:'',proxy_enabled:false,dns_mode:'system',dns_custom:'8.8.8.8',max_log_entries:2000,page_refresh_ms:30000,tracker_stat_period:'24h',rank_stat_period:'24h',cache_history:true});
+        // 仪表盘 rank 切换 / 快速搜索
+        const dashRankMode = ref('worst'); // 'worst' | 'best'
+        const qsSearch = ref('');
+
         // refreshMs 由 cfg.page_refresh_ms 驱动，保存到后端
         const refreshMs = computed({
             get: () => cfg.value.page_refresh_ms ?? 30000,
@@ -1123,7 +1235,31 @@ createApp({
             }
         };
 
-        const clearLogs = async () => { try { await axios.post('/api/logs/clear'); logs.value=[]; } catch(e){} };
+        const clearLogs = async () => {
+            // 只有 admin 才能真正清空（内存+磁盘），其他角色无此按钮
+            try { await axios.post('/api/logs/clear'); logs.value=[]; } catch(e){}
+        };
+
+        // 导出 error.log：从后端下载
+        const exportErrorLog = async () => {
+            try {
+                const r = await axios.get('/api/logs/export', {responseType:'blob'});
+                const url = URL.createObjectURL(r.data);
+                const a = document.createElement('a');
+                a.href = url; a.download = 'error.log';
+                document.body.appendChild(a); a.click();
+                document.body.removeChild(a); URL.revokeObjectURL(url);
+            } catch(e) {
+                // 如果没有 error.log 或接口未实现，从内存导出 error 级别日志
+                const errLines = logs.value.filter(l=>l.level==='error')
+                    .map(l=>`[${l.time}][ERROR] ${l.message}`).join('\n');
+                const blob = new Blob([errLines], {type:'text/plain'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href=url; a.download='error.log';
+                document.body.appendChild(a); a.click();
+                document.body.removeChild(a); URL.revokeObjectURL(url);
+            }
+        };
 
         const saveCfg = async () => {
             try {
@@ -1249,46 +1385,162 @@ createApp({
         const chartLatency = ref(null);
         let _chartInstances = {};
 
-        // 仪表盘 computed：最差TOP10（颜色逻辑与 uptimeCls 一致 + 均延迟 + 全离线优先排前）
-        const dashWorstTrackers = computed(() => {
-            const entries = Object.entries(trackers.value);
-            return entries.map(([domain, tr]) => {
-                const h = tr.history_24h || [];
-                const u = h.length ? h.filter(x=>x===1).length/h.length*100 : null;
-                const activeIps = (tr.ips||[]).filter(ip=>!ip.removed);
-                const onlineIps = activeIps.filter(ip=>ip.status==='online');
-                const offlineIps = activeIps.filter(ip=>ip.status==='offline');
-                const offline_count = offlineIps.length;
-                const all_offline = activeIps.length > 0 && onlineIps.length === 0 && offlineIps.length > 0;
-                const mixed = onlineIps.length > 0 && offlineIps.length > 0;
-                // 均延迟：在线IP有效延迟均值
-                const lats = onlineIps.map(ip=>ip.latency).filter(l=>l>=0);
-                const avg_latency = lats.length ? Math.round(lats.reduce((a,b)=>a+b,0)/lats.length) : -1;
-                // 颜色逻辑与 uptimeCls 完全一致
-                let cls = 'up-unknown';
-                if (u !== null) {
-                    if (all_offline) cls = 'up-red';
-                    else if (mixed) cls = 'up-yellow';
-                    else if (u < 50) cls = 'up-red';
-                    else if (u <= 80) cls = 'up-yellow';
-                    else cls = 'up-green';
-                }
-                return { domain, uptime: u!==null ? Math.round(u*10)/10 : null,
-                         offline_count, all_offline, avg_latency, cls };
-            })
-            .filter(x => x.uptime !== null)
-            .sort((a,b) => {
-                // 全部离线排最前；其次可用率升序（最差靠前）
-                if (a.all_offline !== b.all_offline) return a.all_offline ? -1 : 1;
-                return (a.uptime??101) - (b.uptime??101);
-            })
-            .slice(0,10);
+        // ── 仪表盘 computed ──────────────────────────────────────────────────────
+
+        // 通用域名指标计算（复用多处）
+        const _domainMetric = (domain, tr) => {
+            const h = tr.history_24h || [];
+            const u = h.length ? h.filter(x=>x===1).length/h.length*100 : null;
+            const activeIps = (tr.ips||[]).filter(ip=>!ip.removed);
+            const onlineIps = activeIps.filter(ip=>ip.status==='online');
+            const offlineIps = activeIps.filter(ip=>ip.status==='offline');
+            const offline_count = offlineIps.length;
+            const all_offline = activeIps.length > 0 && onlineIps.length === 0 && offlineIps.length > 0;
+            const mixed = onlineIps.length > 0 && offlineIps.length > 0;
+            const lats = onlineIps.map(ip=>ip.latency).filter(l=>l>=0);
+            const avg_latency = lats.length ? Math.round(lats.reduce((a,b)=>a+b,0)/lats.length) : -1;
+            // 历史中 0 的尾部连续段长度 = 近期连续失败检测轮数（域名维度）
+            const fail_count = offline_count; // 当前离线IP数作为故障次数展示
+            let cls = 'up-unknown';
+            if (u !== null) {
+                if (all_offline) cls = 'up-red';
+                else if (mixed) cls = 'up-yellow';
+                else if (u < 50) cls = 'up-red';
+                else if (u <= 80) cls = 'up-yellow';
+                else cls = 'up-green';
+            }
+            return { domain, uptime: u!==null ? Math.round(u*10)/10 : null,
+                     offline_count, all_offline, avg_latency, fail_count, cls };
+        };
+
+        // 可用率排行（最差/最好切换）
+        const dashRankList = computed(() => {
+            const list = Object.entries(trackers.value)
+                .map(([d,tr]) => _domainMetric(d,tr))
+                .filter(x => x.uptime !== null);
+            if (dashRankMode.value === 'worst') {
+                return list.sort((a,b) => {
+                    if (a.all_offline !== b.all_offline) return a.all_offline ? -1 : 1;
+                    return (a.uptime??101) - (b.uptime??101);
+                }).slice(0,10);
+            } else {
+                return list.sort((a,b) => (b.uptime??-1) - (a.uptime??-1)).slice(0,10);
+            }
         });
 
-        // 仪表盘 computed：最近10条error日志
+        // 告警中心：IP维度，history_24h 尾部连续失败 ≥5 次触发
+        const dashAlerts = computed(() => {
+            const alerts = [];
+            for (const [domain, tr] of Object.entries(trackers.value)) {
+                for (const ip of (tr.ips||[])) {
+                    if (ip.removed) continue;
+                    const h = tr.history_24h || [];
+                    // 计算 history 尾部连续 0 的数量（=连续失败轮数）
+                    let consec = 0;
+                    for (let i = h.length-1; i >= 0; i--) {
+                        if (h[i] === 0) consec++; else break;
+                    }
+                    if (consec >= 5) {
+                        alerts.push({
+                            domain,
+                            ip: ip.ip,
+                            status: ip.status,
+                            consec_fail: consec,
+                            avg_latency: ip.latency >= 0 ? ip.latency : -1,
+                            country: ip.country?.country || '',
+                            country_code: ip.country?.country_code || '',
+                            isp: ip.country?.isp || '',
+                        });
+                    }
+                }
+            }
+            // 离线优先，再按连续失败次数降序
+            alerts.sort((a,b) => {
+                if (a.status !== b.status) return a.status==='offline' ? -1 : 1;
+                return b.consec_fail - a.consec_fail;
+            });
+            return alerts;
+        });
+
+        // 错误日志分组：相同 message 前缀聚合，提取 IP 归属地
+        const dashErrorGroups = computed(() => {
+            const errLogs = logs.value.filter(l=>l.level==='error').slice(-200);
+            // 按消息内容聚合（截取前80字符作key）
+            const groups = {};
+            for (const l of errLogs) {
+                const key = l.message.substring(0, 80);
+                if (!groups[key]) {
+                    // 尝试从 message 中提取 IP 地址
+                    const ipMatch = l.message.match(/(\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f:]{6,39})/i);
+                    let geo = '';
+                    if (ipMatch) {
+                        const ipStr = ipMatch[1];
+                        // 从 trackers 中查找该 IP 的归属地
+                        for (const tr of Object.values(trackers.value)) {
+                            const found = (tr.ips||[]).find(i => i.ip === ipStr);
+                            if (found?.country?.country) {
+                                const c = found.country;
+                                geo = [c.country, c.isp].filter(Boolean).join(' · ');
+                                break;
+                            }
+                        }
+                    }
+                    groups[key] = { message: l.message, count: 0, first_time: l.time, last_time: l.time, geo };
+                }
+                groups[key].count++;
+                if (l.time > groups[key].last_time) groups[key].last_time = l.time;
+                if (l.time < groups[key].first_time) groups[key].first_time = l.time;
+            }
+            return Object.values(groups)
+                .sort((a,b) => b.last_time.localeCompare(a.last_time))
+                .slice(0, 20);
+        });
+
+        // 仪表盘 computed：最近error日志（保留兼容，dashErrorGroups 是新版聚合）
         const dashErrorLogs = computed(() =>
             logs.value.filter(l=>l.level==='error').slice(-10).reverse()
         );
+
+        // 快速搜索结果（IP维度展平）
+        const qsResults = computed(() => {
+            const q = qsSearch.value.toLowerCase().trim();
+            if (!q) return [];
+            const results = [];
+            for (const [domain, tr] of Object.entries(trackers.value)) {
+                const h = tr.history_24h || [];
+                const u = h.length ? h.filter(x=>x===1).length/h.length*100 : null;
+                let upcls = 'up-unknown';
+                if (u !== null) {
+                    const activeIps = (tr.ips||[]).filter(ip=>!ip.removed);
+                    const hasOnline = activeIps.some(ip=>ip.status==='online');
+                    const hasOff = activeIps.some(ip=>ip.status==='offline');
+                    if (!hasOnline && hasOff) upcls = 'up-red';
+                    else if (hasOnline && hasOff) upcls = 'up-yellow';
+                    else if (u < 50) upcls = 'up-red';
+                    else if (u <= 80) upcls = 'up-yellow';
+                    else upcls = 'up-green';
+                }
+                for (const ip of (tr.ips||[])) {
+                    if (ip.removed) continue;
+                    const co = ip.country || {};
+                    const searchable = [
+                        domain, ip.ip, tr.protocol||'tcp',
+                        co.country||'', co.country_code||'', co.isp||'',
+                        ip.status||''
+                    ].join(' ').toLowerCase();
+                    if (!searchable.includes(q)) continue;
+                    results.push({
+                        domain, ip: ip.ip, version: ip.version||'ipv4',
+                        port: tr.port||80, protocol: tr.protocol||'tcp',
+                        country: co.country||'', country_code: co.country_code||'',
+                        isp: co.isp||'', latency: ip.latency,
+                        status: ip.status||'unknown',
+                        uptime: u!==null ? Math.round(u*10)/10 : null, upcls
+                    });
+                }
+            }
+            return results.slice(0, 100);
+        });
 
         const CHART_DEFAULTS = {
             color: { grid:'rgba(100,116,139,.15)', text:'#94a3b8', ok:'#10b981', warn:'#f59e0b', err:'#ef4444', blue:'#3b82f6', purple:'#8b5cf6' }
@@ -1483,7 +1735,10 @@ createApp({
             delTracker, retryDomain, retryIp, clearLogs, saveCfg, changeLocale,
             uptime, uptimeCls, stCls, stIcon, stTxt, latCls, latW,
             fmtTime, fmtFullTime, fmtLogTime, flag, resetRefresh, clearHistory, clearHistoryMsg, toast, showToast,
-            dashWorstTrackers, dashErrorLogs, chartTrend, chartPie, chartUptime, chartLatency,
+            dashRankMode, dashRankList, dashAlerts, dashErrorGroups, dashErrorLogs,
+            qsSearch, qsResults,
+            exportErrorLog,
+            chartTrend, chartPie, chartUptime, chartLatency,
             t: (key) => i18n.global.t(key)
         };
     }

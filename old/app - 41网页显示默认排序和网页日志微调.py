@@ -14,17 +14,15 @@ import logging
 import threading
 import random
 import re
-import hashlib
-import secrets
 from datetime import datetime
-from flask import Flask, jsonify, request, make_response, session
+from flask import Flask, jsonify, request, make_response
 from flask_cors import CORS
 import dns.resolver
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests as req_lib
 
 # ==================== 配置持久化 ====================
-CONFIG_FILE  = 'config.json'
+CONFIG_FILE  = 'network_monitor_config.json'
 DEFAULT_CONFIG = {
     'port': 443,
     'check_interval': 30,
@@ -33,8 +31,8 @@ DEFAULT_CONFIG = {
     'retry_interval': 5,       # 当 retry_mode != 'polling' 时使用
     'log_to_disk': False,
     'log_level': 'info',  # none | info | error | debug（原 console_log_level）
-    'log_file': 'error.log',
-    'data_file': 'data.json',
+    'log_file': 'network_monitor.log',
+    'data_file': 'network_monitor_data.json',
     'max_history': 2880,  # history_24h 上限：24h × 3600s ÷ 30s间隔 = 2880点
     'http_proxy': '',
     'udp_proxy': '',
@@ -46,11 +44,6 @@ DEFAULT_CONFIG = {
     'cache_history': True,      # 是否缓存历史可用率到JSON（重启不丢失）
     'tracker_stat_period': '24h', # 监控列表可用率统计周期：24h | 7d | 30d
     'rank_stat_period': '24h',    # 可用率排行统计周期：24h | 7d | 30d
-    'users': [
-        {"username": "admin",    "password": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", "role": "admin"},
-        {"username": "operator", "password": "06e55b633481f7bb072957eabcf110c972e86691c3cfedabe088024bffe42f23", "role": "operator"},
-        {"username": "viewer",   "password": "d35ca5051b82ffc326a3b0b6574a9a3161dee16b9478a199ee39cd803ce5b799",  "role": "viewer"},
-    ],
 }
 POLLING_SEQUENCE = [5, 15, 30, 60]   # 轮询重试的秒数序列
 
@@ -63,8 +56,7 @@ def load_config():
             for k in ['check_interval','timeout','retry_mode','retry_interval',
                       'log_to_disk','log_level','console_log_level',
                       'http_proxy','udp_proxy','proxy_enabled',
-                      'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
-                      'tracker_stat_period','rank_stat_period','cache_history','users']:
+                      'dns_mode','dns_custom','max_log_entries','page_refresh_ms','tracker_stat_period','rank_stat_period','cache_history']:
                 if k in saved:
                     cfg[k] = saved[k]
             # 向后兼容：旧配置文件用 console_log_level，迁移到 log_level
@@ -79,8 +71,7 @@ def persist_config(cfg):
         savable = {k: cfg[k] for k in ['check_interval','timeout','retry_mode','retry_interval',
                                         'log_to_disk','log_level',
                                         'http_proxy','udp_proxy','proxy_enabled',
-                                        'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
-                                        'tracker_stat_period','rank_stat_period','cache_history','users']
+                                        'dns_mode','dns_custom','max_log_entries','page_refresh_ms','tracker_stat_period','rank_stat_period','cache_history']
                    if k in cfg}
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(savable, f, indent=2, ensure_ascii=False)
@@ -91,66 +82,11 @@ CONFIG = load_config()
 
 # ==================== Flask 初始化 ====================
 app = Flask(__name__, static_folder='static')
-CORS(app, supports_credentials=True)
-
-# Session 签名密钥：持久化到 config，重启后 session 仍有效
-_SK_FILE = 'session_secret.key'
-def _get_secret_key():
-    if os.path.exists(_SK_FILE):
-        with open(_SK_FILE, 'r') as f:
-            return f.read().strip()
-    k = secrets.token_hex(32)
-    with open(_SK_FILE, 'w') as f:
-        f.write(k)
-    return k
-
-app.secret_key = _get_secret_key()
+CORS(app)
 
 # 关闭 werkzeug 自带的 request log，我们自己处理
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
-
-# ==================== 权限工具 ====================
-def _hash_pw(pw: str) -> str:
-    return hashlib.sha256(pw.encode()).hexdigest()
-
-def _find_user(username: str):
-    for u in CONFIG.get('users', []):
-        if u['username'] == username:
-            return u
-    return None
-
-def _current_role() -> str:
-    """从 session 读取当前用户角色，未登录返回 None"""
-    return session.get('role')
-
-def _require_role(*roles):
-    """装饰器：要求指定角色之一，否则返回 403"""
-    from functools import wraps
-    def decorator(f):
-        @wraps(f)
-        def wrapper(*args, **kwargs):
-            role = _current_role()
-            if role not in roles:
-                return jsonify({'error': '权限不足', 'require_login': True}), 403
-            return f(*args, **kwargs)
-        return wrapper
-    return decorator
-
-# operator 重试限流：{username: last_retry_time}
-_retry_throttle: dict = {}
-_retry_throttle_lock = threading.Lock()
-
-def _check_retry_throttle(interval_ms: float) -> bool:
-    """检查当前用户是否超过重试频率限制。True=允许，False=拒绝"""
-    username = session.get('username', session.get('remote', request.remote_addr))
-    now = time.time()
-    with _retry_throttle_lock:
-        last = _retry_throttle.get(username, 0)
-        if now - last < interval_ms / 1000:
-            return False
-        _retry_throttle[username] = now
-        return True
 
 # ==================== 控制台输出工具 ====================
 LEVEL_ORDER = {'none': 0, 'info': 1, 'error': 2, 'debug': 3}
@@ -174,10 +110,10 @@ def cprint(msg: str, level: str = 'info'):
     prefix = {'info': '[INFO ]', 'error': '[ERROR]', 'debug': '[DEBUG]'}.get(level, '[INFO ]')
     print(f"  {ts} {prefix} {msg}", flush=True)
 
-_ACCESS_LOG_FILE = 'access.log'
+_ACCESS_LOG_FILE = 'network_monitor_access.log'
 
 def access_log(msg: str):
-    """写入独立访问日志文件（access.log）。
+    """写入独立访问日志文件（network_monitor_access.log）。
     记录：外部请求、tracker操作、配置变更，带来源IP和时间戳。
     仅在 log_to_disk=True 时写盘；控制台输出跟随 log_level（非none时都输出）。
     """
@@ -249,18 +185,11 @@ class TrackerDB:
                         info['latency']    = latency
                         info['last_check'] = datetime.now().isoformat()
                         break
-                self._push_history(domain, ip, status)
+                self._push_history(domain, status)
                 self._recalc()
 
-    def _push_history(self, domain, ip, status):
-        """只统计非 removed 的活跃 IP，避免已移除/DDNS旧IP污染可用率"""
+    def _push_history(self, domain, status):
         t = self.trackers[domain]
-        # 找到对应 IP，若已标记 removed 则跳过，不影响历史统计
-        for info in t['ips']:
-            if info['ip'] == ip:
-                if info.get('removed', False):
-                    return
-                break
         v = 1 if status == 'online' else 0
         for key, maxlen in [('history_24h', CONFIG['max_history']),
                              ('history_7d', 20160),   # 7d × 2880点/d
@@ -302,14 +231,11 @@ class TrackerDB:
                 uptime = (sum(h)/len(h)*100) if h else None
                 if uptime is None and min_uptime > 0: continue
                 if uptime is not None and uptime < min_uptime: continue
-                online_count = sum(1 for ip in d['ips'] if ip.get('status') == 'online' and not ip.get('removed'))
                 out.append({'domain': domain, 'port': d.get('port',80),
                             'protocol': d.get('protocol','tcp'),
                             'uptime': round(uptime,2) if uptime is not None else None,
-                            'ip_count': len(d['ips']),
-                            'online_count': online_count})
-        # 主排序：可用率高→低；同可用率：在线数多→少；再同：名称字母序
-        out.sort(key=lambda x: (-(x['uptime'] if x['uptime'] is not None else -1), -x['online_count'], x['domain']))
+                            'ip_count': len(d['ips'])})
+        out.sort(key=lambda x: (-(x['uptime'] if x['uptime'] is not None else -1), x['domain']))
         return out[:limit]
 
     # ---------- 日志 ----------
@@ -1532,8 +1458,8 @@ def monitor_loop():
             summary = (f"轮检完成 | "
                        f"总:{s['total']} [v4:{s['ipv4']} v6:{s['ipv6']}] | "
                        f"在线:{s['alive']} [v4:{s['alive_v4']} v6:{s['alive_v6']}]")
-            db.add_log(summary, 'info')
-            # 轮检完成只写网页端日志，不输出控制台（避免刷屏）
+            db.add_log(summary, 'debug')
+            cprint(summary, 'debug')
             if CONFIG.get('cache_history', True):
                 db._save()  # 每轮检测完持久化历史数据
 
@@ -1605,36 +1531,6 @@ def index():
     return make_response(content, 200, {'Content-Type':'text/html; charset=utf-8'})
 
 # ==================== API ====================
-
-# ── 认证 ──
-@app.route('/api/auth/login', methods=['POST'])
-def api_login():
-    data = request.json or {}
-    username = data.get('username','').strip()
-    password = data.get('password','')
-    user = _find_user(username)
-    if not user or user['password'] != _hash_pw(password):
-        return jsonify({'error': '用户名或密码错误'}), 401
-    session['username'] = username
-    session['role'] = user['role']
-    session.permanent = True
-    access_log(f"← {_client_ip()} 登录 [{username}] role={user['role']}")
-    return jsonify({'success': True, 'username': username, 'role': user['role']})
-
-@app.route('/api/auth/logout', methods=['POST'])
-def api_logout():
-    username = session.get('username','?')
-    session.clear()
-    access_log(f"← {_client_ip()} 登出 [{username}]")
-    return jsonify({'success': True})
-
-@app.route('/api/auth/whoami')
-def api_whoami():
-    role = session.get('role')
-    if not role:
-        return jsonify({'logged_in': False, 'role': None, 'username': None})
-    return jsonify({'logged_in': True, 'role': role, 'username': session.get('username')})
-
 @app.route('/api/stats')
 def api_stats():
     return jsonify(db.get_stats())
@@ -1644,7 +1540,6 @@ def api_trackers():
     return jsonify(db.get_trackers())
 
 @app.route('/api/tracker/add', methods=['POST'])
-@_require_role('admin', 'operator')
 def api_add():
     raw = (request.json or {}).get('urls', (request.json or {}).get('url',''))
     if not raw:
@@ -1685,7 +1580,6 @@ def api_add():
     return jsonify({'success':True,'added':len(results),'results':results,'errors':errors})
 
 @app.route('/api/tracker/delete', methods=['POST'])
-@_require_role('admin', 'operator')
 def api_delete():
     domain = (request.json or {}).get('domain','').strip()
     with db.lock:
@@ -1700,16 +1594,7 @@ def api_delete():
     return jsonify({'error':'不存在'}), 404
 
 @app.route('/api/tracker/check', methods=['POST'])
-@_require_role('admin', 'operator', 'viewer')
 def api_check():
-    role = _current_role()
-    # viewer: 限速 1000ms；operator: 限速 500ms；admin: 不限
-    if role == 'viewer':
-        if not _check_retry_throttle(1000):
-            return jsonify({'error': '操作过于频繁，请稍候'}), 429
-    elif role == 'operator':
-        if not _check_retry_throttle(500):
-            return jsonify({'error': '操作过于频繁，请稍候'}), 429
     domain    = (request.json or {}).get('domain','').strip()
     target_ip = (request.json or {}).get('ip', None)
     with db.lock:
@@ -1819,7 +1704,6 @@ def api_history_status():
         return jsonify({'has_cache': False, 'error': str(e)})
 
 @app.route('/api/config', methods=['GET','POST'])
-@_require_role('admin')
 def api_config():
     if request.method == 'POST':
         data = request.json or {}
@@ -1886,45 +1770,14 @@ def api_config():
         if changes:
             msg = f"配置已更新: {' | '.join(changes)}"
             access_log(f"← {_client_ip()} {msg}")
-            # 配置变更只记录 access_log（控制台+磁盘access），不写网页端日志
-        # else: 无变更时完全静默
+        else:
+            msg = "配置保存（无变更）"
+        db.add_log(msg, 'info')
+        cprint(msg, 'info')
 
         return jsonify({'success':True,'config':{k:CONFIG[k] for k in keys if k != 'console_log_level'}})
-    safe = {k:v for k,v in CONFIG.items() if k not in ('data_file','log_file','users')}
+    safe = {k:v for k,v in CONFIG.items() if k not in ('data_file','log_file')}
     return jsonify(safe)
-
-@app.route('/api/users', methods=['GET'])
-@_require_role('admin')
-def api_users_get():
-    """返回用户列表（不含密码哈希）"""
-    users = [{'username': u['username'], 'role': u['role']} for u in CONFIG.get('users', [])]
-    return jsonify(users)
-
-@app.route('/api/users', methods=['POST'])
-@_require_role('admin')
-def api_users_save():
-    """批量保存用户配置，支持新增/修改/删除"""
-    data = request.json or {}
-    new_users = data.get('users', [])
-    result = []
-    existing = {u['username']: u for u in CONFIG.get('users', [])}
-    for u in new_users:
-        uname = u.get('username','').strip()
-        role  = u.get('role','viewer')
-        if not uname or role not in ('admin','operator','viewer'):
-            continue
-        pw_plain = u.get('password','').strip()
-        if pw_plain:
-            pw_hash = _hash_pw(pw_plain)
-        elif uname in existing:
-            pw_hash = existing[uname]['password']  # 保留旧密码
-        else:
-            continue  # 新用户必须设密码
-        result.append({'username': uname, 'role': role, 'password': pw_hash})
-    CONFIG['users'] = result
-    persist_config(CONFIG)
-    access_log(f"← {_client_ip()} 用户配置已更新 ({len(result)}个用户)")
-    return jsonify({'success': True, 'count': len(result)})
 
 # ==================== 主程序 ====================
 if __name__ == '__main__':
@@ -1954,13 +1807,12 @@ if __name__ == '__main__':
         print(f"    UDP代理      : {udp_p  if udp_p  else '(未设置)'}")
     else:
         print(f"  代理           : 关闭")
-    users_info = CONFIG.get('users', [])
-    print(f"  用户账户       : {len(users_info)} 个 ({', '.join(u['username']+'('+u['role']+')' for u in users_info)})")
     print(f"{'='*58}")
-    print(f"  权限说明:")
-    print(f"    admin    - 全部权限（配置+用户管理，重试不限速）")
-    print(f"    operator - 增删tracker，重试限速500ms")
-    print(f"    viewer   - 只读，重试限速1000ms")
+    print(f"  日志级别说明:")
+    print(f"    none  - 不输出任何内容")
+    print(f"    info  - 仅输出访问日志 + 轮检摘要（默认）")
+    print(f"    error - info + 所有失败/超时错误")
+    print(f"    debug - 全部（含每个IP成功结果）")
     print(f"{'='*58}\n")
 
     try:
