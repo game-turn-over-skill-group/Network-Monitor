@@ -1,0 +1,6 @@
+# 忽略会话密钥文件 + 配置文件
+session_secret.key
+config.json
+data.json
+error.log
+access.log
