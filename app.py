@@ -1773,9 +1773,29 @@ def api_logs():
     return jsonify(db.get_logs(limit))
 
 @app.route('/api/logs/clear', methods=['POST'])
+@_require_role('admin')
 def api_clear_logs():
     db.clear_logs()
+    access_log(f"← {_client_ip()} 清空日志")
     return jsonify({'success':True})
+
+@app.route('/api/logs/export')
+def api_export_logs():
+    """下载 error.log 文件，不存在则返回内存中的 error 级别日志"""
+    log_path = CONFIG.get('log_file', 'error.log')
+    if os.path.exists(log_path):
+        from flask import send_file
+        return send_file(os.path.abspath(log_path), as_attachment=True,
+                         download_name='error.log', mimetype='text/plain')
+    # 文件不存在：从内存拼装
+    lines = []
+    for e in db.get_logs(2000):
+        if e.get('level') == 'error':
+            lines.append(f"[{e['time']}][ERROR] {e['message']}")
+    content = '\n'.join(lines) or '(no errors)'
+    from flask import Response
+    return Response(content, mimetype='text/plain',
+                    headers={'Content-Disposition': 'attachment; filename=error.log'})
 
 @app.route('/api/history/clear', methods=['POST'])
 def api_clear_history():
