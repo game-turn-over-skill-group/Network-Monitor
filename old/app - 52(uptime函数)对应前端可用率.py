@@ -1825,7 +1825,7 @@ def api_add():
         scheme, host, port = parse_url(line)
         if not host:
             errors.append(f"无效格式: {line}"); continue
-        protocol = scheme if scheme in ('udp','https') else 'tcp'  # https://xxx 记为 https
+        protocol = 'udp' if scheme=='udp' else 'tcp'
         is_ip = bool(re.match(r'^\d{1,3}(?:\.\d{1,3}){3}$', host)) or ':' in host
         if is_ip:
             geo  = get_geo(host)

@@ -310,38 +310,21 @@ class TrackerDB:
                 self._recalc()
 
     def _push_history(self, domain, ip, status):
-        """把历史记录写入对应的 IP 对象（IP级可用率）。
-        同时更新域名级汇总历史（用于排行榜）。
-        跳过 removed IP，避免污染统计。"""
+        """只统计非 removed 的活跃 IP，避免已移除/DDNS旧IP污染可用率"""
         t = self.trackers[domain]
-        ip_obj = None
+        # 找到对应 IP，若已标记 removed 则跳过，不影响历史统计
         for info in t['ips']:
             if info['ip'] == ip:
                 if info.get('removed', False):
                     return
-                ip_obj = info
                 break
-        if ip_obj is None:
-            return
         v = 1 if status == 'online' else 0
-        maxlens = [('history_24h', CONFIG['max_history']),
-                   ('history_7d', 20160),
-                   ('history_30d', 86400)]
-        # ── IP 级历史（精确到每个 IP）──────────────────────────
-        for key, maxlen in maxlens:
-            lst = ip_obj.setdefault(key, [])
-            lst.append(v)
-            if len(lst) > maxlen:
-                lst.pop(0)
-        # ── 域名级汇总历史（排行榜用，取活跃IP的平均在线状态）──
-        active = [i for i in t['ips'] if not i.get('removed')]
-        if active:
-            agg = 1 if any(i.get('status') == 'online' for i in active) else 0
-            for key, maxlen in maxlens:
-                lst = t.setdefault(key, [])
-                lst.append(agg)
-                if len(lst) > maxlen:
-                    lst.pop(0)
+        for key, maxlen in [('history_24h', CONFIG['max_history']),
+                             ('history_7d', 20160),   # 7d × 2880点/d
+                             ('history_30d', 86400)]:  # 30d × 2880点/d
+            t[key].append(v)
+            if len(t[key]) > maxlen:
+                t[key].pop(0)
 
     def _recalc(self):
         total = alive = ipv4 = ipv6 = 0
@@ -363,30 +346,7 @@ class TrackerDB:
         }
 
     def get_trackers(self):
-        """返回 tracker 字典，IP 对象附带 ip_uptime（各统计周期的可用率百分比）"""
-        with self.lock:
-            result = {}
-            period = CONFIG.get('tracker_stat_period', '24h')
-            for domain, t in self.trackers.items():
-                t_copy = dict(t)
-                ips_copy = []
-                for ip_obj in t.get('ips', []):
-                    ip_copy = {k: v for k, v in ip_obj.items()
-                               if k not in ('history_24h','history_7d','history_30d')}
-                    # 附加当前统计周期的 IP 级可用率
-                    h = ip_obj.get(f'history_{period}', [])
-                    ip_copy['ip_uptime'] = round(sum(h)/len(h)*100, 1) if h else None
-                    # 同时附加三个周期（前端可按需使用）
-                    for pk in ('24h','7d','30d'):
-                        ph = ip_obj.get(f'history_{pk}', [])
-                        ip_copy[f'uptime_{pk}'] = round(sum(ph)/len(ph)*100, 1) if ph else None
-                    ips_copy.append(ip_copy)
-                t_copy['ips'] = ips_copy
-                # 域名级历史：传给前端供 uptime()/uptimeCls() 计算域名可用率
-                for k in ('history_24h','history_7d','history_30d'):
-                    t_copy[k] = t.get(k, [])
-                result[domain] = t_copy
-            return result
+        with self.lock: return dict(self.trackers)
 
     def get_stats(self):
         with self.lock: return dict(self.stats)
@@ -470,24 +430,16 @@ class TrackerDB:
             cache_hist = CONFIG.get('cache_history', True)
             with self.lock:
                 for d, t in self.trackers.items():
-                    # IP 列表：存储时把 IP 级历史转成紧凑计数器格式
-                    ips_to_save = []
-                    for ip_obj in t['ips']:
-                        ip_entry = {k: v for k, v in ip_obj.items()
-                                    if k not in ('history_24h','history_7d','history_30d')}
-                        if cache_hist:
-                            for key in ('history_24h','history_7d','history_30d'):
-                                h = ip_obj.get(key, [])
-                                ip_entry[key] = {'total': len(h), 'ok': sum(h), 'fail': len(h)-sum(h)}
-                        ips_to_save.append(ip_entry)
                     entry = {'domain':d,'port':t.get('port',80),
                              'protocol':t.get('protocol','tcp'),
-                             'ips':ips_to_save,'added_time':t['added_time']}
+                             'ips':t['ips'],'added_time':t['added_time']}
                     if cache_hist:
-                        # 域名级汇总历史（排行榜用）
+                        # 存紧凑计数器格式，避免几万行 0/1 撑大文件
                         for key in ('history_24h','history_7d','history_30d'):
                             h = t.get(key, [])
-                            entry[key] = {'total': len(h), 'ok': sum(h), 'fail': len(h)-sum(h)}
+                            total = len(h)
+                            ok    = sum(h)
+                            entry[key] = {'total': total, 'ok': ok, 'fail': total - ok}
                     data[d] = entry
             with open(CONFIG['data_file'], 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -500,30 +452,26 @@ class TrackerDB:
                 data = json.load(f)
             with self.lock:
                 for d, t in data.items():
+                    # 启动时清除上次标记为 removed 的过时IP，不再保留
                     clean_ips = [ip for ip in t.get('ips', [])
                                  if not ip.get('removed', False)]
                     removed_count = len(t.get('ips', [])) - len(clean_ips)
                     if removed_count:
                         cprint(f"[load] {d}: 清除 {removed_count} 个过时IP", 'debug')
                     def _restore(raw, maxlen):
+                        """从计数器或原始数组恢复滚动数组"""
                         if isinstance(raw, dict):
                             ok   = int(raw.get('ok', 0))
                             fail = int(raw.get('fail', 0))
+                            # 重建：先排失败再排成功（尾部是最新数据）
                             arr = [0]*fail + [1]*ok
                             return arr[-maxlen:] if len(arr) > maxlen else arr
                         elif isinstance(raw, list):
                             return raw[-maxlen:] if len(raw) > maxlen else raw
                         return []
-                    # 恢复每个 IP 的独立历史
-                    for ip_obj in clean_ips:
-                        for key, maxlen in [('history_24h', CONFIG['max_history']),
-                                            ('history_7d', 20160),
-                                            ('history_30d', 86400)]:
-                            ip_obj[key] = _restore(ip_obj.get(key, []), maxlen)
                     self.trackers[d] = {
                         'domain':d,'port':t.get('port',80),
                         'protocol':t.get('protocol','tcp'),'ips':clean_ips,
-                        # 域名级汇总历史（排行榜用）— 兼容旧 data.json
                         'history_24h': _restore(t.get('history_24h',[]), CONFIG['max_history']),
                         'history_7d':  _restore(t.get('history_7d',[]),  20160),
                         'history_30d': _restore(t.get('history_30d',[]), 86400),
@@ -1711,14 +1659,22 @@ def log_request():
 
 @app.after_request
 def security_headers(response):
-    # ── 安全响应头 ──
-    response.headers['X-Frame-Options']        = 'SAMEORIGIN'   # 允许同源 iframe（防点击劫持）
-    response.headers['X-Content-Type-Options'] = 'nosniff'       # 防 MIME 嗅探
-    response.headers['Referrer-Policy']        = 'same-origin'
-    response.headers['Server']                 = 'NetworkMonitor'
-    # 注意：X-XSS-Protection 已从现代浏览器移除，设为 '1; mode=block' 反而可能误拦截 Vue 模板
-    # 注意：CSP 不在此处设置，因为 Vue CDN + inline 模板需要 unsafe-inline，
-    #       设置严格 CSP 会阻断页面加载
+    # ── 安全响应头（防止点击劫持、MIME嗅探、XSS、信息泄露）──
+    response.headers['X-Frame-Options']           = 'DENY'
+    response.headers['X-Content-Type-Options']    = 'nosniff'
+    response.headers['X-XSS-Protection']          = '1; mode=block'
+    response.headers['Referrer-Policy']           = 'same-origin'
+    response.headers['Server']                    = 'NetworkMonitor'  # 隐藏真实服务器信息
+    # CSP: 仅允许指定来源的脚本/样式，禁止 eval / inline script (除 Vue 模板)
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src  'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "font-src   'self' https://cdn.jsdelivr.net data:; "
+        "img-src    'self' data: https:; "
+        "connect-src 'self' https://ip-api.com; "
+        "frame-ancestors 'none';"
+    )
     if request.path.startswith('/api/'):
         # 轮询读取路径静默
         if request.method == 'GET' and request.path.split('?')[0].rstrip('/') in _NOISY_PATHS:
@@ -1825,7 +1781,7 @@ def api_add():
         scheme, host, port = parse_url(line)
         if not host:
             errors.append(f"无效格式: {line}"); continue
-        protocol = scheme if scheme in ('udp','https') else 'tcp'  # https://xxx 记为 https
+        protocol = 'udp' if scheme=='udp' else 'tcp'
         is_ip = bool(re.match(r'^\d{1,3}(?:\.\d{1,3}){3}$', host)) or ':' in host
         if is_ip:
             geo  = get_geo(host)
@@ -1946,8 +1902,9 @@ def api_nav():
     return jsonify({'ok': True})
 
 @app.route('/api/logs')
+@_require_role('admin', 'operator', 'viewer')
 def api_logs():
-    limit = min(request.args.get('limit', 300, type=int), 5000)
+    limit = min(request.args.get('limit', 300, type=int), 5000)  # 上限5000防止OOM
     return jsonify(db.get_logs(limit))
 
 @app.route('/api/logs/clear', methods=['POST'])
@@ -1958,6 +1915,7 @@ def api_clear_logs():
     return jsonify({'success':True})
 
 @app.route('/api/logs/export')
+@_require_role('admin')
 def api_export_logs():
     """下载 error.log 文件，不存在则返回内存中的 error 级别日志"""
     # 路径穿越防护：限定只能在程序工作目录下，文件名只允许固定值

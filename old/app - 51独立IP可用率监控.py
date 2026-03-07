@@ -382,9 +382,9 @@ class TrackerDB:
                         ip_copy[f'uptime_{pk}'] = round(sum(ph)/len(ph)*100, 1) if ph else None
                     ips_copy.append(ip_copy)
                 t_copy['ips'] = ips_copy
-                # 域名级历史：传给前端供 uptime()/uptimeCls() 计算域名可用率
+                # 域名级历史不发送（节省传输量，前端只用 ip_uptime）
                 for k in ('history_24h','history_7d','history_30d'):
-                    t_copy[k] = t.get(k, [])
+                    t_copy.pop(k, None)
                 result[domain] = t_copy
             return result
 
@@ -1825,7 +1825,7 @@ def api_add():
         scheme, host, port = parse_url(line)
         if not host:
             errors.append(f"无效格式: {line}"); continue
-        protocol = scheme if scheme in ('udp','https') else 'tcp'  # https://xxx 记为 https
+        protocol = 'udp' if scheme=='udp' else 'tcp'
         is_ip = bool(re.match(r'^\d{1,3}(?:\.\d{1,3}){3}$', host)) or ':' in host
         if is_ip:
             geo  = get_geo(host)

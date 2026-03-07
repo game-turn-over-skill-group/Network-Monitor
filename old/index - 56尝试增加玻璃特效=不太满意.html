@@ -41,23 +41,23 @@
            日间模式 — 白灰玻璃特效
         ══════════════════════════════════════════ */
         body.light-mode {
-            --bg-from: #b8c8de;
-            --bg-to:   #cad8ee;
-            --glass:   rgba(255,255,255,0.45);
-            --glass-border: rgba(140,170,230,0.5);
-            --glass-nav:   rgba(230,238,255,0.78);
-            --glass-header: rgba(220,232,255,0.62);
-            --glass-card:   rgba(255,255,255,0.42);
+            --bg-from: #d6dff0;
+            --bg-to:   #eaf0fb;
+            --glass:   rgba(255,255,255,0.52);
+            --glass-border: rgba(160,185,240,0.45);
+            --glass-nav:   rgba(255,255,255,0.72);
+            --glass-header: rgba(235,242,255,0.65);
+            --glass-card:   rgba(255,255,255,0.52);
             --text:    #1a2540;
             --muted:   #5a6f96;
-            --accent:  rgba(160,190,240,0.45);
+            --accent:  rgba(180,205,255,0.5);
             --ok:      #059669;
             --err:     #dc2626;
             --warn:    #d97706;
-            --input-bg: rgba(255,255,255,0.55);
-            --shadow:  0 6px 28px rgba(80,110,180,0.22);
-            --row-hover: rgba(100,150,255,0.08);
-            --border-subtle: rgba(140,170,230,0.35);
+            --input-bg: rgba(255,255,255,0.65);
+            --shadow:  0 4px 24px rgba(100,130,200,0.18);
+            --row-hover: rgba(100,150,255,0.07);
+            --border-subtle: rgba(160,185,240,0.3);
         }
 
         /* ── 全局基础 ── */
@@ -81,24 +81,13 @@
                 radial-gradient(ellipse 50% 60% at 80% 70%, rgba(10,50,160,0.12) 0%, transparent 70%);
         }
 
-        /* 日间模式：深色蓝灰光晕 + 噪点质感 */
+        /* 日间模式：柔和光晕 */
         body.light-mode::before {
             content:'';
             position:fixed; inset:0; pointer-events:none; z-index:0;
             background:
-                radial-gradient(ellipse 80% 60% at 10% 15%, rgba(120,160,240,0.45) 0%, transparent 60%),
-                radial-gradient(ellipse 70% 70% at 90% 85%, rgba(100,140,220,0.35) 0%, transparent 60%),
-                radial-gradient(ellipse 50% 40% at 50% 50%, rgba(160,190,255,0.2) 0%, transparent 70%);
-        }
-        /* 日间卡片增加 frosted glass 阴影 */
-        body.light-mode .card {
-            box-shadow: 0 4px 24px rgba(80,110,200,0.18), inset 0 1px 0 rgba(255,255,255,0.7);
-        }
-        body.light-mode .card:hover {
-            box-shadow: 0 8px 32px rgba(80,110,200,0.28), inset 0 1px 0 rgba(255,255,255,0.8);
-        }
-        body.light-mode .stat-card-new {
-            box-shadow: 0 4px 20px rgba(80,110,200,0.15), inset 0 1px 0 rgba(255,255,255,0.65);
+                radial-gradient(ellipse 70% 50% at 15% 20%, rgba(180,210,255,0.35) 0%, transparent 65%),
+                radial-gradient(ellipse 60% 60% at 85% 80%, rgba(200,220,255,0.25) 0%, transparent 65%);
         }
 
         #app { position:relative; z-index:1; }
@@ -156,17 +145,15 @@
         body.light-mode .ip-row td { background: rgba(200,220,255,0.18) !important; }
         .ip-row:hover td { background: var(--row-hover) !important; }
 
-        /* ── 列宽拖拽把手 — 所有 th 都支持 ── */
-        .resizable-table th { position: relative; user-select: none; }
-        .col-resizer {
-            position: absolute; right: 0; top: 0;
-            width: 7px; height: 100%;
-            cursor: col-resize; z-index: 10;
-            background: transparent;
-            transition: background .12s;
+        /* ── 列宽拖拽把手 ── */
+        .resizable-table th { position:relative; }
+        .resizable-table th .col-resizer {
+            position:absolute; right:0; top:0; width:5px; height:100%;
+            cursor:col-resize; user-select:none; z-index:2;
+            background:transparent; transition:background .12s;
         }
-        .col-resizer:hover { background: rgba(100,160,255,0.35); }
-        .col-resizer.dragging { background: rgba(100,160,255,0.75) !important; }
+        .resizable-table th:hover .col-resizer { background:rgba(100,160,255,0.3); }
+        .resizable-table th .col-resizer.dragging { background:rgba(100,160,255,0.7) !important; }
 
         /* ── 表格通用 ── */
         .table { color:var(--text); width:100%; }
@@ -447,16 +434,6 @@
                         <i class="bi" :class="isDark ? 'bi-sun-fill' : 'bi-moon-fill'"></i>
                         <span class="d-none d-md-inline ms-1">{{ isDark ? t('nav.lightMode') : t('nav.darkMode') }}</span>
                     </button>
-                    <!-- 缩放选择器 -->
-                    <select class="form-select form-select-sm zoom-select" v-model="uiZoom" @change="applyZoom" style="width:72px;font-size:.78rem;" title="页面缩放">
-                        <option value="80">80%</option>
-                        <option value="85">85%</option>
-                        <option value="90">90%</option>
-                        <option value="95">95%</option>
-                        <option value="100">100%</option>
-                        <option value="105">105%</option>
-                        <option value="110">110%</option>
-                    </select>
                     <select class="form-select form-select-sm" v-model="locale" @change="changeLocale" style="width:140px;">
                         <option value="zh">中文</option>
                         <option value="en">English</option>
@@ -509,7 +486,7 @@
         </div>
     </div>
 
-    <div class="container-fluid p-3 p-md-4" id="main-container">
+    <div class="container-fluid p-3 p-md-4" style="max-width:1800px;margin:0 auto;">
 
         <!-- 仪表盘 -->
         <div v-if="currentTab==='dashboard'">
@@ -921,7 +898,6 @@
                                             <option value="http">HTTP</option>
                                             <option value="https">HTTPS</option>
                                         </select>
-                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
                                     </th><!-- C4 protocol -->
                                     <th @click="cycleExpandAll(sortedTrackers)" style="cursor:pointer;user-select:none;" :title="t('tracker.expandHint')">
                                         {{ t('tracker.ip') }}<span style="font-size:.68rem;margin-left:2px;color:#64748b;">
@@ -929,7 +905,6 @@
                                             <span v-else-if="expandState===2">⊞</span>
                                             <span v-else>⊟</span>
                                         </span>
-                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
                                     </th><!-- C5 ip -->
                                     <th @click="cycleSort('uptime')" style="cursor:pointer;user-select:none;">
                                         {{ t('tracker.status') }}<span style="font-size:.68rem;color:#64748b;margin-left:2px;">[{{ cfg.tracker_stat_period }}]</span>
@@ -940,7 +915,6 @@
                                             <span v-else-if="sortKey==='uptime' && sortDir===4" style="color:#ef4444;">●</span>
                                             <span v-else>⇅</span>
                                         </span>
-                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
                                     </th><!-- C6 status -->
                                     <th @click="cycleSort('latency')" style="cursor:pointer;user-select:none;">
                                         {{ t('tracker.latency') }}<span style="font-size:.7rem;color:#475569;margin-left:2px;">
@@ -948,10 +922,9 @@
                                             <span v-else-if="sortKey==='latency' && sortDir===-1" style="color:#e2e8f0;">▼</span>
                                             <span v-else>⇅</span>
                                         </span>
-                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
                                     </th><!-- C7 latency -->
-                                    <th>{{ t('tracker.country') }}<div class="col-resizer" @mousedown.stop="startResize($event)"></div></th><!-- C8 -->
-                                    <th>{{ t('tracker.isp') }}<div class="col-resizer" @mousedown.stop="startResize($event)"></div></th><!-- C9 -->
+                                    <th>{{ t('tracker.country') }}</th><!-- C8 -->
+                                    <th>{{ t('tracker.isp') }}</th><!-- C9 -->
                                     <th>{{ t('tracker.addedTime') }}</th><!-- C10 -->
                                     <th>{{ t('tracker.lastCheck') }}</th><!-- C11 -->
                                     <th></th><!-- C12 actions -->
@@ -1095,7 +1068,7 @@
                                     <div class="text-secondary" style="font-size:.78rem;">{{ item.ip_count }} IPs</div>
                                 </div>
                             </div>
-                            <span class="fw-bold" style="font-size:.95rem;" :class="item.uptime===null?'up-unknown':(item.uptime>80?'up-green':(item.uptime>=50?'up-yellow':'up-red'))">{{ item.uptime===null ? '?' : item.uptime.toFixed(2)+'%' }}</span>
+                            <span class="fw-bold fs-5" :class="item.uptime===null?'up-unknown':(item.uptime>80?'up-green':(item.uptime>=50?'up-yellow':'up-red'))">{{ item.uptime===null ? '?' : item.uptime.toFixed(2)+'%' }}</span>
                         </div>
                     </div>
                 </div>
@@ -1461,13 +1434,6 @@ createApp({
         const currentTab = ref('dashboard');
         const locale = ref('zh');
         const isDark = ref(true); // 默认夜间模式
-        const uiZoom = ref('100'); // 默认100%缩放
-
-        const applyZoom = () => {
-            document.documentElement.style.fontSize = (parseInt(uiZoom.value) / 100 * 16) + 'px';
-            document.body.style.zoom = uiZoom.value + '%';
-            document.cookie = 'uiZoom=' + uiZoom.value + ';path=/;max-age=' + (365*24*3600);
-        };
         const loading = ref(true);
         const trackers = ref({});
         const stats = ref({total:0,alive:0,ipv4:0,ipv6:0,alive_v4:0,alive_v6:0});
@@ -2452,30 +2418,19 @@ createApp({
             resizer.classList.add('dragging');
             const startX = e.clientX;
             const startW = th.offsetWidth;
-            let moved = false;
             const onMove = (mv) => {
-                moved = true;
                 const newW = Math.max(40, startW + mv.clientX - startX);
                 th.style.width = newW + 'px';
                 th.style.minWidth = newW + 'px';
-                // 切换为 fixed layout 让手动宽度生效
-                const tbl = th.closest('table');
-                if (tbl) tbl.style.tableLayout = 'fixed';
             };
-            const onUp = (upEvt) => {
+            const onUp = () => {
                 resizer.classList.remove('dragging');
                 document.removeEventListener('mousemove', onMove);
                 document.removeEventListener('mouseup', onUp);
-                // 若确实拖动过，阻止后续 click 事件触发排序
-                if (moved) {
-                    const stopNext = (ev) => { ev.stopPropagation(); ev.stopImmediatePropagation(); document.removeEventListener('click', stopNext, true); };
-                    document.addEventListener('click', stopNext, true);
-                }
             };
             document.addEventListener('mousemove', onMove);
             document.addEventListener('mouseup', onUp);
             e.preventDefault();
-            e.stopPropagation();
         };
 
         onMounted(async () => {
@@ -2486,10 +2441,6 @@ createApp({
                 if (k==='theme') {
                     isDark.value = v !== 'light';
                     if (v === 'light') document.body.classList.add('light-mode');
-                }
-                if (k==='uiZoom' && v && ['80','85','90','95','100','105','110'].includes(v)) {
-                    uiZoom.value = v;
-                    document.body.style.zoom = v + '%';
                 }
             }
             readHash();
@@ -2510,7 +2461,7 @@ createApp({
         });
 
         return {
-            currentTab, locale, isDark, toggleTheme, uiZoom, applyZoom, loading, trackers, stats, expanded, searchQ, logSearch,
+            currentTab, locale, isDark, toggleTheme, loading, trackers, stats, expanded, searchQ, logSearch,
             sortKey, sortDir, cycleSort, sortedTrackers,
             showAdd, addUrl, adding, addMsg, ranking, rankPeriod, filterEnabled, filterThreshold,
             logs, logLvl, cfg, refreshMs,

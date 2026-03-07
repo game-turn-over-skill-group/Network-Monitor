@@ -11,414 +11,133 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.8.1/font/bootstrap-icons.css" rel="stylesheet">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-
-        /* ══════════════════════════════════════════
-           夜间模式 (默认) — 蓝黑玻璃特效
-        ══════════════════════════════════════════ */
         :root {
-            --bg-from: #0a0f1e;
-            --bg-to:   #0d1b3e;
-            --glass:   rgba(16, 28, 60, 0.55);
-            --glass-border: rgba(80, 140, 255, 0.18);
-            --glass-nav:   rgba(10, 20, 48, 0.75);
-            --glass-header: rgba(20, 35, 75, 0.6);
-            --glass-card:   rgba(14, 26, 58, 0.55);
-            --text:    #e2eaf8;
-            --muted:   #7a91bc;
-            --accent:  rgba(50, 100, 200, 0.35);
-            --ok:      #34d399;
-            --err:     #f87171;
-            --warn:    #fbbf24;
-            --input-bg: rgba(10, 20, 50, 0.6);
-            --blur:    12px;
-            --shadow:  0 8px 32px rgba(0,0,0,0.45);
-            --row-hover: rgba(80,140,255,0.07);
-            --border-subtle: rgba(80,140,255,0.12);
+            --bg: #1a1a2e; --card: #16213e; --text: #eee; --muted: #aaa;
+            --accent: #0f3460; --ok: #10b981; --err: #ef4444; --warn: #f59e0b;
+            --input-bg: #0d2446;
         }
-
-        /* ══════════════════════════════════════════
-           日间模式 — 白灰玻璃特效
-        ══════════════════════════════════════════ */
+        /* 日间模式变量覆盖 */
         body.light-mode {
-            --bg-from: #b8c8de;
-            --bg-to:   #cad8ee;
-            --glass:   rgba(255,255,255,0.45);
-            --glass-border: rgba(140,170,230,0.5);
-            --glass-nav:   rgba(230,238,255,0.78);
-            --glass-header: rgba(220,232,255,0.62);
-            --glass-card:   rgba(255,255,255,0.42);
-            --text:    #1a2540;
-            --muted:   #5a6f96;
-            --accent:  rgba(160,190,240,0.45);
-            --ok:      #059669;
-            --err:     #dc2626;
-            --warn:    #d97706;
-            --input-bg: rgba(255,255,255,0.55);
-            --shadow:  0 6px 28px rgba(80,110,180,0.22);
-            --row-hover: rgba(100,150,255,0.08);
-            --border-subtle: rgba(140,170,230,0.35);
+            --bg: #f0f4f8; --card: #ffffff; --text: #1e293b; --muted: #64748b;
+            --accent: #dbeafe; --ok: #059669; --err: #dc2626; --warn: #d97706;
+            --input-bg: #f8fafc;
         }
-
-        /* ── 全局基础 ── */
-        * { box-sizing: border-box; }
-        body {
-            background: linear-gradient(135deg, var(--bg-from) 0%, var(--bg-to) 100%);
-            background-attachment: fixed;
-            color: var(--text);
-            font-family: 'Inter', 'Segoe UI', sans-serif;
-            font-size: 14px;
-            min-height: 100vh;
-            transition: background .3s, color .3s;
-        }
-
-        /* 夜间模式：动态背景粒子感 */
-        body:not(.light-mode)::before {
-            content:'';
-            position:fixed; inset:0; pointer-events:none; z-index:0;
-            background:
-                radial-gradient(ellipse 60% 40% at 20% 30%, rgba(30,80,200,0.13) 0%, transparent 70%),
-                radial-gradient(ellipse 50% 60% at 80% 70%, rgba(10,50,160,0.12) 0%, transparent 70%);
-        }
-
-        /* 日间模式：深色蓝灰光晕 + 噪点质感 */
-        body.light-mode::before {
-            content:'';
-            position:fixed; inset:0; pointer-events:none; z-index:0;
-            background:
-                radial-gradient(ellipse 80% 60% at 10% 15%, rgba(120,160,240,0.45) 0%, transparent 60%),
-                radial-gradient(ellipse 70% 70% at 90% 85%, rgba(100,140,220,0.35) 0%, transparent 60%),
-                radial-gradient(ellipse 50% 40% at 50% 50%, rgba(160,190,255,0.2) 0%, transparent 70%);
-        }
-        /* 日间卡片增加 frosted glass 阴影 */
-        body.light-mode .card {
-            box-shadow: 0 4px 24px rgba(80,110,200,0.18), inset 0 1px 0 rgba(255,255,255,0.7);
-        }
-        body.light-mode .card:hover {
-            box-shadow: 0 8px 32px rgba(80,110,200,0.28), inset 0 1px 0 rgba(255,255,255,0.8);
-        }
-        body.light-mode .stat-card-new {
-            box-shadow: 0 4px 20px rgba(80,110,200,0.15), inset 0 1px 0 rgba(255,255,255,0.65);
-        }
-
-        #app { position:relative; z-index:1; }
-
-        /* ── Glassmorphism 卡片 ── */
-        .card {
-            background: var(--glass-card);
-            backdrop-filter: blur(var(--blur));
-            -webkit-backdrop-filter: blur(var(--blur));
-            border: 1px solid var(--glass-border);
-            border-radius: 14px;
-            box-shadow: var(--shadow);
-            margin-bottom: 20px;
-            transition: box-shadow .2s, border-color .2s;
-        }
-        .card:hover {
-            box-shadow: 0 12px 40px rgba(0,0,0,0.35);
-            border-color: rgba(100,160,255,0.25);
-        }
-        body.light-mode .card:hover {
-            box-shadow: 0 6px 28px rgba(100,140,220,0.22);
-        }
-
-        .card-header {
-            background: var(--glass-header);
-            backdrop-filter: blur(var(--blur));
-            -webkit-backdrop-filter: blur(var(--blur));
-            border-bottom: 1px solid var(--glass-border);
-            border-radius: 14px 14px 0 0 !important;
-            padding: 12px 16px;
-        }
-
-        /* ── 导航栏 ── */
-        .navbar {
-            background: var(--glass-nav) !important;
-            backdrop-filter: blur(18px) saturate(1.3) !important;
-            -webkit-backdrop-filter: blur(18px) saturate(1.3) !important;
-            border-bottom: 1px solid var(--glass-border) !important;
-            box-shadow: 0 2px 20px rgba(0,0,0,0.2);
-            position: sticky; top:0; z-index: 1000;
-        }
-        body.light-mode .navbar { box-shadow: 0 2px 16px rgba(100,140,220,0.15); }
-        /* ── 统计卡片 ── */
+        body { background:var(--bg); color:var(--text); font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; transition: background .2s, color .2s; }
+        .navbar { background:var(--card)!important; border-bottom:1px solid var(--accent); }
+        .card { background:var(--card); border:1px solid var(--accent); margin-bottom:20px; }
+        .card-header { background:var(--accent); }
         .stat-card { text-align:center; padding:20px; }
-        .stat-num  { font-size:2.5rem; font-weight:700; }
-        .stat-lbl  { color:var(--muted); font-size:.9rem; }
-        .ok  { color:var(--ok); }
-        .err { color:var(--err); }
-        .warn{ color:var(--warn); }
-
-        /* ── 表格 — 智能自适应宽度 ── */
+        .stat-num { font-size:2.5rem; font-weight:700; }
+        .stat-lbl { color:var(--muted); font-size:.9rem; }
+        .ok { color:var(--ok); } .err { color:var(--err); } .warn { color:var(--warn); }
         .tracker-row { cursor:pointer; transition:background .15s; }
-        .tracker-row:hover td { background: var(--row-hover) !important; }
-        .ip-row td { background: rgba(10,30,65,0.2) !important; transition:background .15s; }
-        body.light-mode .ip-row td { background: rgba(200,220,255,0.18) !important; }
-        .ip-row:hover td { background: var(--row-hover) !important; }
-
-        /* ── 列宽拖拽把手 — 所有 th 都支持 ── */
-        .resizable-table th { position: relative; user-select: none; }
-        .col-resizer {
-            position: absolute; right: 0; top: 0;
-            width: 7px; height: 100%;
-            cursor: col-resize; z-index: 10;
-            background: transparent;
-            transition: background .12s;
-        }
-        .col-resizer:hover { background: rgba(100,160,255,0.35); }
-        .col-resizer.dragging { background: rgba(100,160,255,0.75) !important; }
-
-        /* ── 表格通用 ── */
-        .table { color:var(--text); width:100%; }
-        .table>:not(caption)>*>* {
-            background: transparent;
-            border-color: var(--border-subtle);
-            padding: 8px 10px;
-        }
-        .table th {
-            color: var(--muted);
-            font-weight: 500;
-            font-size: .82rem;
-            white-space: nowrap;
-            background: var(--glass-header);
-            backdrop-filter: blur(8px);
-        }
-
-        /* ── 智能表格布局：自动宽度 ── */
-        .tracker-smart-table {
-            table-layout: auto;   /* 关键：让浏览器智能分配宽度 */
-            width: 100%;
-            min-width: 700px;     /* 防止过窄 */
-        }
-        /* 各列宽度约束（min/max，让内容自然撑开） */
-        .tracker-smart-table .col-expand  { width: 30px; min-width:30px; max-width:30px; }
-        .tracker-smart-table .col-domain  { min-width: 140px; max-width: 260px; }
-        .tracker-smart-table .col-port    { width: 62px; min-width:62px; max-width:75px; white-space:nowrap; }
-        .tracker-smart-table .col-proto   { width: 82px; min-width:80px; max-width:95px; }
-        .tracker-smart-table .col-ip      { min-width: 120px; max-width: 240px; }
-        .tracker-smart-table .col-status  { min-width: 130px; max-width: 180px; }
-        .tracker-smart-table .col-latency { width: 90px; min-width:80px; max-width:110px; }
-        .tracker-smart-table .col-country { min-width: 90px; max-width: 140px; }
-        .tracker-smart-table .col-isp     { min-width: 120px; max-width: 220px; overflow:hidden; }
-        .tracker-smart-table .col-added   { min-width: 130px; max-width: 155px; white-space:nowrap; }
-        .tracker-smart-table .col-lastchk { min-width: 130px; max-width: 155px; white-space:nowrap; }
-        .tracker-smart-table .col-actions { width: 80px; min-width:70px; max-width:90px; text-align:center; }
-
-        /* 手机端：隐藏次要列 */
-        @media (max-width: 768px) {
-            .tracker-smart-table .col-added,
-            .tracker-smart-table .col-isp { display: none; }
-        }
-        @media (max-width: 540px) {
-            .tracker-smart-table .col-country,
-            .tracker-smart-table .col-lastchk { display: none; }
-        }
-
-        /* ── 元素样式 ── */
+        .tracker-row:hover td { background:rgba(255,255,255,.05)!important; }
+        /* Fix: IP展开行不随hover清空内容 */
+        .ip-row td { background:rgba(10,30,65,.4)!important; transition:background .15s; }
+        .ip-row:hover td { background:rgba(255,255,255,.03)!important; }
         .domain-name { font-weight:600; }
-        .ip-mono { font-family: 'Courier New', monospace; font-size:.84rem; color:var(--muted); }
-        .latbar { width:80px; height:4px; background:var(--accent); border-radius:3px; overflow:hidden; display:inline-block; vertical-align:middle; }
-        .latfill           { height:100%; background:var(--ok); transition:width .3s; }
-        .latfill.lat-yellow{ background:var(--warn); }
-        .latfill.lat-red   { background:var(--err); }
+        .ip-mono { font-family:monospace; font-size:.84rem; color:var(--muted); }
+        .latbar { width:90px; height:5px; background:var(--accent); border-radius:3px; overflow:hidden; display:inline-block; vertical-align:middle; }
+        .latfill          { height:100%; background:var(--ok); transition:width .3s; }
+        .latfill.lat-yellow { background:var(--warn); }
+        .latfill.lat-red    { background:var(--err); }
         .chevron { transition:transform .2s; display:inline-block; }
         .chevron.open { transform:rotate(90deg); }
-
-        /* badge */
-        .badge-up { padding:2px 7px; border-radius:5px; font-size:.76rem; font-weight:600; }
-        .up-green   { background:rgba(52,211,153,.15);  color:var(--ok);  border:1px solid rgba(52,211,153,.25); }
-        .up-yellow  { background:rgba(251,191,36,.15);  color:var(--warn);border:1px solid rgba(251,191,36,.25); }
-        .up-red     { background:rgba(248,113,113,.15); color:var(--err); border:1px solid rgba(248,113,113,.25); }
-        .up-unknown { background:rgba(100,116,139,.12); color:#64748b;    border:1px solid rgba(100,116,139,.2); }
-
-        /* port / proto tags */
-        .port-tag {
-            font-size:.71rem;
-            background: rgba(80,140,255,0.12);
-            border: 1px solid rgba(80,140,255,0.22);
-            padding: 1px 5px; border-radius:4px;
-            color: #7eb3e8; font-family:monospace;
-        }
-        body.light-mode .port-tag { background:rgba(59,130,246,.1); border-color:rgba(59,130,246,.25); color:#2563eb; }
-        .proto-tag { font-size:.67rem; padding:2px 6px; border-radius:4px; font-weight:700; letter-spacing:.4px; }
-        .proto-udp  { background:rgba(251,191,36,.18);  color:var(--warn); border:1px solid rgba(251,191,36,.3); }
-        .proto-tcp  { background:rgba(52,211,153,.18);  color:var(--ok);   border:1px solid rgba(52,211,153,.3); }
-        .proto-https{ background:rgba(52,211,153,.15);  color:var(--ok);   border:1px solid rgba(52,211,153,.25); }
-
-        /* ── Toast ── */
+        .badge-up { padding:3px 8px; border-radius:4px; font-size:.78rem; font-weight:600; }
+        .up-green   { background:rgba(16,185,129,.18); color:var(--ok); }
+        .up-yellow  { background:rgba(245,158,11,.18);  color:var(--warn); }
+        .up-red     { background:rgba(239,68,68,.18);   color:var(--err); }
+        .up-unknown { background:rgba(100,116,139,.18); color:#64748b; }
         .toast-bar {
             position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
-            padding:10px 22px; border-radius:10px; font-size:.88rem; font-weight:500;
-            z-index:9999; pointer-events:none;
-            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-            border: 1px solid;
+            padding:10px 22px; border-radius:8px; font-size:.88rem; font-weight:500;
+            z-index:9999; box-shadow:0 4px 16px rgba(0,0,0,.4); pointer-events:none;
         }
-        .toast-bar.info  { background:rgba(30,60,95,.8);  border-color:rgba(80,140,255,.3); color:#93c5fd; box-shadow:0 4px 20px rgba(0,0,0,.4); }
-        .toast-bar.ok    { background:rgba(6,78,59,.8);   border-color:rgba(52,211,153,.3); color:#6ee7b7; box-shadow:0 4px 20px rgba(0,0,0,.4); }
-        .toast-bar.warn  { background:rgba(120,53,15,.8); border-color:rgba(251,191,36,.3); color:#fde68a; box-shadow:0 4px 20px rgba(0,0,0,.4); }
-        .toast-bar.error { background:rgba(127,29,29,.8); border-color:rgba(248,113,113,.3);color:#fca5a5; box-shadow:0 4px 20px rgba(0,0,0,.4); }
-
-        /* ── 日志 ── */
-        .log-row { font-family:monospace; font-size:.8rem; padding:4px 0; border-bottom:1px solid var(--border-subtle); word-break:break-all; }
-        .log-time { color:var(--muted); font-size:.75rem; margin-right:6px; }
-        .log-info  { color:var(--ok); }
-        .log-error { color:var(--err); }
-        .log-debug { color:#555; }
-        .log-warn  { color:var(--warn); }
-        .log-success { color:#64748b; }
-
-        /* ── 表单 ── */
-        .form-control, .form-select {
-            background: var(--input-bg);
-            backdrop-filter: blur(8px);
-            border-color: var(--glass-border);
-            color: var(--text);
-            border-radius: 8px;
-        }
-        .form-control:focus, .form-select:focus {
-            background: var(--input-bg);
-            border-color: rgba(100,160,255,.5);
-            color: var(--text);
-            box-shadow: 0 0 0 3px rgba(80,140,255,.15);
-        }
-        body.light-mode .form-control::placeholder { color:#9ab0cc; }
-        .form-control::placeholder { color:#4a6080; }
-        .form-text { color:var(--muted); font-size:.78rem; }
-
-        /* ── 按钮 ── */
-        .btn-primary {
-            background: linear-gradient(135deg, rgba(60,120,240,.8), rgba(40,90,200,.9));
-            border: 1px solid rgba(80,140,255,.4);
-            backdrop-filter: blur(8px);
-        }
-        .btn-primary:hover {
-            background: linear-gradient(135deg, rgba(80,140,255,.9), rgba(60,110,220,1));
-            border-color: rgba(100,160,255,.5);
-        }
+        .toast-bar.info  { background:#1e3a5f; color:#93c5fd; }
+        .toast-bar.ok    { background:#065f46; color:#6ee7b7; }
+        .toast-bar.warn  { background:#78350f; color:#fde68a; }
+        .toast-bar.error { background:#7f1d1d; color:#fca5a5; }
+        .log-row { font-family:monospace; font-size:.81rem; padding:3px 0; border-bottom:1px solid rgba(15,52,96,.4); word-break:break-all; }
+        .log-time { color:var(--muted); font-size:.76rem; margin-right:6px; }
+        .log-info { color:var(--ok); } .log-error { color:var(--err); }
+        .log-debug { color:#555; } .log-warn { color:var(--warn); } .log-success { color:#64748b; }
+        .form-control,.form-select { background:var(--input-bg); border-color:var(--accent); color:var(--text); }
+        .form-control:focus,.form-select:focus { background:var(--input-bg); border-color:#2a5a8a; color:var(--text); box-shadow:0 0 0 .2rem rgba(15,52,96,.4); }
+        body.light-mode .form-control,.light-mode .form-select { border-color:#94a3b8; }
+        body.light-mode .form-control:focus,.light-mode .form-select:focus { border-color:#3b82f6; box-shadow:0 0 0 .2rem rgba(59,130,246,.2); }
+        body.light-mode .table>:not(caption)>*>* { border-color:rgba(148,163,184,.4); }
+        body.light-mode .modal-content { background:#fff; }
+        body.light-mode .navbar { background:#1e40af!important; }
+        body.light-mode .card { background:#fff; border-color:#cbd5e1; box-shadow:0 1px 3px rgba(0,0,0,.08); }
+        body.light-mode .card-header { background:#eff6ff; border-color:#bfdbfe; }
+        body.light-mode .badge-up.up-green { background:rgba(5,150,105,.12); }
+        body.light-mode .badge-up.up-yellow { background:rgba(217,119,6,.12); }
+        body.light-mode .badge-up.up-red { background:rgba(220,38,38,.12); }
+        body.light-mode .ip-mono { color:#475569; }
+        body.light-mode .log-row { border-bottom-color:rgba(148,163,184,.3); }
+        body.light-mode .qs-search-input { background:#f8fafc; border-color:#cbd5e1; color:#1e293b; }
+        body.light-mode .stat-card-new { box-shadow:0 1px 4px rgba(0,0,0,.06); }
+        /* 主题切换按钮 */
+        .theme-btn { background:transparent; border:1px solid rgba(255,255,255,.2); color:var(--text); border-radius:6px; padding:4px 10px; cursor:pointer; font-size:.82rem; transition:all .15s; }
+        .theme-btn:hover { background:rgba(255,255,255,.1); }
+        body.light-mode .theme-btn { border-color:rgba(255,255,255,.4); }
+        .form-control::placeholder { color:#555; }
+        .form-text { color:#555; font-size:.79rem; }
+        .table { color:var(--text); }
+        .table>:not(caption)>*>* { background:transparent; border-color:rgba(15,52,96,.6); }
+        .table th { color:var(--muted); font-weight:500; font-size:.83rem; white-space:nowrap; }
+        .btn-primary { background:var(--accent); border-color:var(--accent); }
+        .btn-primary:hover { background:#1a4a7a; border-color:#1a4a7a; }
         .btn-close { filter:invert(1); }
-
-        /* ── 模态框 ── */
-        .modal-content {
-            background: var(--glass);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
-            border: 1px solid var(--glass-border);
-            border-radius: 16px;
-        }
-        body.light-mode .modal-content { background: rgba(255,255,255,0.85); }
-        .modal-header { border-bottom-color: var(--glass-border); }
-        .modal-footer { border-top-color: var(--glass-border); }
-
-        /* ── 主题切换按钮 ── */
-        .theme-btn {
-            background: rgba(255,255,255,.07);
-            border: 1px solid var(--glass-border);
-            color: var(--text);
-            border-radius: 8px; padding:4px 10px;
-            cursor: pointer; font-size:.82rem;
-            transition: all .18s; backdrop-filter: blur(8px);
-        }
-        .theme-btn:hover { background: rgba(255,255,255,.14); border-color: rgba(100,160,255,.35); }
-
-        /* ── empty state ── */
+        .modal-content { background:var(--card); border:1px solid var(--accent); }
+        .modal-header { border-bottom-color:var(--accent); }
+        .modal-footer { border-top-color:var(--accent); }
         .empty-st { text-align:center; padding:40px; color:var(--muted); }
-
-        /* ── rank ── */
-        .rank-item {
-            display:flex; justify-content:space-between; align-items:center;
-            padding:10px 16px;
-            border-bottom: 1px solid var(--border-subtle);
-            transition: background .15s;
-        }
-        .rank-item:hover { background: var(--row-hover); }
+        .rank-item { display:flex; justify-content:space-between; align-items:center; padding:10px 15px; border-bottom:1px solid var(--accent); }
+        .rank-item:hover { background:rgba(255,255,255,.04); }
         .rank-num { font-size:1rem; font-weight:700; color:var(--ok); width:36px; flex-shrink:0; }
-
-        /* ── misc ── */
+        .port-tag { font-size:.72rem; background:rgba(15,52,96,.9); border:1px solid #1a4a7a; padding:1px 5px; border-radius:3px; color:#7eb3e8; font-family:monospace; }
+        .proto-tag { font-size:.68rem; padding:1px 5px; border-radius:3px; font-weight:700; }
+        .proto-udp { background:rgba(245,158,11,.2); color:var(--warn); }
+        .proto-tcp { background:rgba(16,185,129,.2); color:var(--ok); }
         .cfg-row { display:flex; align-items:center; justify-content:space-between; padding:10px 0; }
         textarea.form-control { resize:vertical; min-height:110px; }
         .nav-link { cursor:pointer; }
-        .nav-tabs { border-bottom-color: var(--glass-border); }
+        .nav-tabs { border-bottom-color:var(--accent); }
         .nav-tabs .nav-link { color:var(--muted); border-color:transparent; }
         .nav-tabs .nav-link:hover { color:var(--text); }
-        .nav-tabs .nav-link.active {
-            background: var(--glass-card);
-            color: var(--text);
-            border-color: var(--glass-border);
-            border-bottom-color: transparent;
-            backdrop-filter: blur(8px);
-        }
+        .nav-tabs .nav-link.active { background:var(--card); color:var(--text); border-color:var(--accent); border-bottom-color:var(--card); }
         .retry-sm { padding:1px 5px; font-size:.72rem; }
-        .polling-badge {
-            display:inline-block;
-            background:rgba(251,191,36,.12); color:var(--warn);
-            border:1px solid rgba(251,191,36,.25);
-            border-radius:5px; padding:1px 6px; font-family:monospace; font-size:.76rem; margin-top:2px;
-        }
-        .alert-card { border-left:3px solid var(--err); background:rgba(239,68,68,.06); border-radius:8px; padding:10px 14px; margin-bottom:8px; }
+        .polling-badge { display:inline-block; background:rgba(245,158,11,.15); color:var(--warn); border:1px solid rgba(245,158,11,.3); border-radius:4px; padding:1px 6px; font-family:monospace; font-size:.76rem; margin-top:2px; }
+        .alert-card { border-left:3px solid var(--err); background:rgba(239,68,68,.06); border-radius:6px; padding:10px 14px; margin-bottom:8px; }
         .alert-card.warn { border-left-color:var(--warn); background:rgba(245,158,11,.06); }
         .alert-card-title { font-size:.88rem; font-weight:600; margin-bottom:2px; }
         .alert-card-sub { font-size:.77rem; color:#94a3b8; }
-        .alert-status-online  { color:var(--ok);  font-size:.75rem; font-weight:600; }
+        .alert-status-online { color:var(--ok); font-size:.75rem; font-weight:600; }
         .alert-status-offline { color:var(--err); font-size:.75rem; font-weight:600; }
-        .tab-pill { display:inline-flex; border-radius:8px; overflow:hidden; border:1px solid var(--glass-border); backdrop-filter:blur(8px); }
+        .tab-pill { display:inline-flex; border-radius:6px; overflow:hidden; border:1px solid #334155; }
         .tab-pill button { background:transparent; border:none; color:#94a3b8; padding:3px 12px; font-size:.78rem; cursor:pointer; transition:all .15s; }
-        .tab-pill button.active { background:rgba(80,140,255,.18); color:var(--text); }
-        .tab-pill button:hover:not(.active) { background:rgba(255,255,255,.06); }
+        .tab-pill button.active { background:rgba(15,52,96,.9); color:var(--text); }
+        .tab-pill button:hover:not(.active) { background:rgba(255,255,255,.05); }
         .qs-table td { font-size:.8rem; padding:5px 8px !important; vertical-align:middle; }
         .qs-table th { font-size:.75rem; padding:4px 8px !important; color:#64748b; font-weight:normal; }
-        .qs-search-input {
-            background: var(--input-bg);
-            backdrop-filter: blur(8px);
-            border: 1px solid var(--glass-border);
-            color: var(--text);
-            border-radius: 8px; padding:6px 32px 6px 10px; font-size:.85rem; width:100%;
-        }
-        .qs-search-input:focus { outline:none; border-color:rgba(100,160,255,.45); }
-
-        /* ── 统计卡（新版）── */
-        .stat-card-new {
-            padding: 14px 16px; margin-bottom: 0;
-            background: var(--glass-card);
-            backdrop-filter: blur(14px);
-            -webkit-backdrop-filter: blur(14px);
-            border: 1px solid var(--glass-border);
-            border-radius: 12px;
-            box-shadow: var(--shadow);
-            transition: box-shadow .2s, border-color .2s;
-        }
-        .stat-card-new:hover {
-            box-shadow: 0 8px 30px rgba(0,0,0,.3);
-            border-color: rgba(100,160,255,.28);
-        }
-        body.light-mode .stat-card-new:hover { box-shadow: 0 4px 20px rgba(100,140,220,.2); }
-        .scn-label { font-size:.77rem; color:var(--muted); margin-bottom:4px; letter-spacing:.3px; text-transform:uppercase; }
-        .scn-main  { font-size:2rem; font-weight:700; line-height:1.2; }
-        .scn-sub   { display:flex; align-items:center; gap:6px; margin-top:4px; flex-wrap:wrap; }
-        .scn-rate  { font-size:.74rem; font-weight:600; display:flex; align-items:center; gap:2px; }
-        .scn-desc  { font-size:.71rem; color:var(--muted); }
-
-        /* 拖拽把手 */
+        .qs-search-input { background:#0d2446; border:1px solid var(--accent); color:var(--text); border-radius:6px; padding:6px 32px 6px 10px; font-size:.85rem; width:100%; }
+        .qs-search-input:focus { outline:none; border-color:#2a5a8a; }
+        /* 新统计卡 */
+        .stat-card-new { padding:14px 16px; margin-bottom:0; }
+        .scn-label { font-size:.78rem; color:#64748b; margin-bottom:4px; }
+        .scn-main { font-size:2rem; font-weight:700; line-height:1.2; }
+        .scn-sub { display:flex; align-items:center; gap:6px; margin-top:4px; flex-wrap:wrap; }
+        .scn-rate { font-size:.75rem; font-weight:600; display:flex; align-items:center; gap:2px; }
+        .scn-desc { font-size:.72rem; color:#64748b; }
+        /* 右键拖拽列宽提示 */
         .resizable-th { position:relative; }
         .resizable-th .col-resize-handle { position:absolute; right:0; top:0; width:4px; height:100%; cursor:col-resize; background:transparent; }
-        .resizable-th .col-resize-handle:hover { background:rgba(100,160,255,.35); }
-        .qs-table tr.table-active td { background:rgba(80,140,255,.07)!important; }
-
-        /* 表格响应 */
-        .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: 0 0 14px 14px; }
-
-        /* 导航 active */
-        .navbar .nav-link.active {
-            color: #fff !important;
-            font-weight: 600;
-        }
-        .navbar .nav-link {
-            color: rgba(200,220,255,0.75) !important;
-            transition: color .15s;
-        }
-        .navbar .nav-link:hover { color: #fff !important; }
-        body.light-mode .navbar .nav-link { color: rgba(30,50,100,0.75) !important; }
-        body.light-mode .navbar .nav-link:hover,
-        body.light-mode .navbar .nav-link.active { color: #1a2550 !important; }
+        .resizable-th .col-resize-handle:hover { background:rgba(59,130,246,.4); }
+        /* 选中行高亮 */
+        .qs-table tr.table-active td { background:rgba(59,130,246,.06)!important; }
+        /* proto https */
+        .proto-https { background:rgba(16,185,129,.15); color:var(--ok); }
 
     </style>
 </head>
@@ -447,16 +166,6 @@
                         <i class="bi" :class="isDark ? 'bi-sun-fill' : 'bi-moon-fill'"></i>
                         <span class="d-none d-md-inline ms-1">{{ isDark ? t('nav.lightMode') : t('nav.darkMode') }}</span>
                     </button>
-                    <!-- 缩放选择器 -->
-                    <select class="form-select form-select-sm zoom-select" v-model="uiZoom" @change="applyZoom" style="width:72px;font-size:.78rem;" title="页面缩放">
-                        <option value="80">80%</option>
-                        <option value="85">85%</option>
-                        <option value="90">90%</option>
-                        <option value="95">95%</option>
-                        <option value="100">100%</option>
-                        <option value="105">105%</option>
-                        <option value="110">110%</option>
-                    </select>
                     <select class="form-select form-select-sm" v-model="locale" @change="changeLocale" style="width:140px;">
                         <option value="zh">中文</option>
                         <option value="en">English</option>
@@ -509,7 +218,7 @@
         </div>
     </div>
 
-    <div class="container-fluid p-3 p-md-4" id="main-container">
+    <div class="container-fluid p-4">
 
         <!-- 仪表盘 -->
         <div v-if="currentTab==='dashboard'">
@@ -647,9 +356,7 @@
                             </div>
                             <div v-else>
                                 <div v-for="a in dashAlerts" :key="a.domain+a.ip"
-                                     class="alert-card" :class="{warn: a.consec_fail < 10}"
-                                     style="cursor:pointer;"
-                                     @click="go('trackers'); searchQ=a.domain; nextTick(()=>{ expanded.includes(a.domain)||expanded.push(a.domain); })">
+                                     class="alert-card" :class="{warn: a.consec_fail < 10}">
                                     <div class="d-flex justify-content-between align-items-start">
                                         <div class="alert-card-title">
                                             <i class="bi bi-exclamation-circle me-1" style="color:var(--err);font-size:.85rem;"></i>{{ a.domain }}<span style="color:#64748b;font-size:.8rem;">:{{ a.port }}</span>
@@ -735,93 +442,58 @@
                         <table class="table table-sm mb-0 qs-table">
                             <thead><tr>
                                 <th style="width:28px;"><input type="checkbox" @change="qsSelectAll($event)" :checked="qsSelected.length===qsPagedResults.length && qsPagedResults.length>0" style="cursor:pointer;"></th>
-                                <!-- 域名：可排序 -->
-                                <th @click="cycleQsSort('domain')" style="max-width:200px;width:16%;cursor:pointer;user-select:none;">
-                                    {{ t('tracker.domain') }} <span style="font-size:.7rem;color:#64748b;">{{ qsSortIcon('domain') }}</span>
-                                </th>
-                                <!-- IP：可排序 -->
-                                <th @click="cycleQsSort('ip')" style="max-width:180px;width:15%;cursor:pointer;user-select:none;">
-                                    {{ t('tracker.ip') }} <span style="font-size:.7rem;color:#64748b;">{{ qsSortIcon('ip') }}</span>
-                                </th>
-                                <!-- 端口：可排序 -->
-                                <th @click="cycleQsSort('port')" style="width:58px;cursor:pointer;user-select:none;">
-                                    {{ t('tracker.port') }} <span style="font-size:.7rem;color:#64748b;">{{ qsSortIcon('port') }}</span>
-                                </th>
-                                <!-- 协议：筛选下拉 -->
-                                <th style="width:80px;">
-                                    <select v-model="qsProtoFilter" class="form-select form-select-sm" style="font-size:.72rem;padding:1px 2px;background:transparent;border-color:#334155;color:#94a3b8;width:78px;" @click.stop>
-                                        <option value="">{{ t('tracker.protocol') }}</option>
-                                        <option value="tcp">TCP</option>
-                                        <option value="udp">UDP</option>
-                                        <option value="http">HTTP</option>
-                                        <option value="https">HTTPS</option>
-                                    </select>
-                                </th>
-                                <!-- 归属地 -->
-                                <th style="width:110px;">{{ t('tracker.country') }}</th>
-                                <!-- 最后检查：可排序 -->
-                                <th @click="cycleQsSort('last_check')" style="width:145px;cursor:pointer;user-select:none;">
-                                    最后检查 <span style="font-size:.7rem;color:#64748b;">{{ qsSortIcon('last_check') }}</span>
-                                </th>
-                                <!-- 状态：可排序 -->
-                                <th @click="cycleQsSort('status')" style="width:105px;cursor:pointer;user-select:none;">
-                                    {{ t('tracker.status') }} <span style="font-size:.7rem;color:#64748b;">{{ qsSortIcon('status') }}</span>
-                                </th>
-                                <!-- 延迟：可排序 -->
-                                <th @click="cycleQsSort('latency')" style="width:72px;cursor:pointer;user-select:none;text-align:right;">
-                                    {{ t('tracker.latency') }} <span style="font-size:.7rem;color:#64748b;">{{ qsSortIcon('latency') }}</span>
-                                </th>
-                                <!-- 可用率：可排序 -->
-                                <th @click="cycleQsSort('uptime')" style="width:72px;cursor:pointer;user-select:none;text-align:right;">
-                                    {{ t('tracker.uptimeLbl') }} <span style="font-size:.7rem;color:#64748b;">{{ qsSortIcon('uptime') }}</span>
-                                </th>
-                                <th style="width:36px;"></th>
+                                <th style="max-width:200px;width:18%;">{{ t('tracker.domain') }}</th>
+                                <th style="max-width:180px;width:16%;">{{ t('tracker.ip') }}</th>
+                                <th style="width:55px;">{{ t('tracker.port') }}</th>
+                                <th style="width:60px;">{{ t('tracker.protocol') }}</th>
+                                <th style="width:115px;">{{ t('tracker.country') }}</th>
+                                <th style="width:80px;font-size:.75rem;color:#64748b;">最后检查</th>
+                                <th>{{ t('tracker.status') }}</th>
+                                <th style="text-align:right;">{{ t('tracker.latency') }}</th>
+                                <th style="text-align:right;">{{ t('tracker.uptimeLbl') }}</th>
+                                <th style="width:80px;"></th>
                             </tr></thead>
                             <tbody>
                                 <tr v-for="row in qsPagedResults" :key="row.domain+row.ip"
                                     :class="{'table-active': qsSelected.includes(row.domain+row.ip)}">
                                     <td><input type="checkbox" :value="row.domain+row.ip" v-model="qsSelected" style="cursor:pointer;"></td>
-                                    <!-- 域名列 -->
                                     <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="row.domain">
-                                        <span style="cursor:pointer;font-size:.82rem;" @click="qsFilterDomain=row.domain;qsPage=1" class="domain-name">{{ row.domain }}</span>
+                                        <span style="cursor:pointer;" @click="qsFilterDomain=row.domain;qsPage=1" class="domain-name" style="font-size:.82rem;">{{ row.domain }}</span>
                                     </td>
-                                    <!-- IP列 -->
                                     <td class="font-monospace" style="font-size:.79rem;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="row.ip" :style="{color: row.version==='ipv6'?'#38bdf8':'var(--ok)'}">{{ row.ip }}</td>
-                                    <!-- 端口列 -->
-                                    <td style="white-space:nowrap;"><span class="port-tag">:{{ row.port }}</span></td>
-                                    <!-- 协议列 -->
+                                    <td><span class="port-tag">:{{ row.port }}</span></td>
                                     <td>
                                         <span class="proto-tag" :class="'proto-'+(row.protocol==='https'?'tcp':row.protocol)">{{ row.protocol.toUpperCase() }}</span>
                                     </td>
-                                    <!-- 归属地（含运营商小字）-->
-                                    <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                                    <td style="max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                                         <span v-if="row.country_code && row.country_code!=='XX'">{{ flag(row.country_code) }} {{ row.country }}</span>
                                         <span v-else class="text-secondary">-</span>
-                                        <span v-if="row.isp" class="text-secondary" style="font-size:.7rem;display:block;overflow:hidden;text-overflow:ellipsis;" :title="row.isp">{{ row.isp }}</span>
+                                        <span v-if="row.isp" class="text-secondary" style="font-size:.72rem;display:block;overflow:hidden;text-overflow:ellipsis;" :title="row.isp">{{ row.isp }}</span>
                                     </td>
-                                    <!-- 最后检查（YYYY/MM/DD HH:MM:SS）-->
-                                    <td style="font-size:.75rem;color:#94a3b8;white-space:nowrap;">{{ fmtFullTime(row.last_check) }}</td>
-                                    <!-- 状态：✔/✖ + 浅色Online/Offline小字（无百分比）-->
-                                    <td style="white-space:nowrap;">
-                                        <span :class="stCls(row.status)" style="font-size:.88rem;"><i class="bi" :class="stIcon(row.status)"></i></span>
-                                        <span v-if="row.status==='online'" style="font-size:.72rem;color:#4ade80;margin-left:3px;opacity:.85;">Online</span>
-                                        <span v-else-if="row.status==='offline'" style="font-size:.72rem;color:#f87171;margin-left:3px;opacity:.85;">Offline</span>
-                                        <span v-else style="font-size:.72rem;color:#64748b;margin-left:3px;">-</span>
+                                    <td>
+                                        <span :class="stCls(row.status)" style="font-size:.78rem;">
+                                            <i class="bi" :class="stIcon(row.status)"></i> {{ stTxt(row.status) }}
+                                        </span>
+                                        <!-- IP级可用率 -->
+                                        <span v-if="row.ip_uptime !== null && row.ip_uptime !== undefined"
+                                              :class="row.ip_uptime>=80?'text-success':row.ip_uptime>=50?'text-warning':'text-danger'"
+                                              style="font-size:.7rem;margin-left:4px;">
+                                            {{ row.ip_uptime.toFixed(1) }}%
+                                        </span>
                                     </td>
-                                    <!-- 延迟 -->
-                                    <td style="text-align:right;white-space:nowrap;">
+                                    <td style="font-size:.75rem;color:#64748b;">
+                                        {{ fmtTime(row.last_check) }}
+                                    </td>
+                                    <td style="text-align:right;">
                                         <span v-if="row.latency>=0" :class="{'warn':row.latency>500,'err':row.latency>1500}" style="font-size:.78rem;">{{ row.latency }}ms</span>
                                         <span v-else class="text-secondary">-</span>
                                     </td>
-                                    <!-- IP级可用率（badge-up框式，稍暗）-->
-                                    <td style="text-align:right;white-space:nowrap;">
-                                        <span v-if="row.ip_uptime !== null && row.ip_uptime !== undefined"
-                                              class="badge-up" :class="row.ip_uptime>=80?'up-green':row.ip_uptime>=50?'up-yellow':'up-red'"
-                                              style="font-size:.78rem;opacity:.85;">{{ row.ip_uptime.toFixed(1) }}%</span>
-                                        <span v-else class="badge-up up-unknown" style="font-size:.78rem;opacity:.85;">?</span>
+                                    <td style="text-align:right;">
+                                        <span :class="row.upcls" style="padding:1px 5px;border-radius:4px;font-size:.78rem;">
+                                            {{ row.uptime===null ? '?' : row.uptime.toFixed(1)+'%' }}
+                                        </span>
                                     </td>
-                                    <!-- 操作 -->
-                                    <td style="text-align:center;">
+                                    <td>
                                         <button v-if="authUser.logged_in" class="btn btn-outline-primary retry-sm" @click="retryIp(row.domain,row.ip)" title="重试"><i class="bi bi-arrow-repeat"></i></button>
                                     </td>
                                 </tr>
@@ -878,83 +550,55 @@
                         <p class="mt-3">{{ t('tracker.empty') }}</p>
                     </div>
                     <div v-else class="table-responsive">
-                        <table class="table mb-0 resizable-table tracker-smart-table" id="tracker-table">
-                            <colgroup>
-                                <col class="col-expand">
-                                <col class="col-domain">
-                                <col class="col-port">
-                                <col class="col-proto">
-                                <col class="col-ip">
-                                <col class="col-status">
-                                <col class="col-latency">
-                                <col class="col-country">
-                                <col class="col-isp">
-                                <col class="col-added">
-                                <col class="col-lastchk">
-                                <col class="col-actions">
-                            </colgroup>
+                        <table class="table mb-0">
                             <thead>
                                 <tr>
-                                    <th></th><!-- C1 expand -->
+                                    <th style="width:32px;"></th>
                                     <th @click="cycleSort('domain')" style="cursor:pointer;user-select:none;">
                                         {{ t('tracker.domain') }}
-                                        <span style="font-size:.7rem;margin-left:2px;color:#475569;">
-                                            <span v-if="sortKey==='domain' && sortDir===1" style="color:#e2e8f0;">▲</span>
-                                            <span v-else-if="sortKey==='domain' && sortDir===-1" style="color:#e2e8f0;">▼</span>
-                                            <span v-else>⇅</span>
+                                        <span style="font-size:.7rem;margin-left:2px;">
+                                            <span v-if="sortKey==='domain' && sortDir===1">▲</span>
+                                            <span v-else-if="sortKey==='domain' && sortDir===-1">▼</span>
+                                            <span v-else style="color:#475569;">⇅</span>
                                         </span>
-                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
-                                    </th><!-- C2 domain -->
-                                    <th @click="cycleSort('port')" style="cursor:pointer;user-select:none;">
-                                        端口<span style="font-size:.7rem;color:#475569;margin-left:2px;">
-                                            <span v-if="sortKey==='port' && sortDir===1" style="color:#e2e8f0;">▲</span>
-                                            <span v-else-if="sortKey==='port' && sortDir===-1" style="color:#e2e8f0;">▼</span>
-                                            <span v-else>⇅</span>
-                                        </span>
-                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
-                                    </th><!-- C3 port -->
-                                    <th>
-                                        <select v-model="protoFilter" class="form-select form-select-sm" style="font-size:.72rem;padding:1px 3px;background:transparent;border-color:#334155;color:#94a3b8;width:86px;">
-                                            <option value="">协议</option>
+                                    </th>
+                                    <th style="width:70px;">
+                                        端口
+                                    </th>
+                                    <th style="width:80px;">
+                                        <select v-model="protoFilter" class="form-select form-select-sm" style="font-size:.75rem;padding:1px 4px;background:transparent;border-color:#334155;color:#94a3b8;width:82px;">
+                                            <option value="">{{ t('tracker.protocol') }}</option>
                                             <option value="tcp">TCP</option>
                                             <option value="udp">UDP</option>
                                             <option value="http">HTTP</option>
                                             <option value="https">HTTPS</option>
                                         </select>
-                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
-                                    </th><!-- C4 protocol -->
+                                    </th>
                                     <th @click="cycleExpandAll(sortedTrackers)" style="cursor:pointer;user-select:none;" :title="t('tracker.expandHint')">
-                                        {{ t('tracker.ip') }}<span style="font-size:.68rem;margin-left:2px;color:#64748b;">
+                                        {{ t('tracker.ip') }}
+                                        <span style="font-size:.68rem;margin-left:2px;color:#64748b;">
                                             <span v-if="expandState===1">⊕</span>
                                             <span v-else-if="expandState===2">⊞</span>
                                             <span v-else>⊟</span>
                                         </span>
-                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
-                                    </th><!-- C5 ip -->
+                                    </th>
                                     <th @click="cycleSort('uptime')" style="cursor:pointer;user-select:none;">
-                                        {{ t('tracker.status') }}<span style="font-size:.68rem;color:#64748b;margin-left:2px;">[{{ cfg.tracker_stat_period }}]</span>
-                                        <span style="font-size:.7rem;margin-left:2px;color:#475569;">
-                                            <span v-if="sortKey==='uptime' && sortDir===1" style="color:#e2e8f0;">▲</span>
-                                            <span v-else-if="sortKey==='uptime' && sortDir===2" style="color:#e2e8f0;">▼</span>
+                                        {{ t('tracker.status') }}
+                                        <span style="font-size:.68rem;color:#64748b;margin-left:3px;">[{{ cfg.tracker_stat_period }}]</span>
+                                        <span style="font-size:.7rem;margin-left:2px;">
+                                            <span v-if="sortKey==='uptime' && sortDir===1">▲</span>
+                                            <span v-else-if="sortKey==='uptime' && sortDir===2">▼</span>
                                             <span v-else-if="sortKey==='uptime' && sortDir===3" style="color:#22c55e;">●</span>
                                             <span v-else-if="sortKey==='uptime' && sortDir===4" style="color:#ef4444;">●</span>
-                                            <span v-else>⇅</span>
+                                            <span v-else style="color:#475569;">⇅</span>
                                         </span>
-                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
-                                    </th><!-- C6 status -->
-                                    <th @click="cycleSort('latency')" style="cursor:pointer;user-select:none;">
-                                        {{ t('tracker.latency') }}<span style="font-size:.7rem;color:#475569;margin-left:2px;">
-                                            <span v-if="sortKey==='latency' && sortDir===1" style="color:#e2e8f0;">▲</span>
-                                            <span v-else-if="sortKey==='latency' && sortDir===-1" style="color:#e2e8f0;">▼</span>
-                                            <span v-else>⇅</span>
-                                        </span>
-                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
-                                    </th><!-- C7 latency -->
-                                    <th>{{ t('tracker.country') }}<div class="col-resizer" @mousedown.stop="startResize($event)"></div></th><!-- C8 -->
-                                    <th>{{ t('tracker.isp') }}<div class="col-resizer" @mousedown.stop="startResize($event)"></div></th><!-- C9 -->
-                                    <th>{{ t('tracker.addedTime') }}</th><!-- C10 -->
-                                    <th>{{ t('tracker.lastCheck') }}</th><!-- C11 -->
-                                    <th></th><!-- C12 actions -->
+                                    </th>
+                                    <th>{{ t('tracker.latency') }}</th>
+                                    <th>{{ t('tracker.country') }}</th>
+                                    <th>{{ t('tracker.isp') }}</th>
+                                    <th>{{ t('tracker.addedTime') }}</th>
+                                    <th>{{ t('tracker.lastCheck') }}</th>
+                                    <th style="width:95px;"></th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -966,12 +610,9 @@
                                             <span v-if="tr.dns_error" class="ms-1" style="color:#f87171;font-size:.75rem;font-weight:500;">⚠ Host not found</span>
                                         </td>
                                         <td><span class="port-tag">:{{ tr.port||80 }}</span></td>
-                                        <td>
-                                            <span v-if="(tr.protocol||'tcp')==='https'" class="proto-tag proto-tcp">HTTPS</span>
-                                            <span v-else class="proto-tag" :class="'proto-'+(tr.protocol||'tcp')">{{ (tr.protocol||'tcp').toUpperCase() }}</span>
-                                        </td>
+                                        <td><span class="proto-tag" :class="'proto-'+(tr.protocol||'tcp')">{{ (tr.protocol||'tcp').toUpperCase() }}</span></td>
                                         <td><span class="text-secondary" style="font-size:.82rem;">{{ tr.ips.filter(i=>!i.removed).length }} IPs</span></td>
-                                        <td><!-- C6 status -->
+                                        <td colspan="2">
                                             <!-- 有历史数据：显示可用率百分比；无历史：显示当前在线状态 -->
                                             <span v-if="uptime(tr) !== null" class="badge-up" :class="uptimeCls(tr)">{{ uptime(tr).toFixed(1) }}%</span>
                                             <span v-else-if="tr.ips.filter(i=>!i.removed).length===0" class="badge-up up-unknown">?</span>
@@ -983,11 +624,10 @@
                                                 {{ tr.ips.filter(i=>!i.removed&&i.status==='online').length }}/{{ tr.ips.filter(i=>!i.removed).length }}
                                             </span>
                                         </td>
-                                        <td></td><!-- C7 latency placeholder -->
-                                        <td></td><!-- C8 country placeholder -->
-                                        <td></td><!-- C9 isp placeholder -->
-                                        <td><small class="text-secondary" style="font-size:.75rem;white-space:nowrap;">{{ fmtFullTime(tr.added_time) }}</small></td><!-- C10 -->
-                                        <td></td><!-- 最后检查由IP行各自显示 -->
+                                        <td></td>
+                                        <td></td>
+                                        <td><small class="text-secondary" style="font-size:.75rem;">{{ fmtFullTime(tr.added_time) }}</small></td>
+                                        <td></td>
                                         <td>
                                             <button v-if="authUser.logged_in" class="btn btn-sm btn-outline-primary me-1" @click.stop="retryDomain(domain)" title="重试全部IP"><i class="bi bi-arrow-repeat"></i></button>
                                             <button v-if="authUser.role==='admin'||authUser.role==='operator'" class="btn btn-sm btn-outline-danger" @click.stop="delTracker(domain)" title="删除"><i class="bi bi-trash"></i></button>
@@ -995,53 +635,52 @@
                                     </tr>
                                     <template v-if="expanded.includes(domain)">
                                         <tr v-for="ip in tr.ips" :key="ip.ip" class="ip-row" :style="ip.removed?'opacity:.45':''">
-                                            <td></td><!-- C1 -->
-                                            <td></td><!-- C2 -->
-                                            <td></td><!-- C3 port placeholder -->
-                                            <!-- C4: protocol badge -->
+                                            <td></td><!-- expand -->
+                                            <td></td><!-- domain -->
+                                            <td></td><!-- port: align with port column -->
+                                            <!-- protocol col: HTTP/HTTPS badge (TCP only) -->
                                             <td>
-                                                <span v-if="(tr.protocol||'tcp')==='https'" class="proto-tag proto-tcp" style="font-size:.62rem;opacity:.8;">HTTPS</span>
-                                                <span v-else-if="(tr.protocol||'tcp')==='tcp' && tr.port===443" class="proto-tag proto-tcp" style="font-size:.62rem;opacity:.8;">HTTPS</span>
+                                                <span v-if="(tr.protocol||'tcp')==='tcp' && tr.port===443" class="proto-tag proto-tcp" style="font-size:.62rem;opacity:.8;">HTTPS</span>
                                                 <span v-else-if="(tr.protocol||'tcp')==='tcp'" class="proto-tag" style="font-size:.62rem;opacity:.8;background:rgba(99,102,241,.18);color:#818cf8;">HTTP</span>
                                             </td>
-                                            <td class="ip-mono"><!-- C5 IP address -->
+                                            <td class="ip-mono">
                                                 <span :class="ip.version==='ipv4'?'ok':'text-info'" :style="ip.removed?'text-decoration:line-through':''">{{ ip.ip }}</span>
                                                 <span v-if="ip.removed" style="font-size:.68rem;color:#94a3b8;margin-left:4px;border:1px solid #475569;border-radius:3px;padding:0 3px;">已移除</span>
                                             </td>
-                                            <td style="white-space:nowrap;">
-                                                <!-- ✔/✖ icon -->
-                                                <span :class="stCls(ip.status)" style="font-size:.82rem;"><i class="bi" :class="stIcon(ip.status)"></i></span>
-                                                <!-- 带框百分比（badge-up风格，稍暗）-->
+                                            <td>
+                                                <!-- ✔/✖ + 百分比（亮色）+ Online/Offline（暗小字）-->
+                                                <span :class="stCls(ip.status)" style="font-size:.9rem;">
+                                                    <i class="bi" :class="stIcon(ip.status)"></i>
+                                                </span>
                                                 <span v-if="ip.ip_uptime !== null && ip.ip_uptime !== undefined"
-                                                      class="badge-up ms-1"
-                                                      :class="ip.status==='offline'?'up-red': ip.ip_uptime>=80?'up-green': ip.ip_uptime>=50?'up-yellow':'up-red'"
-                                                      style="font-size:.72rem;opacity:.9;">{{ ip.ip_uptime.toFixed(1) }}%</span>
-                                                <span v-else class="badge-up up-unknown ms-1" style="font-size:.72rem;opacity:.85;">?</span>
-                                                <!-- Online/Offline 浅色小字 -->
-                                                <span v-if="ip.status==='online'" style="font-size:.7rem;color:#4ade80;margin-left:3px;opacity:.8;">Online</span>
-                                                <span v-else-if="ip.status==='offline'" style="font-size:.7rem;color:#f87171;margin-left:3px;opacity:.8;">Offline</span>
-                                                <span v-else style="font-size:.7rem;color:#64748b;margin-left:3px;">-</span>
+                                                      :class="stCls(ip.status)"
+                                                      style="font-weight:600;margin-left:2px;font-size:.88rem;">
+                                                    {{ ip.ip_uptime.toFixed(1) }}%
+                                                </span>
+                                                <span v-else :class="stCls(ip.status)" style="font-weight:600;margin-left:2px;">-</span>
+                                                <span style="font-size:.7rem;color:#64748b;margin-left:3px;">{{ stTxt(ip.status) }}</span>
                                             </td>
                                             <td>
                                                 <div class="latbar"><div class="latfill" :class="latCls(ip.latency)" :style="{width:latW(ip.latency)}"></div></div>
                                                 <small v-if="ip.latency>=0" class="ms-1">{{ ip.latency }}ms</small>
                                                 <small v-else class="text-secondary ms-1">-</small>
                                             </td>
-                                            <td><!-- C8 country -->
+                                            <td>
                                                 <span v-if="ip.country && ip.country.country_code && ip.country.country_code!=='XX'">
                                                     {{ flag(ip.country.country_code) }} {{ ip.country.country }}
                                                 </span>
                                                 <span v-else class="text-secondary">-</span>
                                             </td>
-                                            <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><!-- C9 isp -->
+                                            <!-- 最后检查时间（归属地和运营商之间）-->
+                                            <td><small class="text-secondary" style="font-size:.75rem;">{{ fmtTime(ip.last_check) }}</small></td>
+                                            <td style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                                                 <span v-if="ip.country && ip.country.isp" class="text-secondary" style="font-size:.8rem;" :title="ip.country.isp">{{ ip.country.isp }}</span>
                                                 <span v-else class="text-secondary">-</span>
                                             </td>
-                                            <td></td><!-- C10 added placeholder -->
-                                            <td><!-- C11 last check -->
-                                                <small class="text-secondary" style="font-size:.75rem;white-space:nowrap;">{{ fmtFullTime(ip.last_check) }}</small>
-                                            </td>
-                                            <td><!-- C12 retry -->
+                                            <td></td>
+                                            <td></td>
+                                            <!-- 重试按钮：未登录时隐藏 -->
+                                            <td>
                                                 <button v-if="ip.status==='offline' && authUser.logged_in"
                                                         class="btn btn-outline-warning retry-sm"
                                                         @click.stop="retryIp(domain,ip.ip)" title="重试此IP">
@@ -1095,7 +734,7 @@
                                     <div class="text-secondary" style="font-size:.78rem;">{{ item.ip_count }} IPs</div>
                                 </div>
                             </div>
-                            <span class="fw-bold" style="font-size:.95rem;" :class="item.uptime===null?'up-unknown':(item.uptime>80?'up-green':(item.uptime>=50?'up-yellow':'up-red'))">{{ item.uptime===null ? '?' : item.uptime.toFixed(2)+'%' }}</span>
+                            <span class="fw-bold fs-5" :class="item.uptime===null?'up-unknown':(item.uptime>80?'up-green':(item.uptime>=50?'up-yellow':'up-red'))">{{ item.uptime===null ? '?' : item.uptime.toFixed(2)+'%' }}</span>
                         </div>
                     </div>
                 </div>
@@ -1461,13 +1100,6 @@ createApp({
         const currentTab = ref('dashboard');
         const locale = ref('zh');
         const isDark = ref(true); // 默认夜间模式
-        const uiZoom = ref('100'); // 默认100%缩放
-
-        const applyZoom = () => {
-            document.documentElement.style.fontSize = (parseInt(uiZoom.value) / 100 * 16) + 'px';
-            document.body.style.zoom = uiZoom.value + '%';
-            document.cookie = 'uiZoom=' + uiZoom.value + ';path=/;max-age=' + (365*24*3600);
-        };
         const loading = ref(true);
         const trackers = ref({});
         const stats = ref({total:0,alive:0,ipv4:0,ipv6:0,alive_v4:0,alive_v6:0});
@@ -1495,18 +1127,6 @@ createApp({
         const QS_PAGE_SIZE = 10;
         const qsSelected = ref([]); // 选中行的 domain+ip key
         const expandState = ref(0); // 0=全收缩 1=展开≤5IP的 2=展开全部
-        // 快速搜索 排序 & 筛选
-        const qsSortKey = ref(null);   // 'domain'|'ip'|'port'|'protocol'|'last_check'|'status'|'latency'|'uptime'
-        const qsSortDir = ref(1);      // 1=▲ -1=▼
-        const qsProtoFilter = ref(''); // ''|'tcp'|'udp'|'http'|'https'
-        const cycleQsSort = (key) => {
-            if (qsSortKey.value !== key) { qsSortKey.value = key; qsSortDir.value = 1; }
-            else { qsSortDir.value = qsSortDir.value === 1 ? -1 : 0; if (qsSortDir.value === 0) qsSortKey.value = null; }
-        };
-        const qsSortIcon = (key) => {
-            if (qsSortKey.value !== key) return '⇅';
-            return qsSortDir.value === 1 ? '▲' : '▼';
-        };
 
         // refreshMs 由 cfg.page_refresh_ms 驱动，保存到后端
         const refreshMs = computed({
@@ -1614,13 +1234,13 @@ createApp({
 
         const cycleSort = (key) => {
             if (sortKey.value !== key) { sortKey.value = key; sortDir.value = 1; return; }
-            if (key === 'uptime') {
-                // 1(▲高→低)→2(▼低→高)→3(●绿:在线优先)→4(●红:离线优先)→0(还原)
+            if (key === 'domain') {
+                // 1→-1→0→1...
+                sortDir.value = sortDir.value === 1 ? -1 : sortDir.value === -1 ? 0 : 1;
+            } else if (key === 'uptime') {
+                // 1(▲高→低)→2(▼低→高)→3(●绿:在线优先)→4(●红:离线优先)→0(还原)→1...
                 const seq = [1,2,3,4,0]; const i = seq.indexOf(sortDir.value);
                 sortDir.value = seq[(i+1) % seq.length];
-            } else {
-                // 其他列: 1(▲)→-1(▼)→0(清除)
-                sortDir.value = sortDir.value === 1 ? -1 : sortDir.value === -1 ? 0 : 1;
             }
             if (sortDir.value === 0) sortKey.value = null;
         };
@@ -1634,9 +1254,9 @@ createApp({
                     const proto = (data.protocol||'tcp').toLowerCase();
                     const port = data.port || 80;
                     let match = proto === protoFilter.value;
-                    // https: protocol字段='https' OR tcp+443; http: tcp+非443
-                    if (protoFilter.value === 'https') match = proto === 'https' || (proto === 'tcp' && port === 443);
-                    else if (protoFilter.value === 'http') match = proto === 'tcp' && port !== 443 && proto !== 'https';
+                    // http = tcp + port!=443, https = tcp + port=443
+                    if (protoFilter.value === 'https') match = proto === 'tcp' && port === 443;
+                    else if (protoFilter.value === 'http') match = proto === 'tcp' && port !== 443;
                     if (match) pf[d] = data;
                 }
                 base = pf;
@@ -1656,7 +1276,7 @@ createApp({
                 // 协议关键词搜索
                 const proto = (data.protocol||'tcp').toLowerCase();
                 const port = data.port || 80;
-                const protoLabel = proto==='https' ? 'https' : proto==='tcp' ? (port===443?'https':'http') : proto;
+                const protoLabel = proto==='tcp' ? (port===443?'https':'http') : proto;
                 if (protoLabel.includes(q) || proto.includes(q)) { r[d]=data; continue; }
                 const ipMatch = data.ips.filter(ip =>
                     ip.ip.toLowerCase().includes(q) ||
@@ -1731,17 +1351,6 @@ createApp({
                         if (ua !== ub) return ua - ub;
                         return offB - offA;
                     }
-                }
-                if (sortKey.value === 'port') {
-                    return sortDir.value * ((a.port||80) - (b.port||80));
-                }
-                if (sortKey.value === 'latency') {
-                    // 取域名下所有活跃IP的平均延迟（-1表示无数据，排末尾）
-                    const avgLat = (d) => {
-                        const lats = d.ips.filter(ip=>!ip.removed&&ip.latency>=0).map(ip=>ip.latency);
-                        return lats.length ? lats.reduce((a,b)=>a+b,0)/lats.length : Infinity;
-                    };
-                    return sortDir.value * (avgLat(a) - avgLat(b));
                 }
                 return 0;
             });
@@ -2134,8 +1743,7 @@ createApp({
                 // TCP协议: 根据端口推断 http/https
                 const rawProto = tr.protocol||'tcp';
                 const port = tr.port||80;
-                const displayProto = rawProto === 'https' ? 'https'
-                    : rawProto === 'tcp' ? (port===443?'https':'http') : rawProto;
+                const displayProto = rawProto === 'tcp' ? (port===443?'https':'http') : rawProto;
                 for (const ip of (tr.ips||[])) {
                     if (ip.removed) continue;
                     const co = ip.country || {};
@@ -2149,7 +1757,7 @@ createApp({
                     }
                     results.push({
                         domain, ip: ip.ip, version: ip.version||'ipv4',
-                        port, protocol: displayProto, rawProto,
+                        port, protocol: displayProto,
                         country: co.country||'', country_code: co.country_code||'',
                         isp: co.isp||'', latency: ip.latency,
                         status: ip.status||'unknown',
@@ -2159,43 +1767,7 @@ createApp({
                     });
                 }
             }
-            // ── 协议筛选 ──────────────────────────────────────
-            const pf = qsProtoFilter.value;
-            const filtered = pf ? results.filter(r => {
-                if (pf === 'tcp')   return r.rawProto === 'tcp'; // TCP包含http和https
-                if (pf === 'http')  return r.protocol === 'http';
-                if (pf === 'https') return r.protocol === 'https' || r.rawProto === 'https';
-                if (pf === 'udp')   return r.rawProto === 'udp';
-                return r.protocol === pf || r.rawProto === pf;
-            }) : results;
-
-            // ── 排序 ─────────────────────────────────────────────
-            if (qsSortKey.value) {
-                const dir = qsSortDir.value;
-                filtered.sort((a, b) => {
-                    switch(qsSortKey.value) {
-                        case 'domain':    return dir * a.domain.localeCompare(b.domain);
-                        case 'ip':        return dir * a.ip.localeCompare(b.ip);
-                        case 'port':      return dir * ((a.port||0) - (b.port||0));
-                        case 'protocol':  return dir * a.protocol.localeCompare(b.protocol);
-                        case 'last_check':
-                            const ta = a.last_check ? new Date(a.last_check).getTime() : 0;
-                            const tb = b.last_check ? new Date(b.last_check).getTime() : 0;
-                            return dir * (ta - tb);
-                        case 'status': {
-                            // online < offline < unknown; 同状态按 ip_uptime 降序
-                            const sv = s => s==='online'?2:s==='offline'?1:0;
-                            const sd = sv(a.status) - sv(b.status);
-                            if (sd !== 0) return dir * -sd; // 高优先级在前
-                            return dir * ((a.ip_uptime||0) - (b.ip_uptime||0));
-                        }
-                        case 'latency':  return dir * ((a.latency >= 0 ? a.latency : Infinity) - (b.latency >= 0 ? b.latency : Infinity));
-                        case 'uptime':   return dir * ((a.ip_uptime !== null ? a.ip_uptime : -1) - (b.ip_uptime !== null ? b.ip_uptime : -1));
-                        default: return 0;
-                    }
-                });
-            }
-            return filtered;
+            return results;
         });
 
         // 兼容旧引用
@@ -2444,40 +2016,6 @@ createApp({
             if (refreshMs.value>0) timer = setInterval(async()=>{ await loadTrackers(); await loadStats(); if(currentTab.value==='ranking') await loadRanking(); if(currentTab.value==='logs') await loadLogs(); }, refreshMs.value);
         };
 
-        // ── 列宽拖拽 (col resize) ────────────────────────────────────
-        const startResize = (e) => {
-            const th = e.target.closest('th');
-            if (!th) return;
-            const resizer = e.target;
-            resizer.classList.add('dragging');
-            const startX = e.clientX;
-            const startW = th.offsetWidth;
-            let moved = false;
-            const onMove = (mv) => {
-                moved = true;
-                const newW = Math.max(40, startW + mv.clientX - startX);
-                th.style.width = newW + 'px';
-                th.style.minWidth = newW + 'px';
-                // 切换为 fixed layout 让手动宽度生效
-                const tbl = th.closest('table');
-                if (tbl) tbl.style.tableLayout = 'fixed';
-            };
-            const onUp = (upEvt) => {
-                resizer.classList.remove('dragging');
-                document.removeEventListener('mousemove', onMove);
-                document.removeEventListener('mouseup', onUp);
-                // 若确实拖动过，阻止后续 click 事件触发排序
-                if (moved) {
-                    const stopNext = (ev) => { ev.stopPropagation(); ev.stopImmediatePropagation(); document.removeEventListener('click', stopNext, true); };
-                    document.addEventListener('click', stopNext, true);
-                }
-            };
-            document.addEventListener('mousemove', onMove);
-            document.addEventListener('mouseup', onUp);
-            e.preventDefault();
-            e.stopPropagation();
-        };
-
         onMounted(async () => {
             for (const c of document.cookie.split(';')) {
                 const parts = c.trim().split('=');
@@ -2486,10 +2024,6 @@ createApp({
                 if (k==='theme') {
                     isDark.value = v !== 'light';
                     if (v === 'light') document.body.classList.add('light-mode');
-                }
-                if (k==='uiZoom' && v && ['80','85','90','95','100','105','110'].includes(v)) {
-                    uiZoom.value = v;
-                    document.body.style.zoom = v + '%';
                 }
             }
             readHash();
@@ -2510,7 +2044,7 @@ createApp({
         });
 
         return {
-            currentTab, locale, isDark, toggleTheme, uiZoom, applyZoom, loading, trackers, stats, expanded, searchQ, logSearch,
+            currentTab, locale, isDark, toggleTheme, loading, trackers, stats, expanded, searchQ, logSearch,
             sortKey, sortDir, cycleSort, sortedTrackers,
             showAdd, addUrl, adding, addMsg, ranking, rankPeriod, filterEnabled, filterThreshold,
             logs, logLvl, cfg, refreshMs,
@@ -2527,8 +2061,7 @@ createApp({
             qsSearch, qsFilterDomain, qsPage, qsSelected, qsSelectAll,
             qsAllResults, qsResults, qsPagedResults, qsTotalPages,
             expandState, cycleExpandAll,
-            qsSortKey, qsSortDir, qsProtoFilter, cycleQsSort, qsSortIcon,
-            exportErrorLog, startResize,
+            exportErrorLog,
             chartTrend, chartPie, chartUptime, chartLatency,
             t: (key) => i18n.global.t(key)
         };

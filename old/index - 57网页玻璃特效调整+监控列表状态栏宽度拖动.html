@@ -1461,7 +1461,7 @@ createApp({
         const currentTab = ref('dashboard');
         const locale = ref('zh');
         const isDark = ref(true); // 默认夜间模式
-        const uiZoom = ref('100'); // 默认100%缩放
+        const uiZoom = ref('90'); // 默认90%缩放
 
         const applyZoom = () => {
             document.documentElement.style.fontSize = (parseInt(uiZoom.value) / 100 * 16) + 'px';
