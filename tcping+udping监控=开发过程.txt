@@ -1763,9 +1763,32 @@ i18n：
 --------------------------------------
 
 
+我只能说 牛逼 Claude！
+我想问一下 session_secret.key这个是干嘛的？这个东西开源后 会有什么后果？
+以及如何更改更新他？
+还有帮我更新一下README.md文档 以及 复制翻译弄一份 英文的文档 能在GitHub快速切换的
+我的项目地址 你知道的Network-Monitor/README.md at main · game-turn-over-skill-group/Network-Monitor
+
+----------
+
+session_secret.key 总结：
+它是 Flask 用来给 Session Cookie 加签名的 32 字节随机密钥，保存在本地文件里是为了让服务重启后用户不需要重新登录。
+开源后如果这个文件被别人拿到，他们就能伪造任意用户的 Cookie，不需要知道密码就能直接以 admin 身份登录。
+一定要在 .gitignore 里加上这几行：
+gitignoresession_secret.key
+config.json
+data.json
+error.log
+README 更新内容：
+中英文都同步更新了以下内容：仪表盘新功能（6格统计卡、告警中心、快速搜索翻页）、
+账户权限系统（三级角色、登录自动刷新配置）、新搜索功能（ESC清空、时间搜索、日志级别关键词）、
+HTTP/HTTPS协议区分、文件名更新（config.json / data.json / error.log）、
+安全注意事项（session_secret.key 专门单独一节说明）、
+常见问题补充了登录配置不刷新和多用户权限两条。
+两份文档顶部互相有语言切换链接，符合 GitHub 的阅读习惯。
 
 
-
+--------------------------------------
 
 
 
