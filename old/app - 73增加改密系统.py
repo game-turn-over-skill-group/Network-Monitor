@@ -205,7 +205,7 @@ def _login_check_and_record(ip: str, success: bool) -> tuple:
             locked_until = now + _LOGIN_LOCKOUT_S
             new_warned = True
             # 只打印一次，后续同一IP被拒绝时静默（nginx access log 照常记录 429）
-            cprint(f'[auth] IP {ip} 登录失败 {fail_count} 次，锁定 {_LOGIN_LOCKOUT_S//60} 分钟', 'info')
+            cprint(f'[auth] IP {ip} 登录失败 {fail_count} 次，锁定 {_LOGIN_LOCKOUT_S//60} 分钟', 'error')
         _login_fail[ip] = [fail_count, locked_until, new_warned]
         return False, 0
 
@@ -226,12 +226,10 @@ LEVEL_ORDER = {'none': 0, 'info': 1, 'error': 2, 'debug': 3}
 # 完全静默的路径（前端内部轮询/导航，不是真实用户请求）
 _NOISY_PATHS = {'/api/auth/whoami', '/api/nav'}
 
-_ACCESS_LOG_FILE = 'access.log'
-
 def cprint(msg: str, level: str = 'info', raw: bool = False):
     """根据 log_level 决定是否打印到控制台。
     raw=True：原样输出（nginx access log 或自定义格式，不加前缀）
-    raw=False：加 YYYY/M/D HH:MM:SS [LEVEL] 前缀（内部日志）；同时写入 access.log
+    raw=False：加 YYYY/M/D HH:MM:SS [LEVEL] 前缀（内部日志）
     """
     cl = CONFIG.get('log_level', CONFIG.get('console_log_level', 'info'))
     if cl == 'none':
@@ -248,15 +246,9 @@ def cprint(msg: str, level: str = 'info', raw: bool = False):
         now = datetime.now()
         ts = f"{now.year}/{now.month}/{now.day} {now.strftime('%H:%M:%S')}"
         prefix = {'info': '[INFO]', 'error': '[ERROR]', 'debug': '[DEBUG]'}.get(level, '[INFO]')
-        line = f"  {ts} {prefix} {msg}"
-        print(line, flush=True)
-        # info 级别写入 access.log；error 级别已有 error.log 专门记录，不重复写入
-        if level == 'info' and CONFIG.get('log_to_disk'):
-            try:
-                with open(_ACCESS_LOG_FILE, 'a', encoding='utf-8') as f:
-                    f.write(line + '\n')
-            except Exception:
-                pass
+        print(f"  {ts} {prefix} {msg}", flush=True)
+
+_ACCESS_LOG_FILE = 'access.log'
 
 def _write_access_log(line: str):
     """把一行 nginx 格式日志写入 access.log（仅 log_to_disk=True 时）"""
@@ -2337,8 +2329,7 @@ if __name__ == '__main__':
         port = CONFIG['port']
         serve(app,
               listen=f'0.0.0.0:{port} [::]:{port}',
-              threads=8,
-              ident='')  # 禁止 waitress 注入 Server 响应头
+              threads=8)
     except ImportError:
         print("  提示: pip install waitress 可消除开发警告\n")
         # Flask 开发服务器：在支持 IPv6 的系统上 '::' 通常同时接受 IPv4（双栈）

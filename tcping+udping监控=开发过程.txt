@@ -3142,19 +3142,106 @@ loadCfg() 无条件调用（所有用户，未登录也能拿到公开字段）
 --------------------------------------
 
 
-请求流量优化 基本完成了
+//增加改密系统
 
+请求流量优化 基本完成了
+现在就缺少 改密码系统了 就能上线了 我要给我的朋友登录
+改密码的话 需要登录才能改吧 要确认旧密码+新密码输入一致才行吧 要怎么弄？帮我加上？
+
+----------
+
+后端没有改密接口，需要全新加。现在规划清楚：
+所有已登录用户都能改自己的密码（导航栏头像旁加一个「改密」按钮）
+流程：输入旧密码 → 输入新密码 → 确认新密码（两次一致）→ 提交
+后端 POST /api/auth/change-password：验证旧密码 → 更新 → persist
+admin 在用户管理页依然可以强制重置他人密码（不需要旧密码）
+
+改动说明：
+后端 app.py — 新增 POST /api/auth/change-password：
+
+需登录才能调用，未登录返回 403
+验证旧密码正确才允许修改
+新密码最短 6 位，最长 256 位
+修改后用 PBKDF2+盐重新哈希，立即 persist_config 写入 config.json
+控制台记录：chpw [用户名] 密码已更新 或 chpw [用户名] 旧密码错误
+
+前端 index.html：
+
+导航栏头像右侧加了一个🔑按钮（bi-key 图标），仅登录后显示
+弹窗三个字段：旧密码、新密码、确认新密码
+确认新密码输入时实时校验是否一致，不一致显示红色边框和提示
+前端也做了长度校验（≥6位），和后端双重保障
+提交按钮在密码不一致或请求中时自动禁用
+成功后自动清空表单，2秒后关闭弹窗
+支持回车键提交（@keyup.enter="doChpw"）
 
 
 --------------------------------------
 
 
+//密码错误多次记录到系统日志
+
+基本完美了，但是我还是发现了个小问题
+  2026/3/8 16:37:34 [ERROR] [auth] IP ::1 登录失败 10 次，锁定 10 分钟
+这种 很关键的日志 没有记录到access.log中 日志级别 给他算[INFO]
+
+----------
+
+两处改动：
+① 锁定告警级别从 error 改为 info，这样在日志级别设为 info 时也能看到（之前设 error 反而可能在某些配置下被过滤）。
+② cprint 内部日志同步写入 access.log，条件是 log_to_disk=True 且级别为 info 或 error（debug 不写，避免文件过大）。
+这样所有关键内部事件，包括登录锁定、密码迁移、代理重置等，都会出现在 access.log 里，格式和控制台一致：
+  2026/3/8 16:37:34 [INFO] [auth] IP ::1 登录失败 10 次，锁定 10 分钟。
+
+----------
+A：
+
+error级别的日志 别写入access.log 因为error已经有专门的error.log来记录了
+
+----------
+
+明白，error 级别只写 error.log，info 级别写 access.log。
+一行改动：level in ('info', 'error') → level == 'info'。现在 info 级别的内部日志写 access.log，error 级别只走 error.log，各归各处。
 
 
+--------------------------------------
 
 
+C:\Users\Administrator\Desktop>curl -v http://[::1]:443/
+*   Trying [::1]:443...
+* Connected to ::1 (::1) port 443
+> GET / HTTP/1.1
+> Host: [::1]:443
+> User-Agent: curl/8.9.1
+> Accept: */*
+>
+< HTTP/1.1 200 OK
+< Cache-Control: no-cache
+< Content-Length: 186352
+< Content-Type: text/html; charset=utf-8
+< Date: Sun, 08 Mar 2026 09:51:43 GMT
+< Etag: "792dbca77b90f03e0038ef75e1029389"
+< Referrer-Policy: same-origin
+< Server: waitress
+< X-Content-Type-Options: nosniff
+< X-Frame-Options: SAMEORIGIN
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+
+现在该怎么做？还有我删除了Server 头
+为什么还有Server: waitress？如何从代码上 杜绝这个问题？
+
+问题2：Server: waitress 删不掉
+waitress 在 Flask after_request 之后、发送响应之前自己又把 Server 头加回来了。Flask 层删掉没用，
+需要在 waitress 层禁用：
+ident='' 是 waitress 官方参数，传空字符串就不会注入 Server 头，
+之前在 Flask 层 response.headers.remove('Server') 删的是 Flask 自己加的，
+但 waitress 在更底层又加了一次，所以没用。现在两层都处理了，响应里不会再有 Server 头。
 
 
+--------------------------------------
 
 
 

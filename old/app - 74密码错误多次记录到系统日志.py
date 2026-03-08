@@ -2337,8 +2337,7 @@ if __name__ == '__main__':
         port = CONFIG['port']
         serve(app,
               listen=f'0.0.0.0:{port} [::]:{port}',
-              threads=8,
-              ident='')  # 禁止 waitress 注入 Server 响应头
+              threads=8)
     except ImportError:
         print("  提示: pip install waitress 可消除开发警告\n")
         # Flask 开发服务器：在支持 IPv6 的系统上 '::' 通常同时接受 IPv4（双栈）
