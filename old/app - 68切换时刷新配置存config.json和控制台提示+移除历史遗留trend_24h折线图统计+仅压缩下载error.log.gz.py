@@ -81,8 +81,7 @@ def persist_config(cfg):
                                         'log_to_disk','log_level',
                                         'http_proxy','udp_proxy','proxy_enabled',
                                         'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
-                                        'tracker_stat_period','rank_stat_period','cache_history',
-                                        'tab_switch_refresh','users']
+                                        'tracker_stat_period','rank_stat_period','cache_history','users']
                    if k in cfg}
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(savable, f, indent=2, ensure_ascii=False)
@@ -179,34 +178,25 @@ _retry_throttle_lock = threading.Lock()
 _login_fail: dict = {}
 _login_fail_lock = threading.Lock()
 _LOGIN_MAX_FAIL  = 10          # 最大连续失败次数
-_LOGIN_LOCKOUT_S = 600         # 锁定时长（秒）= 10分钟
+_LOGIN_LOCKOUT_S = 300         # 锁定时长（秒）= 5分钟
 
 def _login_check_and_record(ip: str, success: bool) -> tuple:
     """检查是否被锁定，并记录结果。
-    返回 (is_locked, seconds_remaining)。
-    locked_until=0 表示未锁定。
-    warned=True 表示本次锁定已打印过告警，不再重复。"""
+    返回 (is_locked, seconds_remaining)。"""
     now = time.time()
     with _login_fail_lock:
-        rec = _login_fail.get(ip, [0, 0, False])  # [fail_count, locked_until, warned]
-        fail_count, locked_until, warned = rec[0], rec[1], rec[2] if len(rec) > 2 else False
-        # 已在锁定期内
+        rec = _login_fail.get(ip, [0, 0])
+        fail_count, locked_until = rec
         if locked_until > now:
             return True, int(locked_until - now)
-        # 锁定已过期，重置
-        if locked_until and locked_until <= now:
-            fail_count, locked_until, warned = 0, 0, False
         if success:
-            _login_fail[ip] = [0, 0, False]
+            _login_fail[ip] = [0, 0]
             return False, 0
         fail_count += 1
-        new_warned = warned
-        if fail_count >= _LOGIN_MAX_FAIL and not warned:
+        if fail_count >= _LOGIN_MAX_FAIL:
             locked_until = now + _LOGIN_LOCKOUT_S
-            new_warned = True
-            # 只打印一次，后续同一IP被拒绝时静默（nginx access log 照常记录 429）
-            cprint(f'[auth] IP {ip} 登录失败 {fail_count} 次，锁定 {_LOGIN_LOCKOUT_S//60} 分钟', 'error')
-        _login_fail[ip] = [fail_count, locked_until, new_warned]
+            cprint(f'[auth] {ip} 登录失败超过{_LOGIN_MAX_FAIL}次，锁定{_LOGIN_LOCKOUT_S}s', 'error')
+        _login_fail[ip] = [fail_count, locked_until]
         return False, 0
 
 def _check_retry_throttle(interval_ms: float) -> bool:
@@ -396,13 +386,6 @@ class TrackerDB:
                     for pk in ('24h','7d','30d'):
                         ph = ip_obj.get(f'history_{pk}', [])
                         ip_copy[f'uptime_{pk}'] = round(sum(ph)/len(ph)*100, 1) if ph else None
-                    # IP 级末尾连续失败次数（告警用，每个IP独立计算）
-                    ip_h24 = ip_obj.get('history_24h', [])
-                    ip_consec = 0
-                    for v in reversed(ip_h24):
-                        if v == 0: ip_consec += 1
-                        else: break
-                    ip_copy['consec_fail'] = ip_consec
                     ips_copy.append(ip_copy)
                 t_copy['ips'] = ips_copy
                 # 域名级：用预计算的百分比代替巨大0/1数组，大幅压缩体积
@@ -419,6 +402,13 @@ class TrackerDB:
                         t_copy[f'ok_{pk}']     = 0
                         t_copy[f'total_{pk}']  = 0
                 # 趋势图已移除，不再传输原始0/1点位数据
+                # 末尾连续失败次数（告警判断用）
+                raw_24h = t.get('history_24h', [])
+                consec = 0
+                for v in reversed(raw_24h):
+                    if v == 0: consec += 1
+                    else: break
+                t_copy['consec_fail'] = consec
                 # 删除所有原始0/1数组，不传给前端
                 for k in ('history_24h', 'history_7d', 'history_30d'):
                     t_copy.pop(k, None)
@@ -1857,32 +1847,34 @@ def index():
 @app.route('/api/auth/login', methods=['POST'])
 def api_login():
     client = _client_ip()
-    # 先纯检查是否已被锁定（不记录失败次数）
+    # 暴力破解检查
+    locked, remaining = _login_check_and_record(client, False)  # 先假设失败做预检查
+    # 预检查：如果该IP已被锁定，直接拒绝（不需要真正校验密码）
     with _login_fail_lock:
-        rec = _login_fail.get(client, [0, 0, False])
-        locked_until = rec[1] if len(rec) > 1 else 0
-        if locked_until > time.time():
-            remaining = int(locked_until - time.time())
-            # 锁定期间的重复请求：nginx access log 照常记 429，不额外 cprint（已打印过一次）
-            return jsonify({'error': f'登录尝试过多，请 {remaining//60} 分 {remaining%60} 秒后再试'}), 429
+        rec = _login_fail.get(client, [0, 0])
+        if rec[1] > time.time():
+            return jsonify({'error': f'登录尝试过多，请 {int(rec[1]-time.time())}s 后再试'}), 429
 
     data = request.json or {}
     username = (data.get('username','') or '').strip()
     password = data.get('password','') or ''
+    # 基本长度检查，防止超长字符串暴力攻击
     if not username or len(username) > 64 or len(password) > 256:
         _login_check_and_record(client, False)
         return jsonify({'error': '用户名或密码错误'}), 401
     user = _find_user(username)
     if not user:
+        # 常量时间返回，防时序攻击
         secrets.compare_digest('a', 'b')
         _login_check_and_record(client, False)
         return jsonify({'error': '用户名或密码错误'}), 401
-    stored_salt = user.get('salt')
+    stored_salt = user.get('salt')  # 新版有盐字段
     if not _verify_pw(password, user['password'], stored_salt):
         _login_check_and_record(client, False)
         return jsonify({'error': '用户名或密码错误'}), 401
     # 登录成功：清除失败计数
     _login_check_and_record(client, True)
+    # 登录成功后自动将旧版 SHA256 迁移到 PBKDF2+盐
     if not stored_salt:
         new_hash, new_salt = _hash_pw(password)
         user['password'] = new_hash
@@ -2127,12 +2119,9 @@ def api_history_status():
         return jsonify({'has_cache': False, 'error': str(e)})
 
 @app.route('/api/config', methods=['GET','POST'])
+@_require_role('admin')
 def api_config():
-    # POST 修改配置：仅 admin
     if request.method == 'POST':
-        role = session.get('role')
-        if role != 'admin':
-            return jsonify({'error': '权限不足'}), 403
         data = request.json or {}
         keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'log_to_disk','log_level','console_log_level','http_proxy','udp_proxy','proxy_enabled',
@@ -2160,10 +2149,12 @@ def api_config():
             'cache_history':       '缓存统计可用率',
             'tab_switch_refresh':  '切换时刷新',
         }
+        # 单位后缀
         suffixes = {
             'check_interval': 's', 'timeout': 's', 'retry_interval': 's',
             'page_refresh_ms': 'ms',
         }
+        # 布尔值显示
         bool_fmt = {True: '开', False: '关'}
 
         changes = []
@@ -2171,6 +2162,7 @@ def api_config():
             if k not in data: continue
             old_val = CONFIG.get(k)
             new_val = data[k]
+            # console_log_level 作为 log_level 的别名写入
             if k == 'console_log_level':
                 k = 'log_level'
                 old_val = CONFIG.get('log_level', CONFIG.get('console_log_level'))
@@ -2186,6 +2178,7 @@ def api_config():
 
         persist_config(CONFIG)
 
+        # 代理相关配置变更 → 销毁旧 SOCKS5 连接池，下次 udp_ping 自动重建
         proxy_changed_keys = {'udp_proxy', 'proxy_enabled', 'timeout'}
         if any(k in data for k in proxy_changed_keys):
             _socks5_pool.invalidate()
@@ -2194,20 +2187,11 @@ def api_config():
         if changes:
             msg = f"配置已更新: {' | '.join(changes)}"
             g.access_note = msg
+        # else: 无变更时完全静默
 
         return jsonify({'success':True,'config':{k:CONFIG[k] for k in keys if k != 'console_log_level'}})
-
-    # GET 读取配置：未登录只返回前端行为控制必要字段（不含账户/代理等敏感信息）
-    # 已登录用户额外返回运维相关字段（仍不含账户信息）
-    public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'tracker_stat_period', 'rank_stat_period']
-    if not session.get('role'):
-        return jsonify({k: CONFIG.get(k) for k in public_keys})
-    # 已登录用户返回更多展示字段，但不含账户信息（users/密钥）
-    all_keys = ['check_interval','timeout','retry_mode','retry_interval',
-                'log_to_disk','log_level','http_proxy','udp_proxy','proxy_enabled',
-                'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
-                'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh']
-    return jsonify({k: CONFIG.get(k) for k in all_keys})
+    safe = {k:v for k,v in CONFIG.items() if k not in ('data_file','log_file','users')}
+    return jsonify(safe)
 
 @app.route('/api/users', methods=['GET'])
 @_require_role('admin')
