@@ -49,8 +49,6 @@ DEFAULT_CONFIG = {
     'rank_stat_period': '24h',    # 可用率排行统计周期：24h | 7d | 30d
     'tab_switch_refresh': True,   # 切换仪表盘/监控列表时是否刷新数据
     'export_suffix': '/announce',   # 导出 tracker 列表时追加的路径后缀
-    'show_removed_ips': True,       # 是否显示已移除的历史IP（前端控制）
-    'default_layout_width': '1700', # 默认页面视野宽度（px字符串，对应50%~100%）
     'users': [
         {"username": "admin",    "password": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", "role": "admin"},
         {"username": "operator", "password": "06e55b633481f7bb072957eabcf110c972e86691c3cfedabe088024bffe42f23", "role": "operator"},
@@ -70,7 +68,7 @@ def load_config():
                       'log_to_disk','log_level','console_log_level',
                       'http_proxy','udp_proxy','proxy_enabled',
                       'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
-                      'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','users']:
+                      'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh','export_suffix','users']:
                 if k in saved:
                     cfg[k] = saved[k]
             # 向后兼容：旧配置文件用 console_log_level，迁移到 log_level
@@ -88,7 +86,7 @@ def persist_config(cfg):
                                         'http_proxy','udp_proxy','proxy_enabled',
                                         'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
                                         'tracker_stat_period','rank_stat_period','cache_history',
-                                        'tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','users']
+                                        'tab_switch_refresh','export_suffix','users']
                    if k in cfg}
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(savable, f, indent=2, ensure_ascii=False)
@@ -329,8 +327,7 @@ class TrackerDB:
                 existing = {x['ip'] for x in self.trackers[domain]['ips']}
                 for info in ip_list:
                     if info['ip'] not in existing:
-                        info.update({'status': 'unknown', 'latency': -1, 'last_check': None,
-                                     'added_time': datetime.now().isoformat()})
+                        info.update({'status': 'unknown', 'latency': -1, 'last_check': None})
                         self.trackers[domain]['ips'].append(info)
             self._save()
 
@@ -427,9 +424,6 @@ class TrackerDB:
                     # 附加当前统计周期的 IP 级可用率
                     h = ip_obj.get(f'history_{period}', [])
                     ip_copy['ip_uptime'] = round(sum(h)/len(h)*100, 1) if h else None
-                    # 兼容旧数据：IP 没有 added_time 时，用域名的 added_time 代替
-                    if 'added_time' not in ip_copy:
-                        ip_copy['added_time'] = t.get('added_time')
                     # 同时附加三个周期（前端可按需使用）
                     for pk in ('24h','7d','30d'):
                         ph = ip_obj.get(f'history_{pk}', [])
@@ -474,18 +468,12 @@ class TrackerDB:
                 uptime = (sum(h)/len(h)*100) if h else None
                 if uptime is None and min_uptime > 0: continue
                 if uptime is not None and uptime < min_uptime: continue
-                active_ips = [ip for ip in d['ips'] if not ip.get('removed')]
-                online_count = sum(1 for ip in active_ips if ip.get('status') == 'online')
-                # 收集 IP 版本集合
-                versions = list({ip.get('version','ipv4') for ip in active_ips})
-                has_v4 = 'ipv4' in versions
-                has_v6 = 'ipv6' in versions
+                online_count = sum(1 for ip in d['ips'] if ip.get('status') == 'online' and not ip.get('removed'))
                 out.append({'domain': domain, 'port': d.get('port',80),
                             'protocol': d.get('protocol','tcp'),
                             'uptime': round(uptime,2) if uptime is not None else None,
-                            'ip_count': len(active_ips),
-                            'online_count': online_count,
-                            'has_v4': has_v4, 'has_v6': has_v6})
+                            'ip_count': len(d['ips']),
+                            'online_count': online_count})
         # 主排序：可用率高→低；同可用率：在线数多→少；再同：名称字母序
         out.sort(key=lambda x: (-(x['uptime'] if x['uptime'] is not None else -1), -x['online_count'], x['domain']))
         return out[:limit]
@@ -612,15 +600,15 @@ class TrackerDB:
                         'dns_error': t.get('dns_error', False)
                     }
                 self._recalc()
-            # 预热 geo 缓存：把 data.json 中已有的有效 country 数据加载到内存缓存
-            # 只预热成功的（countryCode != XX），失败的允许下次重新查询
+            # 预热 geo 缓存：把 data.json 中已有的 country 数据加载到内存缓存
+            # 避免重启后第一轮 DNS 解析时对每个已知 IP 重复查归属地
             warmed = 0
             with _geo_cache_lock:
                 for td in self.trackers.values():
                     for ip_obj in td.get('ips', []):
                         ip  = ip_obj.get('ip', '')
                         geo = ip_obj.get('country')
-                        if ip and geo and geo.get('country_code','XX') != 'XX' and ip not in _geo_cache:
+                        if ip and geo and ip not in _geo_cache:
                             _geo_cache[ip] = geo
                             warmed += 1
             if warmed:
@@ -1172,9 +1160,8 @@ def _is_safe_public_ip(ip: str) -> bool:
 def get_geo(ip: str) -> dict:
     # 先查缓存，命中直接返回，不发网络请求
     with _geo_cache_lock:
-        cached = _geo_cache.get(ip)
-        if cached and cached.get('country_code','XX') != 'XX':
-            return cached   # 只用成功的缓存；XX 表示之前失败，允许重试
+        if ip in _geo_cache:
+            return _geo_cache[ip]
     result = {'country':'Unknown','country_code':'XX','isp':'Unknown'}
     # SSRF防护：仅对公网IP发起查询，私有/回环地址直接返回Unknown
     if not _is_safe_public_ip(ip):
@@ -1184,21 +1171,20 @@ def get_geo(ip: str) -> dict:
     # 未命中，请求 ip-api.com
     try:
         s = get_requests_session()
+        # 对IP进行URL编码确保安全，防止路径注入
         import urllib.parse
         safe_ip = urllib.parse.quote(ip, safe=':.[]')
         r = s.get(f"http://ip-api.com/json/{safe_ip}?fields=country,countryCode,isp", timeout=5)
         if r.status_code == 200:
             d = r.json()
-            if d.get('countryCode') and d['countryCode'] != 'XX':
-                result = {'country': d.get('country','Unknown'),
-                          'country_code': d.get('countryCode','XX'),
-                          'isp': d.get('isp','Unknown')}
-                with _geo_cache_lock:
-                    _geo_cache[ip] = result
-                return result
+            result = {'country': d.get('country','Unknown'),
+                      'country_code': d.get('countryCode','XX'),
+                      'isp': d.get('isp','Unknown')}
     except Exception:
         pass
-    # 失败时不写入缓存（下次检测轮次会重试）
+    # 无论成功失败都缓存（失败的也缓存Unknown，避免反复请求无效IP）
+    with _geo_cache_lock:
+        _geo_cache[ip] = result
     return result
 
 def _resolve_system(domain: str):
@@ -1696,6 +1682,7 @@ def _check_one(domain, ip_info):
         status, lat, err = check_ip(domain, ip_info, retry=True)
         lat_s = f"{lat}ms" if lat >= 0 else "N/A"
         if status == 'skipped':
+            # 代理不可用，保留上次状态，仅 debug 级记录，不污染错误日志
             cprint(f"⏭ {proto_s}://{domain}:{port} ({ip}) 跳过 | {err}", 'debug')
         elif status == 'online':
             msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}"
@@ -1706,21 +1693,6 @@ def _check_one(domain, ip_info):
             msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}"
             db.add_log(msg, 'error')
             cprint(msg, 'error')
-        # 若该 IP 归属地未知，顺带补查（锁外查询，避免长时间持锁）
-        need_geo = False
-        with db.lock:
-            for ip_obj in db.trackers.get(domain, {}).get('ips', []):
-                if ip_obj.get('ip') == ip:
-                    need_geo = ip_obj.get('country', {}).get('country_code', 'XX') == 'XX'
-                    break
-        if need_geo:
-            new_geo = get_geo(ip)  # 网络请求在锁外
-            if new_geo.get('country_code', 'XX') != 'XX':
-                with db.lock:
-                    for ip_obj in db.trackers.get(domain, {}).get('ips', []):
-                        if ip_obj.get('ip') == ip:
-                            ip_obj['country'] = new_geo
-                            break
     except Exception as e:
         msg = f"检查异常 {domain}:{port} ({ip}): {type(e).__name__}: {e}"
         db.add_log(msg, 'error')
@@ -1737,48 +1709,39 @@ _probe_ok   = True    # 探针当前状态（True=可达，False=不可达）
 _probe_lock = threading.Lock()
 
 def _probe_loop():
-    """后台探针线程：多目标探测，任一可达即视为网络正常，全部不可达才告警。"""
+    """后台探针线程：每30秒 TCP 连接 8.8.8.8:53，更新 _probe_ok 状态。
+    失败时只打一次告警，恢复时打一次恢复提示。"""
     global _probe_ok
     _warned = False
-    # 多个探针目标：任一可达即认为网络正常（避免单点误判）
-    PROBE_TARGETS = [
-        ('8.8.8.8',   53),   # Google DNS
-        ('1.1.1.1',   53),   # Cloudflare DNS
-        ('114.114.114.114', 53),  # 国内DNS（服务器在国内也能探到）
-    ]
+    PROBE_HOST = '8.8.8.8'
+    PROBE_PORT = 53
     PROBE_TIMEOUT = 3
+    PROBE_INTERVAL = 30
 
     while True:
-        probe_interval = CONFIG.get('check_interval', 30)
-        reachable = False
-        hit_target = ''
-        for host, port in PROBE_TARGETS:
-            try:
-                s = socket.create_connection((host, port), timeout=PROBE_TIMEOUT)
-                s.close()
-                reachable = True
-                hit_target = f"{host}:{port}"
-                break
-            except Exception:
-                continue
+        try:
+            s = socket.create_connection((PROBE_HOST, PROBE_PORT), timeout=PROBE_TIMEOUT)
+            s.close()
+            reachable = True
+        except Exception:
+            reachable = False
 
         with _probe_lock:
             prev = _probe_ok
             _probe_ok = reachable
 
         if not reachable and not _warned:
-            targets_str = ', '.join(f"{h}:{p}" for h,p in PROBE_TARGETS)
-            msg = f"[探针] 全部目标({targets_str})均不可达，本地网络可能异常"
+            msg = f"[探针] 无法连接 {PROBE_HOST}:{PROBE_PORT}，本地网络可能异常"
             db.add_log(msg, 'error')
             cprint(msg, 'error')
             _warned = True
         elif reachable and _warned:
-            msg = f"[探针] 网络已恢复，{hit_target} 可达"
+            msg = f"[探针] 网络已恢复，{PROBE_HOST}:{PROBE_PORT} 可达"
             db.add_log(msg, 'info')
             cprint(msg, 'info')
             _warned = False
 
-        time.sleep(probe_interval)
+        time.sleep(PROBE_INTERVAL)
 
 
 # 立即检测触发器：启动时或添加 tracker 后置位，monitor_loop 检测到后立即执行（不等待 check_interval）
@@ -2502,7 +2465,7 @@ def api_config():
             return jsonify({'error': '权限不足'}), 403
         data = request.json or {}
         keys = ['check_interval','timeout','retry_mode','retry_interval',
-                'monitor_workers','export_suffix','show_removed_ips','default_layout_width',
+                'monitor_workers','export_suffix',
                 'log_to_disk','log_level','console_log_level','http_proxy','udp_proxy','proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
                 'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh']
@@ -2569,15 +2532,14 @@ def api_config():
 
     # GET 读取配置：未登录只返回前端行为控制必要字段（不含账户/代理等敏感信息）
     # 已登录用户额外返回运维相关字段（仍不含账户信息）
-    public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'tracker_stat_period', 'rank_stat_period', 'show_removed_ips', 'default_layout_width']
+    public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'tracker_stat_period', 'rank_stat_period']
     if not session.get('role'):
         return jsonify({k: CONFIG.get(k) for k in public_keys})
     # 已登录用户返回更多展示字段，但不含账户信息（users/密钥）
     all_keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'log_to_disk','log_level','http_proxy','udp_proxy','proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
-                'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh',
-                'show_removed_ips','monitor_workers','export_suffix','default_layout_width']
+                'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh']
     return jsonify({k: CONFIG.get(k) for k in all_keys})
 
 @app.route('/api/users', methods=['GET'])
@@ -2628,36 +2590,6 @@ def api_users_save():
 if __name__ == '__main__':
     db.load()
     db.add_log("网络监控服务启动", 'info')
-
-    # 启动后台 geo 补查线程：修复 data.json 中遗留的 XX/Unknown 归属地
-    def _geo_repair_loop():
-        """启动后延迟10s开始，逐个补查归属地为 Unknown 的 IP，避免启动时并发过高"""
-        import time as _time
-        _time.sleep(10)
-        with db.lock:
-            xx_ips = []
-            for domain, td in db.trackers.items():
-                for ip_obj in td.get('ips', []):
-                    c = ip_obj.get('country', {})
-                    if isinstance(c, dict) and c.get('country_code', 'XX') == 'XX':
-                        xx_ips.append((domain, ip_obj))
-        if xx_ips:
-            cprint(f"[geo] 发现 {len(xx_ips)} 个未知归属地IP，开始后台补查…", 'info')
-        for domain, ip_obj in xx_ips:
-            ip = ip_obj.get('ip', '')
-            if not ip: continue
-            new_geo = get_geo(ip)
-            if new_geo.get('country_code', 'XX') != 'XX':
-                with db.lock:
-                    for td in db.trackers.values():
-                        for obj in td.get('ips', []):
-                            if obj.get('ip') == ip:
-                                obj['country'] = new_geo
-                cprint(f"[geo] 补查完成: {ip} → {new_geo['country']} / {new_geo['isp']}", 'info')
-            _time.sleep(0.5)  # 限速，避免 ip-api 429
-
-    geo_repair_t = threading.Thread(target=_geo_repair_loop, daemon=True)
-    geo_repair_t.start()
 
     t = threading.Thread(target=monitor_loop, daemon=True)
     t.start()

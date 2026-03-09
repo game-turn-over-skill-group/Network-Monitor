@@ -274,146 +274,9 @@
             .tracker-smart-table .col-lastchk { display: none; }
         }
 
-        /* ══ 新版监控列表样式 ══ */
-        .tracker-list-wrap { padding: 0; }
-        /* 域名头行 */
-        .tl-domain-row {
-            display: flex; align-items: center; gap: 10px;
-            padding: 8px 14px; cursor: pointer; border-bottom: 1px solid var(--border-subtle);
-            background: var(--glass); transition: background .15s;
-        }
-        .tl-domain-row:hover { background: rgba(80,140,255,.08); }
-        .tl-domain-row.paused { opacity: .65; }
-        .tl-domain-row.dns-error { border-left: 3px solid var(--err); }
-        .tl-domain-left { display:flex; align-items:center; gap:4px; flex:1; min-width:0; overflow:hidden; }
-        .tl-expand-icon { color: #64748b; font-size: .7rem; flex-shrink:0; }
-        .tl-domain-name { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:260px; }
-        .tl-domain-meta { display:flex; align-items:center; gap:8px; flex-shrink:0; }
-        .tl-meta-ip     { font-size:.82rem; white-space:nowrap; }
-        .tl-added-time  { font-size:.7rem; white-space:nowrap; display:none; }
-        @media (min-width:768px) { .tl-added-time { display:inline; } }
-        .tl-domain-actions { display:flex; gap:4px; flex-shrink:0; }
-        /* IP 行 */
-        .tl-ip-row {
-            display: grid;
-            grid-template-columns: minmax(240px,320px) 145px 115px 150px 160px 68px;
-            align-items: center; gap: 8px;
-            padding: 5px 14px 5px 38px;
-            border-bottom: 1px solid rgba(30,50,100,.18);
-            background: rgba(10,20,50,.18);
-            font-size: .82rem;
-        }
-        .tl-ip-row:last-child { border-bottom: none; }
-        .tl-ip-row.paused  { opacity: .55; }
-        .tl-ip-row.removed { opacity: .38; filter: grayscale(.5); }
-        .tl-ip-row:hover { background: rgba(40,60,120,.22); }
-        .tl-ip-addr    { overflow:hidden; white-space:nowrap; display:flex; align-items:center; }
-        .tl-ip-status  { display:flex; align-items:center; flex-wrap:wrap; gap:2px; }
-        .tl-ip-latency { display:flex; align-items:center; }
-        .tl-ip-geo     { overflow:hidden; }
-        .tl-ip-lastchk { }
-        .tl-ip-actions { display:flex; gap:3px; }
-        /* IP 列标题行 */
-        .tl-col-header {
-            display: grid;
-            grid-template-columns: minmax(240px,320px) 145px 115px 150px 160px 68px;
-            gap: 8px;
-            padding: 4px 14px 4px 38px;
-            font-size: .68rem;
-            color: #3a5070;
-            text-transform: uppercase;
-            letter-spacing: .4px;
-            border-bottom: 1px solid rgba(30,50,100,.25);
-            background: rgba(6,14,38,.3);
-        }
-        @media (max-width:900px) { .tl-col-header > span:nth-child(5) { display:none; } }
-        @media (max-width:600px) { .tl-col-header > span:nth-child(3), .tl-col-header > span:nth-child(4), .tl-col-header > span:nth-child(5) { display:none; } }
-
-        /* IP 地址字体 — 细体，按版本着色 */
-        .ip-mono    { font-family:monospace; font-size:.82rem; font-weight:400; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1; min-width:0; }
-        .ip-mono-v6 { color: #a5b4fc; }
-        .ip-mono-v4 { color: #6ee7b7; }
-        /* v4/v6 角标 — 紧跟IP，垂直居中 */
-        .ip-ver-badge {
-            display: inline-flex; align-items: center;
-            font-size: .58rem; padding: 1px 4px; border-radius: 3px;
-            margin-left: 4px; flex-shrink: 0;
-            line-height: 1; height: 16px;
-        }
-        .ipvb-v6 { background: rgba(99,102,241,.15); color: #818cf8; }
-        .ipvb-v4 { background: rgba(16,185,129,.10); color: #34d399; }
-        /* 状态点 ● ✗ — ✗ 小一点 */
-        .ip-status-dot { font-weight: 700; margin-right: 3px; line-height: 1; }
-        .dot-on  { color: #34d399; font-size: .82rem; }
-        .dot-off { color: #f87171; font-size: .72rem; }
-        .dot-unk { color: #64748b; font-size: .82rem; }
-        /* 响应式：小屏隐藏部分列 */
-        @media (max-width:1200px) {
-            .tl-ip-row        { grid-template-columns: minmax(220px,290px) 130px 100px 1fr 140px 60px; }
-            .tl-col-header    { grid-template-columns: minmax(220px,290px) 130px 100px 1fr 140px 60px; }
-        }
-        @media (max-width:900px) {
-            .tl-ip-row        { grid-template-columns: minmax(200px,260px) 120px 100px 1fr 60px; }
-            .tl-col-header    { grid-template-columns: minmax(200px,260px) 120px 100px 1fr 60px; }
-            .tl-ip-lastchk    { display:none; }
-        }
-        @media (max-width:600px) {
-            .tl-ip-row        { grid-template-columns: 1fr 110px 80px; }
-            .tl-col-header    { grid-template-columns: 1fr 110px 80px; }
-            .tl-ip-geo, .tl-ip-latency, .tl-ip-lastchk { display:none; }
-        }
-        /* light mode overrides */
-        body.light-mode .tl-domain-row { background: rgba(240,244,255,.7); }
-        body.light-mode .tl-domain-row:hover { background: rgba(100,140,220,.1); }
-        body.light-mode .tl-ip-row { background: rgba(230,238,255,.45); border-bottom-color: rgba(180,200,240,.3); }
-        /* 日间模式 IP 地址颜色 — 深色，保证可读 */
-        body.light-mode .ip-mono-v6 { color: #4338ca; }
-        body.light-mode .ip-mono-v4 { color: #065f46; }
-        /* 日间模式 v4/v6 角标 */
-        body.light-mode .ipvb-v6 { background: rgba(99,102,241,.15); color: #4338ca; }
-        body.light-mode .ipvb-v4 { background: rgba(16,185,129,.15); color: #065f46; }
-        /* 日间模式 已暂停 按钮 */
-        body.light-mode .badge-up[style*='fbbf24'],
-        body.light-mode .tl-btn-resume { color: #92400e !important; border-color: rgba(146,64,14,.4) !important; background: rgba(251,191,36,.15) !important; }
-        body.light-mode .tl-ip-status .ip-status-dot.dot-on  { color: #059669; }
-        body.light-mode .tl-ip-status .ip-status-dot.dot-off { color: #dc2626; }
-
-        /* ── 列表操作按钮（小号统一样式）── */
-        .tl-action-btn {
-            padding: 2px 7px; font-size: .72rem; border-radius: 5px;
-            border: 1px solid; background: transparent; transition: all .13s; cursor: pointer;
-        }
-        .tl-btn-retry  { border-color: rgba(52,211,153,.4); color: #34d399; }
-        .tl-btn-retry:hover  { background: rgba(52,211,153,.15); }
-        .tl-btn-retry:disabled { opacity:.35; cursor:not-allowed; }
-        .tl-btn-pause  { border-color: rgba(100,116,139,.35); color: #94a3b8; }
-        .tl-btn-pause:hover  { background: rgba(100,116,139,.12); }
-        .tl-btn-resume { border-color: rgba(251,191,36,.45); color: #fbbf24; }
-        .tl-btn-resume:hover { background: rgba(251,191,36,.15); }
-        .tl-btn-del    { border-color: rgba(248,113,113,.35); color: #f87171; }
-        .tl-btn-del:hover    { background: rgba(248,113,113,.12); }
-        .tl-sticky-toolbar {
-            position: sticky;
-            top: 56px; /* navbar高度 */
-            z-index: 50;
-            background: var(--glass-header) !important;
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border-bottom: 1px solid var(--border-subtle) !important;
-        }
-        body.light-mode .tl-sticky-toolbar { background: rgba(220,232,255,.92) !important; }
-
-        /* 工具栏下拉选择统一样式 */
-        .tl-sel {
-            font-size:.76rem !important;
-            background: transparent !important;
-            border-color: #334155 !important;
-            color: #94a3b8 !important;
-        }
-        body.light-mode .tl-sel { border-color: #94a3b8 !important; color: #5a6f96 !important; }
-
         /* ── 元素样式 ── */
         .domain-name { font-weight:600; }
+        .ip-mono { font-family: 'Courier New', monospace; font-size:.84rem; color:var(--muted); }
         .latbar { width:80px; height:4px; background:var(--accent); border-radius:3px; overflow:hidden; display:inline-block; vertical-align:middle; }
         .latfill           { height:100%; background:var(--ok); transition:width .3s; }
         .latfill.lat-yellow{ background:var(--warn); }
@@ -520,37 +383,10 @@
         }
         .theme-btn:hover { background: rgba(255,255,255,.14); border-color: rgba(100,160,255,.35); }
 
-        /* 导航栏功能按钮 */
-        .nav-btn-add {
-            background: rgba(52,211,153,.1);
-            border: 1px solid rgba(52,211,153,.35);
-            color: #34d399;
-            font-size: .78rem;
-            padding: 3px 10px;
-            border-radius: 6px;
-            transition: all .15s;
-        }
-        .nav-btn-add:hover { background: rgba(52,211,153,.2); border-color: rgba(52,211,153,.5); color: #6ee7b7; }
-        .nav-btn-pause {
-            background: rgba(251,191,36,.08);
-            border: 1px solid rgba(251,191,36,.3);
-            color: #fbbf24;
-            font-size: .78rem;
-            padding: 3px 10px;
-            border-radius: 6px;
-            transition: all .15s;
-        }
-        .nav-btn-pause:hover { background: rgba(251,191,36,.18); border-color: rgba(251,191,36,.5); color: #fde68a; }
-        .nav-btn-resume {
-            background: rgba(52,211,153,.08);
-            border-color: rgba(52,211,153,.3) !important;
-            color: #34d399 !important;
-        }
-
         /* ── empty state ── */
         .empty-st { text-align:center; padding:40px; color:var(--muted); }
 
-        /* ── 排行榜 ── */
+        /* ── rank ── */
         .rank-item {
             display:flex; justify-content:space-between; align-items:center;
             padding:10px 16px;
@@ -612,11 +448,6 @@
             border-radius: 12px;
             box-shadow: var(--shadow);
             transition: box-shadow .2s, border-color .2s;
-            height: 100%;          /* 等高：撑满父容器 */
-            min-height: 120px;     /* 最小高度保底 */
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
         }
         .stat-card-new:hover {
             box-shadow: 0 8px 30px rgba(0,0,0,.3);
@@ -714,16 +545,14 @@
                             <i class="bi bi-box-arrow-in-right me-1"></i>登录
                         </button>
                     </template>
-                    <button v-if="authUser.role==='admin'||authUser.role==='operator'"
-                            class="btn btn-sm nav-btn-add" @click="openAdd">
-                        <i class="bi bi-plus-lg me-1"></i>{{ t('common.add') }}
+                    <button v-if="authUser.role==='admin'||authUser.role==='operator'" class="btn btn-primary btn-sm" @click="openAdd">
+                        <i class="bi bi-plus-lg"></i> {{ t('common.add') }}
                     </button>
-                    <button v-if="authUser.role==='admin'||authUser.role==='operator'"
-                            class="btn btn-sm nav-btn-pause"
-                            :class="allPaused ? 'nav-btn-resume' : ''"
+                    <button v-if="authUser.role==='admin'||authUser.role==='operator'" class="btn btn-sm"
+                            :class="allPaused ? 'btn-warning' : 'btn-outline-secondary'"
                             @click="pauseAll(!allPaused)"
                             :title="allPaused ? '恢复全部监控' : '暂停全部监控'">
-                        <i class="bi me-1" :class="allPaused ? 'bi-play-fill' : 'bi-pause-fill'"></i>
+                        <i class="bi" :class="allPaused ? 'bi-play-fill' : 'bi-pause-fill'"></i>
                         {{ allPaused ? '恢复全部' : '暂停全部' }}
                     </button>
                 </div>
@@ -785,50 +614,50 @@
 
         <!-- 仪表盘 -->
         <div v-if="currentTab==='dashboard'">
-            <!-- 顶部6格统计卡 -->
-            <div class="row mb-2 g-2" style="align-items:stretch;">
-
-                <!-- 卡1：在线IP / 监控IP（合并） -->
+            <!-- 顶部6格统计卡：总IP / 在线IP / 故障IP / 平均延迟 / TCP / UDP -->
+            <div class="row mb-3 g-2">
+                <!-- 总监控IP -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
                     <div class="stat-card-new card">
-                        <div class="scn-label">在线 / 监控</div>
-                        <div class="scn-main" style="font-size:1.7rem;display:flex;align-items:baseline;gap:4px;flex-wrap:wrap;">
-                            <span class="ok" style="font-size:2rem;">{{ stats.alive||0 }}</span>
-                            <span style="color:var(--muted);font-size:1.2rem;font-weight:400;">/</span>
-                            <span style="font-size:2rem;">{{ stats.total||0 }}</span>
+                        <div class="scn-label">{{ t('stats.total') }}</div>
+                        <div class="scn-main">{{ stats.total }}</div>
+                        <div class="scn-sub">
+                            <span class="scn-desc" style="font-size:.72rem;">
+                                IPv4 {{ stats.ipv4||0 }} · IPv6 {{ stats.ipv6||0 }}
+                            </span>
+                            <span class="scn-rate" :class="statCardTrend('total').cls" style="font-size:.72rem;">
+                                <i class="bi" :class="statCardTrend('total').icon"></i>
+                                {{ statCardTrend('total').pct }}
+                            </span>
                         </div>
-                        <div class="scn-sub" style="flex-direction:column;align-items:flex-start;gap:3px;">
-                            <!-- 在线率，颜色随比率 -->
-                            <span style="font-size:.82rem;font-weight:700;"
-                                :class="stats.total>0&&(stats.alive/stats.total)>=0.8?'ok':stats.total>0&&(stats.alive/stats.total)>=0.5?'warn':'err'">
+                    </div>
+                </div>
+                <!-- 在线IP -->
+                <div class="col-xl-2 col-lg-4 col-md-4 col-6">
+                    <div class="stat-card-new card">
+                        <div class="scn-label">{{ t('stats.alive') }}</div>
+                        <div class="scn-main ok">{{ stats.alive }}</div>
+                        <div class="scn-sub">
+                            <span class="scn-rate"
+                                :class="stats.total>0&&(stats.alive/stats.total)>=0.8?'ok':stats.total>0&&(stats.alive/stats.total)>=0.5?'warn':'err'"
+                                style="font-size:.78rem;font-weight:700;">
                                 {{ stats.total>0 ? ((stats.alive||0)/stats.total*100).toFixed(1)+'%' : '-' }}
                             </span>
-                            <!-- IPv4/IPv6在线数：全在线白色，否则带颜色 -->
-                            <span style="font-size:.72rem;">
-                                IPv4&nbsp;<span :class="stats.alive_v4===stats.ipv4?'':'ok'" style="font-weight:600;">{{ stats.alive_v4||0 }}</span>
-                                &nbsp;·&nbsp;
-                                IPv6&nbsp;<span :class="stats.alive_v6===stats.ipv6?'':'ok'" style="font-weight:600;">{{ stats.alive_v6||0 }}</span>
-                            </span>
+                            <span class="scn-desc" style="font-size:.72rem;">IPv4 {{ stats.alive_v4||0 }} · IPv6 {{ stats.alive_v6||0 }}</span>
                         </div>
                     </div>
                 </div>
-
-                <!-- 卡2：故障IP / 监控IP -->
+                <!-- 故障IP -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
                     <div class="stat-card-new card">
-                        <div class="scn-label">故障 / 监控</div>
-                        <div class="scn-main" style="font-size:1.7rem;display:flex;align-items:baseline;gap:4px;flex-wrap:wrap;">
-                            <span :class="(stats.total-(stats.alive||0))>0?'err':''" style="font-size:2rem;">{{ stats.total-(stats.alive||0) }}</span>
-                            <span style="color:var(--muted);font-size:1.2rem;font-weight:400;">/</span>
-                            <span style="font-size:2rem;">{{ stats.total||0 }}</span>
-                        </div>
+                        <div class="scn-label">{{ t('stats.offline') }}</div>
+                        <div class="scn-main" :class="(stats.total-(stats.alive||0))>0?'err':''">{{ stats.total - (stats.alive||0) }}</div>
                         <div class="scn-sub">
-                            <span class="scn-desc">当前离线</span>
+                            <span class="scn-desc">{{ t('stats.offlineDesc') }}</span>
                         </div>
                     </div>
                 </div>
-
-                <!-- 卡3：平均延迟（不变） -->
+                <!-- 平均延迟 -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
                     <div class="stat-card-new card">
                         <div class="scn-label">{{ t('stats.avgLatency') }}</div>
@@ -838,66 +667,36 @@
                         </div>
                     </div>
                 </div>
-
-                <!-- 卡4：网络状态 -->
+                <!-- TCP统计 (tcp/http/https) -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
                     <div class="stat-card-new card">
-                        <div class="scn-label">网络状态</div>
-                        <div class="scn-main" style="font-size:1.9rem;" :class="stats.net_healthy===false?'err':'ok'">
-                            {{ stats.net_healthy===false ? '✗' : '✔' }}
-                        </div>
-                        <div class="scn-sub" style="flex-direction:column;align-items:flex-start;gap:2px;">
-                            <span style="font-size:.78rem;font-weight:600;" :class="stats.net_healthy===false?'err':'ok'">
-                                {{ stats.net_healthy===false ? '异常' : '正常' }}
-                            </span>
-                            <span class="scn-desc" style="font-size:.68rem;">
-                                探针 {{ stats.net_probe_ok===false ? '❌ 不可达' : '✔ 可达' }}
-                            </span>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 卡5：TCP -->
-                <div class="col-xl-2 col-lg-4 col-md-4 col-6">
-                    <div class="stat-card-new card">
-                        <div class="scn-label">TCP <span style="font-size:.65rem;color:#4b5563;font-weight:400;">http/https</span></div>
-                        <!-- 在线数，颜色随比率：100%白，≥80%绿，≥50%黄，<50%红 -->
-                        <div class="scn-main"
-                            :class="stats.tcp_total>0&&stats.tcp_alive===stats.tcp_total?'':stats.tcp_total>0&&(stats.tcp_alive/stats.tcp_total)>=0.8?'ok':stats.tcp_total>0&&(stats.tcp_alive/stats.tcp_total)>=0.5?'warn':'err'">
-                            {{ stats.tcp_alive||0 }}
-                        </div>
-                        <div class="scn-sub" style="flex-direction:column;align-items:flex-start;gap:2px;">
-                            <span style="font-size:.8rem;font-weight:700;"
-                                :class="stats.tcp_total>0&&stats.tcp_alive===stats.tcp_total?'':stats.tcp_total>0&&(stats.tcp_alive/stats.tcp_total)>=0.8?'ok':stats.tcp_total>0&&(stats.tcp_alive/stats.tcp_total)>=0.5?'warn':'err'">
+                        <div class="scn-label">TCP <span style="font-size:.72rem;color:#64748b;">http/https</span></div>
+                        <div class="scn-main" :class="(stats.tcp_alive||0)>0?'ok':''">{{ stats.tcp_alive||0 }}</div>
+                        <div class="scn-sub">
+                            <span class="scn-rate"
+                                :class="stats.tcp_total>0&&(stats.tcp_alive/stats.tcp_total)>=0.8?'ok':stats.tcp_total>0&&(stats.tcp_alive/stats.tcp_total)>=0.5?'warn':'err'"
+                                style="font-size:.78rem;font-weight:700;">
                                 {{ stats.tcp_total>0 ? ((stats.tcp_alive||0)/stats.tcp_total*100).toFixed(1)+'%' : '-' }}
                             </span>
-                            <span class="scn-desc" style="font-size:.68rem;">
-                                故障: {{ (stats.tcp_total||0)-(stats.tcp_alive||0) }} / {{ stats.tcp_total||0 }}
-                            </span>
+                            <span class="scn-desc" style="font-size:.72rem;">{{ t('stats.offline') }}: {{ (stats.tcp_total||0)-(stats.tcp_alive||0) }} / {{ stats.tcp_total||0 }}</span>
                         </div>
                     </div>
                 </div>
-
-                <!-- 卡6：UDP -->
+                <!-- UDP统计 -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
                     <div class="stat-card-new card">
                         <div class="scn-label">UDP</div>
-                        <div class="scn-main"
-                            :class="stats.udp_total>0&&stats.udp_alive===stats.udp_total?'':stats.udp_total>0&&(stats.udp_alive/stats.udp_total)>=0.8?'ok':stats.udp_total>0&&(stats.udp_alive/stats.udp_total)>=0.5?'warn':'err'">
-                            {{ stats.udp_alive||0 }}
-                        </div>
-                        <div class="scn-sub" style="flex-direction:column;align-items:flex-start;gap:2px;">
-                            <span style="font-size:.8rem;font-weight:700;"
-                                :class="stats.udp_total>0&&stats.udp_alive===stats.udp_total?'':stats.udp_total>0&&(stats.udp_alive/stats.udp_total)>=0.8?'ok':stats.udp_total>0&&(stats.udp_alive/stats.udp_total)>=0.5?'warn':'err'">
+                        <div class="scn-main" :class="(stats.udp_alive||0)>0?'ok':''">{{ stats.udp_alive||0 }}</div>
+                        <div class="scn-sub">
+                            <span class="scn-rate"
+                                :class="stats.udp_total>0&&(stats.udp_alive/stats.udp_total)>=0.8?'ok':stats.udp_total>0&&(stats.udp_alive/stats.udp_total)>=0.5?'warn':'err'"
+                                style="font-size:.78rem;font-weight:700;">
                                 {{ stats.udp_total>0 ? ((stats.udp_alive||0)/stats.udp_total*100).toFixed(1)+'%' : '-' }}
                             </span>
-                            <span class="scn-desc" style="font-size:.68rem;">
-                                故障: {{ (stats.udp_total||0)-(stats.udp_alive||0) }} / {{ stats.udp_total||0 }}
-                            </span>
+                            <span class="scn-desc" style="font-size:.72rem;">{{ t('stats.offline') }}: {{ (stats.udp_total||0)-(stats.udp_alive||0) }} / {{ stats.udp_total||0 }}</span>
                         </div>
                     </div>
                 </div>
-
             </div>
 
             <!-- 三栏：可用率排行 | 告警中心 | 最近错误日志 -->
@@ -1031,19 +830,6 @@
                 <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
                     <div class="d-flex align-items-center gap-2">
                         <span><i class="bi bi-search me-1"></i>{{ t('dash.qsTitle') }}</span>
-                        <!-- 项目地址 & Claude.ai 链接 -->
-                        <span style="color:#2d3f5a;">|</span>
-                        <a :href="t('links.githubUrl')" target="_blank" rel="noopener"
-                           style="font-size:.78rem;color:#64748b;text-decoration:none;display:flex;align-items:center;gap:3px;"
-                           onmouseover="this.style.color='#94a3b8'" onmouseout="this.style.color='#64748b'">
-                            <i class="bi bi-github"></i> {{ t('links.github') }}
-                        </a>
-                        <span style="color:#2d3f5a;">|</span>
-                        <a href="https://claude.ai/" target="_blank" rel="noopener"
-                           style="font-size:.78rem;color:#64748b;text-decoration:none;"
-                           onmouseover="this.style.color='#94a3b8'" onmouseout="this.style.color='#64748b'">
-                            ✦ Claude.ai
-                        </a>
                         <span v-if="qsFilterDomain" class="badge" style="background:rgba(59,130,246,.2);color:#60a5fa;border:1px solid rgba(59,130,246,.3);font-size:.72rem;cursor:pointer;" @click="qsFilterDomain='';qsPage=1">
                             <i class="bi bi-funnel-fill me-1"></i>{{ qsFilterDomain }} ✕
                         </span>
@@ -1179,206 +965,240 @@
         <!-- Tracker列表 -->
         <div v-if="currentTab==='trackers'">
             <div class="card">
-                <!-- 吸顶工具栏：sticky top，滚动时仍可见 -->
-                <div class="card-header tl-sticky-toolbar d-flex align-items-center flex-wrap gap-2">
-                    <!-- IP版本过滤 pill -->
-                    <div class="tab-pill" style="font-size:.78rem;flex-shrink:0;">
-                        <button :class="{active:ipVerFilter==='all'}"  @click="ipVerFilter='all'">All</button>
-                        <button :class="{active:ipVerFilter==='ipv4'}" @click="ipVerFilter='ipv4'">IPv4</button>
-                        <button :class="{active:ipVerFilter==='ipv6'}" @click="ipVerFilter='ipv6'">IPv6</button>
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-3">
+                        <span>{{ t('tracker.title') }}</span>
+                        <div class="d-flex gap-2" style="font-size:.8rem;">
+                            <a :href="t('links.githubUrl')" target="_blank" rel="noopener"
+                               style="color:#64748b;text-decoration:none;"
+                               onmouseover="this.style.color='#94a3b8'" onmouseout="this.style.color='#64748b'">
+                                <i class="bi bi-github me-1"></i>{{ t('links.github') }}
+                            </a>
+                            <span style="color:#334155;">|</span>
+                            <a href="https://claude.ai/" target="_blank" rel="noopener"
+                               style="color:#64748b;text-decoration:none;"
+                               onmouseover="this.style.color='#94a3b8'" onmouseout="this.style.color='#64748b'">
+                                ✦ Claude.ai
+                            </a>
+                        </div>
                     </div>
-                    <!-- 协议过滤 -->
-                    <select v-model="protoFilter" class="form-select form-select-sm tl-sel" style="width:105px;">
-                        <option value="">ALL</option>
-                        <option value="tcp">TCP</option>
-                        <option value="udp">UDP</option>
-                        <option value="http">HTTP</option>
-                        <option value="https">HTTPS</option>
-                    </select>
-                    <!-- 在线状态过滤 -->
-                    <select v-model="statusFilter" class="form-select form-select-sm tl-sel" style="width:116px;">
-                        <option value="">{{ t('tracker.statusAll') }}</option>
-                        <option value="online">{{ t('tracker.statusOnline') }}</option>
-                        <option value="offline">{{ t('tracker.statusOffline') }}</option>
-                        <option value="paused">{{ t('tracker.statusPaused') }}</option>
-                    </select>
-                    <!-- 搜索框 -->
-                    <div class="position-relative" style="flex:1;min-width:160px;max-width:300px;">
-                        <input class="form-control form-control-sm pe-4" v-model="searchQ"
-                               :placeholder="t('tracker.searchPlaceholder')"
-                               @keyup.esc="searchQ=''">
-                        <span v-if="searchQ" @click="searchQ=''"
-                              style="position:absolute;right:6px;top:50%;transform:translateY(-50%);cursor:pointer;color:#94a3b8;font-size:.9rem;">✕</span>
-                    </div>
-                    <!-- 排序下拉 + 升降序 -->
-                    <div class="d-flex align-items-center gap-1" style="flex-shrink:0;margin-left:auto;">
-                        <select v-model="sortKey" class="form-select form-select-sm tl-sel" style="width:115px;">
-                            <option value=""></option>
-                            <option value="uptime">{{ t('tracker.uptimeLbl') }}</option>
-                            <option value="domain">{{ t('tracker.domain') }}</option>
-                            <option value="latency">{{ t('tracker.latency') }}</option>
-                            <option value="added">{{ t('tracker.addedTime') }}</option>
-                            <option value="lastcheck">{{ t('tracker.lastCheck') }}</option>
-                            <option value="port">{{ t('tracker.port') }}</option>
-                        </select>
-                        <!-- 升降序三态：1=降序(▼) -1=升序(▲) 0=还原；sortKey为空时禁用 -->
-                        <button class="btn btn-sm btn-outline-secondary"
-                                :disabled="!sortKey"
-                                @click="sortDir = sortDir===1 ? -1 : sortDir===-1 ? 0 : 1"
-                                style="padding:3px 9px;"
-                                :title="sortDir===1?'降序 → 点击升序':sortDir===-1?'升序 → 点击还原':'还原 → 点击降序'">
-                            <i class="bi" :class="{'bi-sort-down': sortKey && sortDir===1, 'bi-sort-up': sortKey && sortDir===-1, 'bi-dash': !sortKey || sortDir===0}"></i>
-                        </button>
-                        <!-- 一键展开/折叠所有 -->
-                        <button class="btn btn-sm btn-outline-secondary"
-                                @click="expandAll()"
-                                style="padding:3px 8px;font-size:.72rem;" title="展开/折叠全部">
-                            <i class="bi bi-arrows-expand"></i>
-                        </button>
+                    <div class="d-flex align-items-center gap-1" style="width:260px;">
+                        <div class="position-relative flex-grow-1">
+                            <input class="form-control form-control-sm pe-4" v-model="searchQ" :placeholder="t('common.search')" style="width:100%;" @keyup.esc="searchQ=''">
+                            <span v-if="searchQ" @click="searchQ=''" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);cursor:pointer;color:#94a3b8;font-size:.9rem;">✕</span>
+                        </div>
                     </div>
                 </div>
-
                 <div class="card-body p-0">
                     <div v-if="loading" class="empty-st"><div class="spinner-border"></div></div>
-                    <div v-else-if="!sortedTrackers.length" class="empty-st">
+                    <div v-else-if="!Object.keys(filteredTrackers).length" class="empty-st">
                         <i class="bi bi-inbox" style="font-size:3rem;"></i>
                         <p class="mt-3">{{ t('tracker.empty') }}</p>
                     </div>
-
-                    <!-- 新版：每个域名是一个独立卡片块 -->
-                    <div v-else class="tracker-list-wrap">
-                        <!-- 列标题行 -->
-                        <div class="tl-col-header">
-                            <span>IP 地址</span>
-                            <span>状态 / 可用率 <span style="font-size:.72rem;opacity:.6;font-weight:400;margin-left:3px;">[{{ cfg.tracker_stat_period||'24h' }}]</span></span>
-                            <span>延迟</span>
-                            <span>归属地 / 运营商</span>
-                            <span>最后检查</span>
-                            <span></span>
-                        </div>
-                        <template v-for="[domain, tr] in sortedTrackers" :key="domain">
-                            <!-- 域名头行 -->
-                            <div class="tl-domain-row" @click.stop="toggleExpand(domain)"
-                                 :class="{paused: tr.paused, 'dns-error': tr.dns_error}">
-                                <!-- 左：展开图标 + 域名 -->
-                                <div class="tl-domain-left">
-                                    <span class="tl-expand-icon">
-                                        <i class="bi" :class="expanded.includes(domain) ? 'bi-chevron-down' : 'bi-chevron-right'"></i>
-                                    </span>
-                                    <span class="tl-domain-name" :title="domain">{{ domain }}</span>
-                                    <span class="port-tag ms-1">:{{ tr.port }}</span>
-                                    <!-- 协议 badge -->
-                                    <span class="proto-tag ms-1" :class="'proto-'+(tr.protocol||'tcp')">
-                                        {{ (tr.protocol||'tcp').toUpperCase() }}
-                                    </span>
-                                    <!-- DNS错误标记 -->
-                                    <span v-if="tr.dns_error" class="badge ms-1" style="background:rgba(239,68,68,.2);color:#f87171;font-size:.66rem;">DNS ERR</span>
-                                </div>
-                                <!-- 中：汇总数据 -->
-                                <div class="tl-domain-meta">
-                                    <!-- 在线/总数 -->
-                                    <span class="tl-meta-ip">
-                                        <span :class="tr.ips.filter(i=>!i.removed&&i.status==='online').length>0?'ok':'err'" style="font-weight:600;">
-                                            {{ tr.ips.filter(i=>!i.removed&&i.status==='online').length }}
+                    <div v-else class="table-responsive">
+                        <table class="table mb-0 resizable-table tracker-smart-table" id="tracker-table">
+                            <colgroup>
+                                <col class="col-expand">
+                                <col class="col-domain">
+                                <col class="col-port">
+                                <col class="col-proto">
+                                <col class="col-ip">
+                                <col class="col-status">
+                                <col class="col-latency">
+                                <col class="col-country">
+                                <col class="col-isp">
+                                <col class="col-added">
+                                <col class="col-lastchk">
+                                <col class="col-actions">
+                            </colgroup>
+                            <thead>
+                                <tr>
+                                    <th></th><!-- C1 expand -->
+                                    <th @click="cycleSort('domain')" style="cursor:pointer;user-select:none;">
+                                        {{ t('tracker.domain') }}
+                                        <span style="font-size:.7rem;margin-left:2px;color:#475569;">
+                                            <span v-if="sortKey==='domain' && sortDir===1" style="color:#e2e8f0;">▲</span>
+                                            <span v-else-if="sortKey==='domain' && sortDir===-1" style="color:#e2e8f0;">▼</span>
+                                            <span v-else>⇅</span>
                                         </span>
-                                        <span class="text-secondary">/{{ tr.ips.filter(i=>!i.removed).length }}</span>
-                                        <span class="text-secondary" style="font-size:.7rem;margin-left:2px;">IP</span>
-                                    </span>
-                                    <!-- 可用率 badge -->
-                                    <span v-if="tr.paused" class="badge-up" style="background:rgba(251,191,36,.15);color:#fbbf24;border:1px solid rgba(251,191,36,.3);font-size:.72rem;"><i class="bi bi-pause-fill me-1"></i>已暂停</span>
-                                    <span v-else-if="uptime(tr) !== null" class="badge-up" :class="uptimeCls(tr)">{{ uptime(tr).toFixed(1) }}%</span>
-                                    <span v-else-if="tr.ips.filter(i=>!i.removed).every(i=>i.status==='online')" class="badge-up up-green"><i class="bi bi-check-circle-fill" style="font-size:.78rem;"></i></span>
-                                    <span v-else-if="tr.ips.filter(i=>!i.removed).every(i=>i.status==='offline')" class="badge-up up-red"><i class="bi bi-x-circle-fill" style="font-size:.78rem;"></i></span>
-                                    <span v-else class="badge-up up-unknown">?</span>
-                                    <!-- 添加时间（显示完整时间） -->
-                                    <small class="tl-added-time text-secondary" :title="fmtFullTime(tr.added_time)" style="font-size:.7rem;">{{ fmtFullTime(tr.added_time) }}</small>
-                                </div>
-                                <!-- 右：操作按钮 -->
-                                <div class="tl-domain-actions" @click.stop>
-                                    <button v-if="authUser.logged_in" class="btn tl-action-btn tl-btn-retry" @click="retryDomain(domain)" :disabled="tr.paused" title="重试全部IP">
-                                        <i class="bi bi-arrow-repeat"></i>
-                                    </button>
-                                    <button v-if="authUser.role==='admin'||authUser.role==='operator'" class="btn tl-action-btn"
-                                            :class="tr.paused?'tl-btn-resume':'tl-btn-pause'"
-                                            @click="pauseDomain(domain,!tr.paused)"
-                                            :title="tr.paused?'恢复监控':'暂停监控'">
-                                        <i class="bi" :class="tr.paused?'bi-play-fill':'bi-pause-fill'"></i>
-                                    </button>
-                                    <button v-if="authUser.role==='admin'||authUser.role==='operator'" class="btn tl-action-btn tl-btn-del" @click="delTracker(domain)" title="删除"><i class="bi bi-trash"></i></button>
-                                </div>
-                            </div>
-
-                            <!-- IP 行：<5个默认展开（除非手动折叠），≥5个需手动展开 -->
-                            <template v-if="tr.ips.filter(i=>!i.removed).length < 5 ? !collapsed.includes(domain) : expanded.includes(domain)">
-                                <div v-for="ip in tr.ips.filter(i => (cfg.show_removed_ips ? true : !i.removed) && (ipVerFilter==='all' || i.version===ipVerFilter))"
-                                     :key="ip.ip"
-                                     class="tl-ip-row"
-                                     :class="{paused: ip.paused, removed: ip.removed}">
-                                    <!-- IP地址 + 版本标 -->
-                                    <div class="tl-ip-addr">
-                                        <span class="ip-mono" :class="ip.version==='ipv6'?'ip-mono-v6':'ip-mono-v4'">{{ ip.ip }}</span><span class="ip-ver-badge" :class="ip.version==='ipv6'?'ipvb-v6':'ipvb-v4'">{{ ip.version==='ipv6'?'v6':'v4' }}</span>
-                                    </div>
-                                    <!-- 状态 + 可用率 -->
-                                    <div class="tl-ip-status">
-                                        <template v-if="ip.paused">
-                                            <span class="badge-up" style="background:rgba(251,191,36,.15);color:#fbbf24;border:1px solid rgba(251,191,36,.3);font-size:.7rem;"><i class="bi bi-pause-fill"></i> 已暂停</span>
-                                        </template>
-                                        <template v-else>
-                                            <!-- ● / ✗ 状态标 -->
-                                            <span class="ip-status-dot"
-                                                  :class="ip.status==='online'?'dot-on':ip.status==='offline'?'dot-off':'dot-unk'">
-                                                {{ ip.status==='online' ? '●' : ip.status==='offline' ? '✗' : '○' }}
+                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
+                                    </th><!-- C2 domain -->
+                                    <th @click="cycleSort('port')" style="cursor:pointer;user-select:none;">
+                                        端口<span style="font-size:.7rem;color:#475569;margin-left:2px;">
+                                            <span v-if="sortKey==='port' && sortDir===1" style="color:#e2e8f0;">▲</span>
+                                            <span v-else-if="sortKey==='port' && sortDir===-1" style="color:#e2e8f0;">▼</span>
+                                            <span v-else>⇅</span>
+                                        </span>
+                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
+                                    </th><!-- C3 port -->
+                                    <th>
+                                        <select v-model="protoFilter" class="form-select form-select-sm" style="font-size:.72rem;padding:1px 3px;background:transparent;border-color:#334155;color:#94a3b8;width:86px;">
+                                            <option value="">协议</option>
+                                            <option value="tcp">TCP</option>
+                                            <option value="udp">UDP</option>
+                                            <option value="http">HTTP</option>
+                                            <option value="https">HTTPS</option>
+                                        </select>
+                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
+                                    </th><!-- C4 protocol -->
+                                    <th @click="cycleExpandAll(sortedTrackers)" style="cursor:pointer;user-select:none;" :title="t('tracker.expandHint')">
+                                        {{ t('tracker.ip') }}<span style="font-size:.68rem;margin-left:2px;color:#64748b;">
+                                            <span v-if="expandState===1">⊕</span>
+                                            <span v-else-if="expandState===2">⊞</span>
+                                            <span v-else>⊟</span>
+                                        </span>
+                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
+                                    </th><!-- C5 ip -->
+                                    <th @click="cycleSort('uptime')" style="cursor:pointer;user-select:none;">
+                                        {{ t('tracker.status') }}<span style="font-size:.68rem;color:#64748b;margin-left:2px;">[{{ cfg.tracker_stat_period }}]</span>
+                                        <span style="font-size:.7rem;margin-left:2px;color:#475569;">
+                                            <span v-if="sortKey==='uptime' && sortDir===1" style="color:#e2e8f0;">▲</span>
+                                            <span v-else-if="sortKey==='uptime' && sortDir===2" style="color:#e2e8f0;">▼</span>
+                                            <span v-else-if="sortKey==='uptime' && sortDir===3" style="color:#22c55e;">●</span>
+                                            <span v-else-if="sortKey==='uptime' && sortDir===4" style="color:#ef4444;">●</span>
+                                            <span v-else>⇅</span>
+                                        </span>
+                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
+                                    </th><!-- C6 status -->
+                                    <th @click="cycleSort('latency')" style="cursor:pointer;user-select:none;">
+                                        {{ t('tracker.latency') }}<span style="font-size:.7rem;color:#475569;margin-left:2px;">
+                                            <span v-if="sortKey==='latency' && sortDir===1" style="color:#e2e8f0;">▲</span>
+                                            <span v-else-if="sortKey==='latency' && sortDir===-1" style="color:#e2e8f0;">▼</span>
+                                            <span v-else>⇅</span>
+                                        </span>
+                                        <div class="col-resizer" @mousedown.stop="startResize($event)"></div>
+                                    </th><!-- C7 latency -->
+                                    <th>{{ t('tracker.country') }}<div class="col-resizer" @mousedown.stop="startResize($event)"></div></th><!-- C8 -->
+                                    <th>{{ t('tracker.isp') }}<div class="col-resizer" @mousedown.stop="startResize($event)"></div></th><!-- C9 -->
+                                    <th>{{ t('tracker.addedTime') }}</th><!-- C10 -->
+                                    <th>{{ t('tracker.lastCheck') }}</th><!-- C11 -->
+                                    <th></th><!-- C12 actions -->
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template v-for="(tr, domain) in sortedTrackers" :key="domain">
+                                    <tr class="tracker-row" @click="toggleExpand(domain)">
+                                        <td><span class="chevron" :class="{open:expanded.includes(domain)}"><i class="bi bi-chevron-right"></i></span></td>
+                                        <td>
+                                            <span class="domain-name">{{ domain }}</span>
+                                            <span v-if="tr.dns_error" class="ms-1" style="color:#f87171;font-size:.75rem;font-weight:500;">⚠ Host not found</span>
+                                        </td>
+                                        <td><span class="port-tag">:{{ tr.port||80 }}</span></td>
+                                        <td>
+                                            <span v-if="(tr.protocol||'tcp')==='https'" class="proto-tag proto-tcp">HTTPS</span>
+                                            <span v-else class="proto-tag" :class="'proto-'+(tr.protocol||'tcp')">{{ (tr.protocol||'tcp').toUpperCase() }}</span>
+                                        </td>
+                                        <td><span class="text-secondary" style="font-size:.82rem;">{{ tr.ips.filter(i=>!i.removed).length }} IPs</span></td>
+                                        <td><!-- C6 status -->
+                                            <!-- 整个域名已暂停：显示「已暂停」badge，覆盖状态 -->
+                                            <span v-if="tr.paused" class="badge-up" style="background:rgba(251,191,36,.15);color:#fbbf24;border:1px solid rgba(251,191,36,.3);"><i class="bi bi-pause-fill me-1"></i>已暂停</span>
+                                            <!-- 有历史数据：显示可用率百分比；无历史：显示当前在线状态 -->
+                                            <template v-else>
+                                            <span v-if="uptime(tr) !== null" class="badge-up" :class="uptimeCls(tr)">{{ uptime(tr).toFixed(1) }}%</span>
+                                            <span v-else-if="tr.ips.filter(i=>!i.removed).length===0" class="badge-up up-unknown">?</span>
+                                            <span v-else-if="tr.ips.filter(i=>!i.removed).every(i=>i.status==='online')" class="badge-up up-green" title="全部在线"><i class="bi bi-check-circle-fill" style="font-size:.8rem;"></i></span>
+                                            <span v-else-if="tr.ips.filter(i=>!i.removed).every(i=>i.status==='offline')" class="badge-up up-red" title="全部离线"><i class="bi bi-x-circle-fill" style="font-size:.8rem;"></i></span>
+                                            <span v-else-if="tr.ips.filter(i=>!i.removed).every(i=>i.status==='unknown')" class="badge-up up-unknown">?</span>
+                                            <span v-else class="badge-up up-yellow" title="部分在线"><i class="bi bi-exclamation-circle-fill" style="font-size:.8rem;"></i></span>
+                                            <span style="font-size:.7rem;color:#64748b;margin-left:3px;">
+                                                {{ tr.ips.filter(i=>!i.removed&&i.status==='online').length }}/{{ tr.ips.filter(i=>!i.removed).length }}
                                             </span>
-                                            <span v-if="ip.ip_uptime !== null && ip.ip_uptime !== undefined"
-                                                  class="badge-up"
-                                                  :class="ip.status==='offline'?'up-red':ip.ip_uptime>=80?'up-green':ip.ip_uptime>=50?'up-yellow':'up-red'"
-                                                  style="font-size:.72rem;">{{ ip.ip_uptime.toFixed(1) }}%</span>
-                                            <span v-else class="badge-up up-unknown" style="font-size:.72rem;">?</span>
-                                            <span v-if="ip.status==='online'" style="font-size:.72rem;color:#4ade80;margin-left:3px;">Online</span>
-                                            <span v-else-if="ip.status==='offline'" style="font-size:.72rem;color:#f87171;margin-left:3px;">Offline</span>
-                                        </template>
-                                    </div>
-                                    <!-- 延迟 -->
-                                    <div class="tl-ip-latency">
-                                        <div class="latbar"><div class="latfill" :class="latCls(ip.latency)" :style="{width:latW(ip.latency)}"></div></div>
-                                        <small v-if="ip.latency>=0" class="ms-1">{{ ip.latency }}ms</small>
-                                        <small v-else class="text-secondary ms-1">-</small>
-                                    </div>
-                                    <!-- 归属地：国家↑ / 运营商↓ -->
-                                    <div class="tl-ip-geo">
-                                        <div v-if="ip.country&&ip.country.country_code&&ip.country.country_code!=='XX'" style="line-height:1.3;">
-                                            <div style="font-size:.78rem;">{{ flag(ip.country.country_code) }} {{ ip.country.country }}</div>
-                                            <div style="font-size:.68rem;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px;" :title="ip.country.isp">{{ ip.country.isp||'-' }}</div>
-                                        </div>
-                                        <span v-else class="text-secondary" style="font-size:.75rem;">-</span>
-                                    </div>
-                                    <!-- 最后检测（完整时间） -->
-                                    <div class="tl-ip-lastchk">
-                                        <small class="text-secondary" style="font-size:.71rem;white-space:nowrap;">{{ fmtFullTime(ip.last_check) }}</small>
-                                    </div>
-                                    <!-- 操作按钮 -->
-                                    <div class="tl-ip-actions">
-                                        <button v-if="ip.status==='offline' && authUser.logged_in && !ip.paused"
-                                                class="btn tl-action-btn tl-btn-retry"
-                                                @click.stop="retryIp(domain,ip.ip)" title="重试此IP">
-                                            <i class="bi bi-arrow-repeat"></i>
-                                        </button>
-                                        <button v-if="authUser.role==='admin'||authUser.role==='operator'"
-                                                class="btn tl-action-btn"
-                                                :class="ip.paused?'tl-btn-resume':'tl-btn-pause'"
-                                                @click.stop="pauseIp(domain,ip.ip,!ip.paused)"
-                                                :title="ip.paused?'恢复此IP监控':'暂停此IP监控'">
-                                            <i class="bi" :class="ip.paused?'bi-play-fill':'bi-pause-fill'"></i>
-                                        </button>
-                                    </div>
-                                </div>
-                            </template>
-                        </template>
+                                            </template>
+                                        </td>
+                                        <td></td><!-- C7 latency placeholder -->
+                                        <td></td><!-- C8 country placeholder -->
+                                        <td></td><!-- C9 isp placeholder -->
+                                        <td><small class="text-secondary" style="font-size:.75rem;white-space:nowrap;">{{ fmtFullTime(tr.added_time) }}</small></td><!-- C10 -->
+                                        <td></td><!-- 最后检查由IP行各自显示 -->
+                                        <td>
+                                            <button v-if="authUser.logged_in" class="btn btn-sm btn-outline-primary me-1" @click.stop="retryDomain(domain)" title="重试全部IP" :disabled="tr.paused"><i class="bi bi-arrow-repeat"></i></button>
+                                            <button v-if="authUser.role==='admin'||authUser.role==='operator'" class="btn btn-sm me-1"
+                                                    :class="tr.paused ? 'btn-warning' : 'btn-outline-secondary'"
+                                                    @click.stop="pauseDomain(domain, !tr.paused)"
+                                                    :title="tr.paused ? '恢复监控' : '暂停监控'">
+                                                <i class="bi" :class="tr.paused ? 'bi-play-fill' : 'bi-pause-fill'"></i>
+                                            </button>
+                                            <button v-if="authUser.role==='admin'||authUser.role==='operator'" class="btn btn-sm btn-outline-danger" @click.stop="delTracker(domain)" title="删除"><i class="bi bi-trash"></i></button>
+                                        </td>
+                                    </tr>
+                                    <template v-if="expanded.includes(domain)">
+                                        <tr v-for="ip in tr.ips" :key="ip.ip" class="ip-row" :style="ip.removed?'opacity:.45':''">
+                                            <td></td><!-- C1 -->
+                                            <td></td><!-- C2 -->
+                                            <td></td><!-- C3 port placeholder -->
+                                            <!-- C4: protocol badge -->
+                                            <td>
+                                                <span v-if="(tr.protocol||'tcp')==='https'" class="proto-tag proto-tcp" style="font-size:.62rem;opacity:.8;">HTTPS</span>
+                                                <span v-else-if="(tr.protocol||'tcp')==='tcp' && tr.port===443" class="proto-tag proto-tcp" style="font-size:.62rem;opacity:.8;">HTTPS</span>
+                                                <span v-else-if="(tr.protocol||'tcp')==='tcp'" class="proto-tag" style="font-size:.62rem;opacity:.8;background:rgba(99,102,241,.18);color:#818cf8;">HTTP</span>
+                                            </td>
+                                            <td class="ip-mono"><!-- C5 IP address -->
+                                                <span :class="[ip.version==='ipv4' ? 'ok ipv4-addr' : 'text-info ipv6-addr', ip.removed?'':'']" 
+                                                      :style="ip.removed?'text-decoration:line-through':''">{{ ip.ip }}</span>
+                                                <span v-if="ip.removed" style="font-size:.68rem;color:#94a3b8;margin-left:4px;border:1px solid #475569;border-radius:3px;padding:0 3px;">已移除</span>
+                                            </td>
+                                            <td style="white-space:nowrap;">
+                                                <!-- IP 已暂停：覆盖显示「已暂停」 -->
+                                                <template v-if="ip.paused">
+                                                    <span class="badge-up" style="background:rgba(251,191,36,.15);color:#fbbf24;border:1px solid rgba(251,191,36,.3);font-size:.72rem;"><i class="bi bi-pause-fill me-1"></i>已暂停</span>
+                                                </template>
+                                                <template v-else>
+                                                <!-- ✔/✖ icon -->
+                                                <span :class="stCls(ip.status)" style="font-size:.82rem;"><i class="bi" :class="stIcon(ip.status)"></i></span>
+                                                <!-- 带框百分比（badge-up风格，稍暗）-->
+                                                <span v-if="ip.ip_uptime !== null && ip.ip_uptime !== undefined"
+                                                      class="badge-up ms-1"
+                                                      :class="ip.status==='offline'?'up-red': ip.ip_uptime>=80?'up-green': ip.ip_uptime>=50?'up-yellow':'up-red'"
+                                                      style="font-size:.72rem;opacity:.9;">{{ ip.ip_uptime.toFixed(1) }}%</span>
+                                                <span v-else class="badge-up up-unknown ms-1" style="font-size:.72rem;opacity:.85;">?</span>
+                                                <!-- Online/Offline 浅色小字 -->
+                                                <span v-if="ip.status==='online'" style="font-size:.7rem;color:#4ade80;margin-left:3px;opacity:.8;">Online</span>
+                                                <span v-else-if="ip.status==='offline'" style="font-size:.7rem;color:#f87171;margin-left:3px;opacity:.8;">Offline</span>
+                                                <span v-else style="font-size:.7rem;color:#64748b;margin-left:3px;">-</span>
+                                                </template>
+                                            </td>
+                                            <td>
+                                                <div class="latbar"><div class="latfill" :class="latCls(ip.latency)" :style="{width:latW(ip.latency)}"></div></div>
+                                                <small v-if="ip.latency>=0" class="ms-1">{{ ip.latency }}ms</small>
+                                                <small v-else class="text-secondary ms-1">-</small>
+                                            </td>
+                                            <td><!-- C8 country -->
+                                                <span v-if="ip.country && ip.country.country_code && ip.country.country_code!=='XX'">
+                                                    {{ flag(ip.country.country_code) }} {{ ip.country.country }}
+                                                </span>
+                                                <span v-else class="text-secondary">-</span>
+                                            </td>
+                                            <td style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><!-- C9 isp -->
+                                                <span v-if="ip.country && ip.country.isp" class="text-secondary" style="font-size:.8rem;" :title="ip.country.isp">{{ ip.country.isp }}</span>
+                                                <span v-else class="text-secondary">-</span>
+                                            </td>
+                                            <td></td><!-- C10 added placeholder -->
+                                            <td><!-- C11 last check -->
+                                                <small class="text-secondary" style="font-size:.75rem;white-space:nowrap;">{{ fmtFullTime(ip.last_check) }}</small>
+                                            </td>
+                                            <td><!-- C12 retry / pause -->
+                                                <button v-if="ip.status==='offline' && authUser.logged_in && !ip.paused"
+                                                        class="btn btn-outline-warning retry-sm"
+                                                        @click.stop="retryIp(domain,ip.ip)" title="重试此IP">
+                                                    <i class="bi bi-arrow-repeat"></i>
+                                                </button>
+                                                <button v-if="authUser.role==='admin'||authUser.role==='operator'"
+                                                        class="btn retry-sm ms-1"
+                                                        :class="ip.paused ? 'btn-warning' : 'btn-outline-secondary'"
+                                                        @click.stop="pauseIp(domain, ip.ip, !ip.paused)"
+                                                        :title="ip.paused ? '恢复此IP监控' : '暂停此IP监控'">
+                                                    <i class="bi" :class="ip.paused ? 'bi-play-fill' : 'bi-pause-fill'"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    </template>
+                                </template>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
         </div>
-
 
         <!-- 排行 -->
         <div v-if="currentTab==='ranking'">
@@ -1409,34 +1229,30 @@
                                 <option value="udp">UDP</option>
                             </select>
                             <select class="form-select form-select-sm" v-model="exportIpVer" style="width:auto;">
-                                <option value="all">ALL</option>
+                                <option value="all">IPv4+6</option>
                                 <option value="ipv4">IPv4</option>
                                 <option value="ipv6">IPv6</option>
                             </select>
-                            <button class="btn btn-sm btn-outline-secondary" @click="exportRanking" title="导出 TXT"
-                                    style="padding:2px 10px;font-size:.78rem;border-color:#334155;color:#94a3b8;">
+                            <button class="btn btn-sm btn-outline-primary" @click="exportRanking" title="导出 TXT">
                                 <i class="bi bi-download me-1"></i>{{ t('ranking.export') }}
                             </button>
                         </div>
                     </div>
                 </div>
                 <div class="card-body p-0">
-                    <div v-if="!filteredRanking.length" class="empty-st">
+                    <div v-if="!ranking.length" class="empty-st">
                         <i class="bi bi-trophy" style="font-size:3rem;"></i>
                         <p class="mt-3">{{ t('ranking.empty') }}</p>
                     </div>
                     <div v-else>
-                        <div class="rank-item" v-for="(item,i) in filteredRanking" :key="i">
+                        <div class="rank-item" v-for="(item,i) in ranking" :key="i">
                             <div class="d-flex align-items-center gap-2">
                                 <span class="rank-num">#{{ i+1 }}</span>
                                 <div>
                                     <span class="domain-name me-1">{{ item.domain }}</span>
                                     <span class="port-tag">:{{ item.port }}</span>
                                     <span class="proto-tag ms-1" :class="'proto-'+item.protocol">{{ item.protocol.toUpperCase() }}</span>
-                                    <!-- v4/v6 版本标签 -->
-                                    <span v-if="item.has_v4" class="ip-ver-badge ipvb-v4 ms-1">v4</span>
-                                    <span v-if="item.has_v6" class="ip-ver-badge ipvb-v6 ms-1">v6</span>
-                                    <div class="text-secondary" style="font-size:.78rem;">{{ item.ip_count }} IPs · {{ item.online_count }} online</div>
+                                    <div class="text-secondary" style="font-size:.78rem;">{{ item.ip_count }} IPs</div>
                                 </div>
                             </div>
                             <span class="fw-bold" style="font-size:.95rem;" :class="item.uptime===null?'up-unknown':(item.uptime>80?'up-green':(item.uptime>=50?'up-yellow':'up-red'))">{{ item.uptime===null ? '?' : item.uptime.toFixed(2)+'%' }}</span>
@@ -1590,16 +1406,13 @@
                             <div class="form-text">{{ t('config.trackerStatPeriodDesc') }}</div>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label">{{ t('config.defaultLayoutWidth') }}</label>
-                            <select class="form-select" v-model="cfg.default_layout_width" @change="saveCfg">
-                                <option value="1500">50%</option>
-                                <option value="1600">60%</option>
-                                <option value="1700">70%</option>
-                                <option value="1800">80%</option>
-                                <option value="1900">90%</option>
-                                <option value="2000">100%</option>
+                            <label class="form-label">{{ t('config.rankStatPeriod') }}</label>
+                            <select class="form-select" v-model="cfg.rank_stat_period" @change="rankPeriod=cfg.rank_stat_period; saveCfg(); loadRanking()">
+                                <option value="24h">{{ t('ranking.24h') }}</option>
+                                <option value="7d">{{ t('ranking.7d') }}</option>
+                                <option value="30d">{{ t('ranking.30d') }}</option>
                             </select>
-                            <div class="form-text">{{ t('config.defaultLayoutWidthDesc') }}</div>
+                            <div class="form-text">{{ t('config.rankStatPeriodDesc') }}</div>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">{{ t('config.autoRefresh') }}</label>
@@ -1611,12 +1424,6 @@
                                 <option :value="0">{{ t('config.disabled') }}</option>
                             </select>
                             <div class="form-text">{{ t('config.autoRefreshDesc') }}</div>
-                        </div>
-                        <div class="col-md-4">
-                            <label class="form-label">{{ t('config.exportSuffix') }}</label>
-                            <input type="text" class="form-control" v-model="cfg.export_suffix"
-                                   @change="saveCfg" placeholder="/announce" style="font-family:monospace;font-size:.9rem;">
-                            <div class="form-text">{{ t('config.exportSuffixDesc') }}</div>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">{{ t('config.consoleLog') }}</label>
@@ -1636,17 +1443,6 @@
                                 </div>
                                 <div class="form-check form-switch mb-0">
                                     <input class="form-check-input" type="checkbox" v-model="cfg.tab_switch_refresh" @change="saveCfg" style="cursor:pointer;">
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-4 d-flex align-items-center">
-                            <div class="cfg-row w-100">
-                                <div>
-                                    <strong>{{ t('config.showRemovedIps') }}</strong>
-                                    <p class="text-secondary mb-0" style="font-size:.8rem;">{{ t('config.showRemovedIpsDesc') }}</p>
-                                </div>
-                                <div class="form-check form-switch mb-0">
-                                    <input class="form-check-input" type="checkbox" v-model="cfg.show_removed_ips" @change="saveCfg" style="cursor:pointer;">
                                 </div>
                             </div>
                         </div>
@@ -1834,12 +1630,12 @@ const { createApp, ref, computed, onMounted, watch, nextTick } = Vue;
 const { createI18n } = VueI18n;
 
 const msgs = {
-    zh:{nav:{appTitle:'网络监控',dashboard:'仪表盘',trackers:'监控列表',ranking:'可用率排行',logs:'日志',config:'配置',toggleTheme:'切换主题',lightMode:'日间模式',darkMode:'夜间模式',userMgmt:'用户管理'},stats:{total:'总监控IP',alive:'在线IP',ipv4:'IPv4',ipv6:'IPv6',offline:'故障IP',offlineDesc:'当前离线',avgLatency:'平均延迟',onlineRate:'在线率',alerts:'未处理告警',netHealth:'网络健康',netOk:'正常',netBad:'异常',probeOk:'探针可达',probeDown:'探针不可达',todayAlerts:'今日告警',activeAlerts:'条活跃告警',allNormal:'全部正常'},tracker:{title:'监控列表',domain:'域名',ip:'IP地址',country:'归属地',isp:'运营商',status:'状态',latency:'延迟',addedTime:'添加时间',lastCheck:'最后检查',ips:'IPs',empty:'暂无Tracker',port:'端口',protocol:'协议',uptimeLbl:'可用率',statusAll:'当前状态',statusOnline:'在线',statusOffline:'离线',statusPaused:'已暂停',expandHint:'点击：展开≤5IP / 展开全部 / 收起',searchPlaceholder:'域名 / IP / 端口 / 国家 / 归属地 / 运营商'},ranking:{'24h':'24小时','export':'导出 TXT','7d':'7天','30d':'30天',filterLabel:'最低可用率',empty:'暂无符合条件的Tracker'},logs:{title:'请求结果',entries:'条',clear:'清空',empty:'暂无日志',all:'全部'},config:{title:'配置',monitorTitle:'监控配置',displayTitle:'显示配置',proxyTitle:'代理配置',cacheTitle:'缓存配置',cacheHistory:'缓存统计可用率',cacheHistoryDesc:'开启后重启不丢失历史统计，排行榜长期有效',clearHistory:'清空缓存',clearHistoryConfirm:'确定要清空缓存？当前统计不受影响，重启后从零开始。',clearHistoryDone:'缓存已清空，重启后生效',clearCacheNeedOff:'请先关闭【缓存统计可用率】开关，再清空缓存',clearCacheEmpty:'缓存中暂无历史数据，无需清空',checkInterval:'监控间隔',checkIntervalDesc:'每隔多少秒检测一次所有tracker',timeout:'连接超时',timeoutDesc:'TCP/UDP最大等待时间',retryMode:'重试模式',retryModeDesc:'轮询: 5s→15s→30s→60s→5s... 循环递增',retryPolling:'轮询',retryInterval:'固定间隔',retryIntervalDesc:'固定秒数重试（替代轮询）',consoleLog:'日志级别',consoleLogDesc:'控制台输出和磁盘日志的详细程度',consoleNone:'无 - 不输出任何内容',consoleInfo:'基础 - 仅访问请求日志（推荐）',consoleError:'错误 - 基础+所有失败/超时/错误（磁盘仅存错误）',consoleDebug:'调试 - 全部（含每IP成功结果，不含轮询刷新）',trackerStatPeriod:'监控列表统计周期',trackerStatPeriodDesc:'监控列表中可用率%的计算窗口',rankStatPeriod:'排行榜统计周期',rankStatPeriodDesc:'排行榜默认打开时的统计周期；进入排行榜页后可手动切换Tab',autoRefresh:'页面刷新',autoRefreshDesc:'自动刷新间隔',monitorWorkers:'并发检测数',monitorWorkersDesc:'同时检测的最大线程数，IP数量多时可适当调高',exportSuffix:'导出后缀',exportSuffixDesc:'导出 Tracker 列表时追加的路径，如 /announce',tabSwitchRefresh:'切换时刷新',tabSwitchRefreshDesc:'切换标签页时重新拉取仪表盘/监控数据',showRemovedIps:'显示历史IP',showRemovedIpsDesc:'开启后显示已移除的历史IP（灰色半透明）',defaultLayoutWidth:'默认页面视野',defaultLayoutWidthDesc:'新用户/未设置cookie时的默认视野宽度；已有cookie的用户不受影响',logToDisk:'日志存盘',logToDiskDesc:'重启后日志不丢失',enable:'启用',httpProxy:'HTTP代理',httpProxyPlaceholder:'http://127.0.0.1:7890 或 socks5://127.0.0.1:1080',httpProxyDesc:'支持HTTP/HTTPS/SOCKS5（包括API请求和IP归属地查询）',udpProxy:'UDP代理',udpProxyPlaceholder:'socks5://127.0.0.1:1080',udpProxyDesc:'UDP通常只支持SOCKS5（需安装PySocks: pip install PySocks）',seconds:'秒',second:'秒',minute:'分钟',minutes:'分钟',hour:'小时',disabled:'禁用',logTitle:'日志配置',maxLogEntries:'日志最大条目',maxLogEntriesDesc:'超过上限后自动删除最旧的日志',default:'默认',dnsTitle:'DNS配置',dnsMode:'解析模式',dnsModeDesc:'选择DNS解析方式，影响域名IP获取准确性',dnsModeSystem:'系统DNS（推荐）- 与nslookup/浏览器一致',dnsModePython:'dnspython - 内置解析器',dnsModeCustom:'自定义DNS服务器',dnsCustom:'自定义DNS服务器',dnsCustomPlaceholder:'8.8.8.8 或 8.8.8.8,8.8.4.4',dnsCustomDesc:'仅在自定义模式下生效，多个服务器用逗号分隔'},modal:{addTracker:'添加Tracker',trackerUrl:'Tracker URL',urlPlaceholder:'udp://tracker.example.com:80/announce\nudp://tracker2.example.com:1337/announce\nhttp://tracker.example.com:6969/announce',urlExample:'支持 udp://, http://, https:// 协议'},links:{github:'项目地址',githubUrl:'https://github.com/game-turn-over-skill-group/Network-Monitor'},common:{add:'添加',cancel:'取消',search:'搜索...',delete:'删除',confirm:'确认',searchLevelHint:'搜索内容/级别(error/info/warn)...'},users:{username:'用户名',newPassword:'新密码（留空=不改）',role:'角色',adminShort:'admin=全权',operatorShort:'operator=增删+限速500ms',viewerShort:'viewer=只读+限速1s',roleAdminDesc:'全部权限，重试不限速',roleOperatorDesc:'增删Tracker，重试500ms',roleViewerDesc:'只读，重试1s',saveBtn:'保存用户配置',addBtn:'+ 添加用户'},dash:{rankTitle:'可用率排行 TOP10',alertTitle:'告警中心',alertThreshold:'连续失败 ≥5次触发',worst:'最差',best:'最佳',goRanking:'排行榜',noAlerts:'全部正常，暂无告警',consecFail:'连续失败',curOnline:'当前在线',curOffline:'当前离线',timeout:'超时',errorLogTitle:'最近错误日志',qsTitle:'快速搜索',qsHint:'域名 / IP / 运营商 / 国家 / 状态',qsPlaceholder:'搜索域名、IP、国家、运营商、online/offline/http/https...',qsEmptyHint:'输入关键词搜索',noResults:'无匹配结果',qsTotal:'共',selected:'已选'}},
-    en:{nav:{appTitle:'Network Monitor',dashboard:'Dashboard',trackers:'Monitor List',ranking:'Ranking',logs:'Logs',config:'Config',toggleTheme:'Toggle Theme',lightMode:'Light Mode',darkMode:'Dark Mode',userMgmt:'User Management'},stats:{total:'Total IPs',alive:'Online IPs',ipv4:'IPv4',ipv6:'IPv6',offline:'Offline IPs',offlineDesc:'Currently offline',avgLatency:'Avg Latency',onlineRate:'Online Rate',alerts:'Active Alerts',netHealth:'Net Health',netOk:'Normal',netBad:'Abnormal',probeOk:'Probe OK',probeDown:'Probe Down',todayAlerts:'Today Alerts',activeAlerts:'active alerts',allNormal:'All Normal'},tracker:{title:'Monitor List',domain:'Domain',ip:'IP Address',country:'Country',isp:'ISP',status:'Status',latency:'Latency',addedTime:'Added',lastCheck:'Last Check',ips:'IPs',empty:'No trackers yet',port:'Port',protocol:'Protocol',uptimeLbl:'Uptime',statusAll:'Status',statusOnline:'Online',statusOffline:'Offline',statusPaused:'Paused',expandHint:'Click: expand ≤5 IPs / expand all / collapse',searchPlaceholder:'Domain / IP / Port / Country / Region / ISP'},ranking:{'24h':'24 Hours','export':'Export TXT','7d':'7 Days','30d':'30 Days',filterLabel:'Min Uptime',empty:'No matching trackers'},logs:{title:'Request Logs',entries:'entries',clear:'Clear',empty:'No logs yet',all:'All'},config:{title:'Config',monitorTitle:'Monitor Settings',displayTitle:'Display Settings',proxyTitle:'Proxy Settings',cacheTitle:'Cache Settings',cacheHistory:'Cache Uptime Stats',cacheHistoryDesc:'Keep uptime history on restart, rankings stay valid long-term',clearHistory:'Clear Cache',clearHistoryConfirm:'Clear cached history? Current stats are unaffected. Takes effect on restart.',clearHistoryDone:'Cache cleared, restart to apply',clearCacheNeedOff:'Please turn off [Cache Uptime Stats] first',clearCacheEmpty:'No cached history found, nothing to clear',checkInterval:'Check Interval',checkIntervalDesc:'How often to check all trackers',timeout:'Connection Timeout',timeoutDesc:'TCP/UDP wait timeout',retryMode:'Retry Mode',retryModeDesc:'Polling: 5s→15s→30s→60s→5s... cycling',retryPolling:'Polling',retryInterval:'Fixed Interval',retryIntervalDesc:'Fixed seconds retry (replaces polling)',consoleLog:'Log Level',consoleLogDesc:'Verbosity of console and disk log output',consoleNone:'None - no output',consoleInfo:'Info - access/request log only (recommended)',consoleError:'Error - info + failures/timeouts (disk: errors only)',consoleDebug:'Debug - all results (no polling noise)',trackerStatPeriod:'Tracker Stat Period',trackerStatPeriodDesc:'Time window for uptime% in tracker list',rankStatPeriod:'Ranking Stat Period',rankStatPeriodDesc:'Default period when opening the ranking page; can switch tabs manually',autoRefresh:'Auto Refresh',autoRefreshDesc:'Page refresh interval',monitorWorkers:'Concurrent Workers',monitorWorkersDesc:'Max parallel check threads (increase for large IP lists)',exportSuffix:'Export Suffix',exportSuffixDesc:'Path appended to each tracker URL on export',tabSwitchRefresh:'Refresh on Tab Switch',tabSwitchRefreshDesc:'Re-fetch dashboard/tracker data when switching tabs',showRemovedIps:'Show Removed IPs',showRemovedIpsDesc:'Show removed historical IPs in tracker list (grayed out)',defaultLayoutWidth:'Default Zoom',defaultLayoutWidthDesc:'Default page width for new users; existing cookie takes priority',logToDisk:'Log to Disk',logToDiskDesc:'Persist logs after restart',enable:'Enable',httpProxy:'HTTP Proxy',httpProxyPlaceholder:'http://127.0.0.1:7890 or socks5://127.0.0.1:1080',httpProxyDesc:'HTTP, HTTPS, SOCKS5 (all API requests)',udpProxy:'UDP Proxy',udpProxyPlaceholder:'socks5://127.0.0.1:1080',udpProxyDesc:'SOCKS5 only (requires pip install PySocks)',seconds:'s',second:'s',minute:'min',minutes:'mins',hour:'hour',disabled:'Disabled',logTitle:'Log Settings',maxLogEntries:'Max Log Entries',maxLogEntriesDesc:'Auto-remove oldest logs when limit is reached',default:'default',dnsTitle:'DNS Settings',dnsMode:'Resolve Mode',dnsModeDesc:'DNS resolution strategy for domain lookups',dnsModeSystem:'System DNS (recommended) - same as nslookup',dnsModePython:'dnspython - built-in resolver',dnsModeCustom:'Custom DNS Server',dnsCustom:'Custom DNS Server',dnsCustomPlaceholder:'8.8.8.8 or 8.8.8.8,8.8.4.4',dnsCustomDesc:'Only used in custom mode, separate multiple servers with comma'},modal:{addTracker:'Add Tracker',trackerUrl:'Tracker URL',urlPlaceholder:'udp://tracker.example.com:80/announce',urlExample:'Supports udp://, http://, https://'},links:{github:'GitHub',githubUrl:'https://github.com/game-turn-over-skill-group/Network-Monitor'},common:{add:'Add',cancel:'Cancel',search:'Search...',delete:'Delete',confirm:'Confirm',searchLevelHint:'Search content/level (error/info/warn)...'},users:{username:'Username',newPassword:'New Password (blank = keep)',role:'Role',adminShort:'admin=full',operatorShort:'operator=edit+500ms',viewerShort:'viewer=readonly+1s',roleAdminDesc:'Full access, no rate limit',roleOperatorDesc:'Add/delete Trackers, 500ms cooldown',roleViewerDesc:'Read-only, 1s cooldown',saveBtn:'Save User Config',addBtn:'+ Add User'},dash:{rankTitle:'Uptime Ranking TOP10',alertTitle:'Alert Center',alertThreshold:'Triggered by ≥5 consecutive failures',worst:'Worst',best:'Best',goRanking:'Ranking',noAlerts:'All normal, no alerts',consecFail:'Consecutive failures',curOnline:'Online',curOffline:'Offline',timeout:'Timeout',errorLogTitle:'Recent Error Logs',qsTitle:'Quick Search',qsHint:'Domain / IP / ISP / Country / Status',qsPlaceholder:'Search domain, IP, country, ISP, online/offline/http/https...',qsEmptyHint:'Enter keyword to search',noResults:'No results',qsTotal:'Total',selected:'selected'}},
-    ru:{nav:{appTitle:'Сетевой монитор',dashboard:'Панель',trackers:'Мониторинг',ranking:'Рейтинг',logs:'Логи',config:'Настройки',toggleTheme:'Тема',lightMode:'Светлая',darkMode:'Тёмная',userMgmt:'Управление пользователями'},stats:{total:'Всего IP',alive:'Онлайн',ipv4:'IPv4',ipv6:'IPv6',offline:'Отключено',offlineDesc:'Сейчас офлайн',avgLatency:'Ср. задержка',onlineRate:'Онлайн %',alerts:'Предупреждения',netHealth:'Сеть',netOk:'Норма',netBad:'Ошибка',probeOk:'Зонд OK',probeDown:'Зонд недост.',todayAlerts:'Тревоги сегодня',activeAlerts:'активных',allNormal:'Всё нормально'},tracker:{title:'Список мониторинга',domain:'Домен',ip:'IP адрес',country:'Страна',isp:'Провайдер',status:'Статус',latency:'Задержка',addedTime:'Добавлен',lastCheck:'Последняя проверка',ips:'IP',empty:'Нет трекеров',port:'Порт',protocol:'Протокол',uptimeLbl:'Доступность',statusAll:'Статус',statusOnline:'Онлайн',statusOffline:'Офлайн',statusPaused:'Приостановлен',expandHint:'Клик: развернуть ≤5 IP / все / свернуть',searchPlaceholder:'Домен / IP / Порт / Страна / Регион / Провайдер'},ranking:{'24h':'24 часа','export':'Экспорт TXT','7d':'7 дней','30d':'30 дней',filterLabel:'Мин. доступность',empty:'Нет подходящих'},logs:{title:'Системные логи',entries:'записей',clear:'Очистить',empty:'Нет логов',all:'Все'},config:{title:'Настройки',monitorTitle:'Мониторинг',displayTitle:'Отображение',proxyTitle:'Прокси',cacheTitle:'Кэш',cacheHistory:'Кэш статистики',cacheHistoryDesc:'Сохранять историю доступности',clearHistory:'Очистить кэш',clearHistoryConfirm:'Очистить кэш? Текущая статистика не изменится. Вступит в силу после перезапуска.',clearHistoryDone:'Кэш очищен, перезапустите',clearCacheNeedOff:'Сначала отключите [Кэш статистики]',clearCacheEmpty:'Кэш пуст, нечего очищать',checkInterval:'Интервал',checkIntervalDesc:'Интервал проверки',timeout:'Таймаут',timeoutDesc:'TCP/UDP таймаут',retryMode:'Режим повтора',retryModeDesc:'Опрос: 5с→15с→30с→60с→...',retryPolling:'Опрос',retryInterval:'Фикс. интервал',retryIntervalDesc:'Фиксированный интервал повтора',consoleLog:'Уровень логов консоли',consoleLogDesc:'Детализация вывода консоли',consoleNone:'Нет - без вывода',consoleInfo:'Инфо - доступ + сводка (рек.)',consoleError:'Ошибки - инфо + ошибки',consoleDebug:'Отладка - всё',trackerStatPeriod:'Период статистики',trackerStatPeriodDesc:'Окно расчёта доступности',rankStatPeriod:'Период рейтинга',rankStatPeriodDesc:'Период по умолч. при открытии рейтинга; можно переключить вкладку',autoRefresh:'Автообновление',autoRefreshDesc:'Интервал обновления',monitorWorkers:'Потоков проверки',monitorWorkersDesc:'Макс. параллельных потоков проверки',exportSuffix:'Суффикс экспорта',exportSuffixDesc:'Путь после домена при экспорте',tabSwitchRefresh:'Обновление при переключении',tabSwitchRefreshDesc:'Перезагружать данные при смене вкладки',showRemovedIps:'Показ. удалённые IP',showRemovedIpsDesc:'Отображать удалённые исторические IP (серым)',defaultLayoutWidth:'Масштаб по умол.',defaultLayoutWidthDesc:'Ширина страницы по умолчанию; cookie имеет приоритет',logToDisk:'Логи на диск',logToDiskDesc:'Сохранять логи',enable:'Включить',httpProxy:'HTTP прокси',httpProxyPlaceholder:'http://127.0.0.1:7890',httpProxyDesc:'HTTP, SOCKS5',udpProxy:'UDP прокси',udpProxyPlaceholder:'socks5://127.0.0.1:1080',udpProxyDesc:'Обычно SOCKS5 (pip install PySocks)',seconds:'с',second:'с',minute:'мин',minutes:'мин',hour:'ч',disabled:'Откл',logTitle:'Логи',maxLogEntries:'Макс. записей',maxLogEntriesDesc:'Авто-удаление старых логов',default:'по умол.',dnsTitle:'DNS',dnsMode:'Режим DNS',dnsModeDesc:'Стратегия разрешения DNS',dnsModeSystem:'Системный DNS (рек.)',dnsModePython:'dnspython',dnsModeCustom:'Свой DNS',dnsCustom:'DNS сервер',dnsCustomPlaceholder:'8.8.8.8',dnsCustomDesc:'Только для режима Custom'},modal:{addTracker:'Добавить трекер',trackerUrl:'URL',urlPlaceholder:'udp://tracker.example.com:80/announce',urlExample:'udp://, http://, https://'},links:{github:'GitHub',githubUrl:'https://github.com/game-turn-over-skill-group/Network-Monitor'},common:{add:'Добавить',cancel:'Отмена',search:'Поиск...',delete:'Удалить',confirm:'Подтвердить',searchLevelHint:'Поиск по уровню (error/info/warn)...'},users:{username:'Имя пользователя',newPassword:'Новый пароль (пусто=без изменений)',role:'Роль',adminShort:'admin=полный',operatorShort:'operator=редакт.+500мс',viewerShort:'viewer=чтение+1с',roleAdminDesc:'Полный доступ, без лимита',roleOperatorDesc:'Добавить/удалить трекеры, 500мс',roleViewerDesc:'Только чтение, 1с',saveBtn:'Сохранить',addBtn:'+ Добавить пользователя'},dash:{rankTitle:'Рейтинг TOP10',alertTitle:'Центр уведомлений',alertThreshold:'≥5 подряд сбоев',worst:'Худшие',best:'Лучшие',goRanking:'Рейтинг',noAlerts:'Всё нормально',consecFail:'Подряд сбоев',curOnline:'Онлайн',curOffline:'Офлайн',timeout:'Таймаут',errorLogTitle:'Последние ошибки',qsTitle:'Быстрый поиск',qsHint:'Домен / IP / Провайдер / Страна',qsPlaceholder:'Домен, IP, страна, провайдер, online/offline...',qsEmptyHint:'Введите запрос',noResults:'Нет результатов',qsTotal:'Всего',selected:'выбрано'}},
-    fr:{nav:{appTitle:'Moniteur Réseau',dashboard:'Tableau',trackers:'Trackers',ranking:'Classement',logs:'Journaux',config:'Config',toggleTheme:'Thème',lightMode:'Clair',darkMode:'Sombre',userMgmt:'Gestion des utilisateurs'},stats:{total:'Total IP',alive:'En ligne',ipv4:'IPv4',ipv6:'IPv6',offline:'Hors ligne',offlineDesc:'Actuellement hors ligne',avgLatency:'Lat. moy.',onlineRate:'Taux en ligne',alerts:'Alertes actives',netHealth:'Réseau',netOk:'Normal',netBad:'Anormal',probeOk:'Sonde OK',probeDown:'Sonde KO',todayAlerts:'Alertes du jour',activeAlerts:'alertes actives',allNormal:'Tout normal'},tracker:{title:'Liste de surveillance',domain:'Domaine',ip:'Adresse IP',country:'Pays',isp:'FAI',status:'Statut',latency:'Latence',addedTime:'Ajouté',lastCheck:'Dernière vérif.',ips:'IPs',empty:'Aucun tracker',port:'Port',protocol:'Protocole',uptimeLbl:'Disponibilité',statusAll:'Statut',statusOnline:'En ligne',statusOffline:'Hors ligne',statusPaused:'En pause',expandHint:'Clic: ≤5 IP / tout / réduire',searchPlaceholder:'Domaine / IP / Port / Pays / Région / FAI'},ranking:{'24h':'24h','export':'Exporter TXT','7d':'7 jours','30d':'30 jours',filterLabel:'Disponibilité min',empty:'Aucun résultat'},logs:{title:'Journaux',entries:'entrées',clear:'Effacer',empty:'Aucun journal',all:'Tout'},config:{title:'Configuration',monitorTitle:'Surveillance',displayTitle:'Affichage',proxyTitle:'Proxy',cacheTitle:'Cache',cacheHistory:'Cache statistiques',cacheHistoryDesc:'Conserver l\'historique après redémarrage',clearHistory:'Vider le cache',clearHistoryConfirm:'Vider le cache? Stats actuelles inchangées. Redémarrage requis.',clearHistoryDone:'Cache vidé, redémarrer',clearCacheNeedOff:'Désactivez d\'abord [Cache statistiques]',clearCacheEmpty:'Aucun cache à vider',checkInterval:'Intervalle',checkIntervalDesc:'Intervalle de vérification',timeout:'Délai',timeoutDesc:'Délai TCP/UDP',retryMode:'Mode retry',retryModeDesc:'Polling: 5s→15s→30s→60s→...',retryPolling:'Polling',retryInterval:'Intervalle fixe',retryIntervalDesc:'Intervalle fixe de retry',consoleLog:'Niveau log console',consoleLogDesc:'Verbosité de la console',consoleNone:'Aucun',consoleInfo:'Info (recommandé)',consoleError:'Erreurs',consoleDebug:'Débogage',trackerStatPeriod:'Période stat.',trackerStatPeriodDesc:'Fenêtre de calcul du taux',rankStatPeriod:'Période classement',rankStatPeriodDesc:'Période par défaut à l\'ouverture du classement; onglets commutables',monitorWorkers:'Threads de vérif.',monitorWorkersDesc:'Nombre max de threads parallèles',exportSuffix:'Suffixe export',exportSuffixDesc:'Chemin ajouté à chaque URL lors de l\'export',tabSwitchRefresh:'Rafraîchir onglet',tabSwitchRefreshDesc:'Recharger données en changeant d\'onglet',showRemovedIps:'Afficher IP supprimés',showRemovedIpsDesc:'Afficher les IP historiques supprimées (grisées)',defaultLayoutWidth:'Zoom par défaut',defaultLayoutWidthDesc:'Largeur par défaut (cookie prioritaire pour les utilisateurs existants)',autoRefresh:'Actualisation',autoRefreshDesc:"Intervalle d'actualisation",logToDisk:'Journaux',logToDiskDesc:'Persister journaux',enable:'Activer',httpProxy:'Proxy HTTP',httpProxyPlaceholder:'http://127.0.0.1:7890',httpProxyDesc:'HTTP, SOCKS5',udpProxy:'Proxy UDP',udpProxyPlaceholder:'socks5://127.0.0.1:1080',udpProxyDesc:'SOCKS5 (pip install PySocks)',seconds:'s',second:'s',minute:'min',minutes:'min',hour:'h',disabled:'Désactivé',logTitle:'Journaux',maxLogEntries:'Max entrées',maxLogEntriesDesc:'Supprime les anciens journaux',default:'défaut',dnsTitle:'DNS',dnsMode:'Mode DNS',dnsModeDesc:'Stratégie de résolution DNS',dnsModeSystem:'DNS système (recommandé)',dnsModePython:'dnspython',dnsModeCustom:'DNS personnalisé',dnsCustom:'Serveur DNS',dnsCustomPlaceholder:'8.8.8.8',dnsCustomDesc:'Mode custom uniquement'},modal:{addTracker:'Ajouter',trackerUrl:'URL',urlPlaceholder:'udp://tracker.example.com:80/announce',urlExample:'udp://, http://, https://'},links:{github:'GitHub',githubUrl:'https://github.com/game-turn-over-skill-group/Network-Monitor'},common:{add:'Ajouter',cancel:'Annuler',search:'Rechercher...',delete:'Supprimer',confirm:'Confirmer',searchLevelHint:'Niveau (error/info/warn)...'},users:{username:'Nom d\'utilisateur',newPassword:'Nouveau mot de passe (vide=inchangé)',role:'Rôle',adminShort:'admin=complet',operatorShort:'operator=édition+500ms',viewerShort:'viewer=lecture+1s',roleAdminDesc:'Accès complet, sans limite',roleOperatorDesc:'Ajouter/supprimer trackers, 500ms',roleViewerDesc:'Lecture seule, 1s',saveBtn:'Enregistrer',addBtn:'+ Ajouter utilisateur'},dash:{rankTitle:'Classement TOP10',alertTitle:'Centre d\'alertes',alertThreshold:'≥5 échecs consécutifs',worst:'Pires',best:'Meilleurs',goRanking:'Classement',noAlerts:'Tout normal',consecFail:'Échecs consécutifs',curOnline:'En ligne',curOffline:'Hors ligne',timeout:'Délai',errorLogTitle:'Erreurs récentes',qsTitle:'Recherche rapide',qsHint:'Domaine / IP / FAI / Pays',qsPlaceholder:'Domaine, IP, pays, FAI, online/offline...',qsEmptyHint:'Saisir un mot-clé',noResults:'Aucun résultat',qsTotal:'Total',selected:'sélectionné'}},
-    ja:{nav:{appTitle:'ネットワーク監視',dashboard:'ダッシュボード',trackers:'監視リスト',ranking:'ランキング',logs:'ログ',config:'設定',toggleTheme:'テーマ切替',lightMode:'ライト',darkMode:'ダーク',userMgmt:'ユーザー管理'},stats:{total:'合計IP',alive:'オンライン',ipv4:'IPv4',ipv6:'IPv6',offline:'オフライン',offlineDesc:'現在オフライン',avgLatency:'平均遅延',onlineRate:'オンライン率',alerts:'アラート',netHealth:'ネット状態',netOk:'正常',netBad:'異常',probeOk:'プローブOK',probeDown:'プローブ不達',todayAlerts:'今日の警告',activeAlerts:'アクティブ警告',allNormal:'正常'},tracker:{title:'監視リスト',domain:'ドメイン',ip:'IPアドレス',country:'国',isp:'ISP',status:'状態',latency:'遅延',addedTime:'追加日時',lastCheck:'最終確認',ips:'IPs',empty:'なし',port:'ポート',protocol:'プロトコル',uptimeLbl:'稼働率',statusAll:'状態',statusOnline:'オンライン',statusOffline:'オフライン',statusPaused:'一時停止',expandHint:'クリック: ≤5 IP / 全展開 / 折り畳み',searchPlaceholder:'ドメイン / IP / ポート / 国 / 地域 / ISP'},ranking:{'24h':'24時間','export':'TXTエクスポート','7d':'7日','30d':'30日',filterLabel:'最低稼働率',empty:'該当なし'},logs:{title:'ログ',entries:'件',clear:'クリア',empty:'なし',all:'全て'},config:{title:'設定',monitorTitle:'監視',displayTitle:'表示',proxyTitle:'プロキシ',cacheTitle:'キャッシュ',cacheHistory:'統計キャッシュ',cacheHistoryDesc:'再起動後も履歴を保持',clearHistory:'キャッシュをクリア',clearHistoryConfirm:'キャッシュをクリアしますか？現在の統計は維持されます。再起動後に反映。',clearHistoryDone:'クリア済み、再起動後に反映',clearCacheNeedOff:'先に[統計キャッシュ]をオフにしてください',clearCacheEmpty:'キャッシュデータがありません',checkInterval:'間隔',checkIntervalDesc:'確認間隔',timeout:'タイムアウト',timeoutDesc:'TCP/UDPタイムアウト',retryMode:'リトライモード',retryModeDesc:'ポーリング: 5s→15s→30s→60s→...',retryPolling:'ポーリング',retryInterval:'固定間隔',retryIntervalDesc:'固定秒数でリトライ',consoleLog:'コンソールログレベル',consoleLogDesc:'コンソール出力の詳細度',consoleNone:'なし',consoleInfo:'情報（推奨）',consoleError:'エラー',consoleDebug:'デバッグ',trackerStatPeriod:'統計期間',trackerStatPeriodDesc:'可用率の計算ウィンドウ',rankStatPeriod:'ランキング期間',rankStatPeriodDesc:'ランキング開時のデフォルト期間；タブで切替可',monitorWorkers:'並列スレッド数',monitorWorkersDesc:'最大並列チェックスレッド数',exportSuffix:'エクスポート後缀',exportSuffixDesc:'エクスポート時に追加するパス',tabSwitchRefresh:'タブ切替で更新',tabSwitchRefreshDesc:'タブ切替時にデータを再取得',showRemovedIps:'削除IP表示',showRemovedIpsDesc:'削除された過去のIPを灰色で表示',defaultLayoutWidth:'デフォルト表示幅',defaultLayoutWidthDesc:'初回/cookie未設定時のデフォルト幅；既存cookie優先',autoRefresh:'自動更新',autoRefreshDesc:'更新間隔',logToDisk:'ログ保存',logToDiskDesc:'再起動後も保持',enable:'有効',httpProxy:'HTTPプロキシ',httpProxyPlaceholder:'http://127.0.0.1:7890',httpProxyDesc:'HTTP, SOCKS5',udpProxy:'UDPプロキシ',udpProxyPlaceholder:'socks5://127.0.0.1:1080',udpProxyDesc:'SOCKS5のみ (pip install PySocks)',seconds:'秒',second:'秒',minute:'分',minutes:'分',hour:'時間',disabled:'無効',logTitle:'ログ設定',maxLogEntries:'最大ログ件数',maxLogEntriesDesc:'上限超過時に古いログを削除',default:'デフォルト',dnsTitle:'DNS設定',dnsMode:'解決モード',dnsModeDesc:'DNS解決の方式',dnsModeSystem:'システムDNS（推奨）',dnsModePython:'dnspython',dnsModeCustom:'カスタムDNS',dnsCustom:'DNSサーバー',dnsCustomPlaceholder:'8.8.8.8',dnsCustomDesc:'カスタムモードのみ'},modal:{addTracker:'追加',trackerUrl:'URL',urlPlaceholder:'udp://tracker.example.com:80/announce',urlExample:'udp://, http://, https://'},links:{github:'GitHub',githubUrl:'https://github.com/game-turn-over-skill-group/Network-Monitor'},common:{add:'追加',cancel:'キャンセル',search:'検索...',delete:'削除',confirm:'確認',searchLevelHint:'レベル検索 (error/info/warn)...'},users:{username:'ユーザー名',newPassword:'新しいパスワード（空欄=変更なし）',role:'ロール',adminShort:'admin=全権限',operatorShort:'operator=編集+500ms',viewerShort:'viewer=読取+1s',roleAdminDesc:'全権限、制限なし',roleOperatorDesc:'追加/削除、500ms制限',roleViewerDesc:'読み取りのみ、1s制限',saveBtn:'保存',addBtn:'+ ユーザー追加'},dash:{rankTitle:'稼働率ランキング TOP10',alertTitle:'アラートセンター',alertThreshold:'5回連続失敗で発動',worst:'最悪',best:'最良',goRanking:'ランキング',noAlerts:'全て正常',consecFail:'連続失敗',curOnline:'オンライン',curOffline:'オフライン',timeout:'タイムアウト',errorLogTitle:'最近のエラー',qsTitle:'クイック検索',qsHint:'ドメイン / IP / ISP / 国',qsPlaceholder:'ドメイン、IP、国、ISP、online/offline...',qsEmptyHint:'キーワードを入力',noResults:'結果なし',qsTotal:'合計',selected:'選択済み'}},
-    ko:{nav:{appTitle:'네트워크 모니터',dashboard:'대시보드',trackers:'모니터 목록',ranking:'순위',logs:'로그',config:'설정',toggleTheme:'테마',lightMode:'라이트',darkMode:'다크',userMgmt:'사용자 관리'},stats:{total:'총 IP',alive:'온라인',ipv4:'IPv4',ipv6:'IPv6',offline:'오프라인',offlineDesc:'현재 오프라인',avgLatency:'평균 지연',onlineRate:'온라인율',alerts:'경보',netHealth:'네트워크 상태',netOk:'정상',netBad:'이상',probeOk:'프로브 OK',probeDown:'프로브 불가',todayAlerts:'오늘 알림',activeAlerts:'활성 알림',allNormal:'모두 정상'},tracker:{title:'모니터 목록',domain:'도메인',ip:'IP 주소',country:'국가',isp:'ISP',status:'상태',latency:'지연',addedTime:'추가 시간',lastCheck:'마지막 확인',ips:'IPs',empty:'없음',port:'포트',protocol:'프로토콜',uptimeLbl:'가용률',statusAll:'상태',statusOnline:'온라인',statusOffline:'오프라인',statusPaused:'일시정지',expandHint:'클릭: ≤5 IP / 전체 / 접기',searchPlaceholder:'도메인 / IP / 포트 / 국가 / 지역 / ISP'},ranking:{'24h':'24시간','export':'TXT 내보내기','7d':'7일','30d':'30일',filterLabel:'최소 가용률',empty:'해당 없음'},logs:{title:'로그',entries:'건',clear:'지우기',empty:'없음',all:'전체'},config:{title:'설정',monitorTitle:'모니터링',displayTitle:'표시',proxyTitle:'프록시',cacheTitle:'캐시',cacheHistory:'통계 캐시',cacheHistoryDesc:'재시작 후에도 기록 유지',clearHistory:'캐시 초기화',clearHistoryConfirm:'캐시를 초기화하시겠습니까? 현재 통계는 유지됩니다. 재시작 후 적용됩니다.',clearHistoryDone:'캐시 초기화 완료, 재시작 후 적용',clearCacheNeedOff:'먼저 [통계 캐시]를 비활성화하세요',clearCacheEmpty:'캐시 데이터가 없습니다',checkInterval:'간격',checkIntervalDesc:'확인 간격',timeout:'타임아웃',timeoutDesc:'TCP/UDP 타임아웃',retryMode:'재시도 모드',retryModeDesc:'폴링: 5s→15s→30s→60s→...',retryPolling:'폴링',retryInterval:'고정 간격',retryIntervalDesc:'고정 초 재시도',consoleLog:'콘솔 로그 레벨',consoleLogDesc:'콘솔 출력 상세도',consoleNone:'없음',consoleInfo:'정보（권장）',consoleError:'오류',consoleDebug:'디버그',trackerStatPeriod:'통계 기간',trackerStatPeriodDesc:'가용률 계산 창',rankStatPeriod:'순위 기간',rankStatPeriodDesc:'순위 기본 통계 기간; 탭으로 전환 가능',monitorWorkers:'동시 검사 수',monitorWorkersDesc:'최대 병렬 검사 스레드 수',exportSuffix:'내보내기 접미사',exportSuffixDesc:'내보내기 시 URL 끝에 추가할 경로',tabSwitchRefresh:'탭 전환 시 새로고침',tabSwitchRefreshDesc:'탭 전환 시 데이터 재로드',showRemovedIps:'삭제 IP 표시',showRemovedIpsDesc:'제거된 과거 IP를 회색으로 표시',defaultLayoutWidth:'기본 화면 너비',defaultLayoutWidthDesc:'쿠키 없는 신규 사용자 기본값; 기존 쿠키 우선',autoRefresh:'자동 새로고침',autoRefreshDesc:'새로고침 간격',logToDisk:'로그 저장',logToDiskDesc:'재시작 후 유지',enable:'활성화',httpProxy:'HTTP 프록시',httpProxyPlaceholder:'http://127.0.0.1:7890',httpProxyDesc:'HTTP, SOCKS5',udpProxy:'UDP 프록시',udpProxyPlaceholder:'socks5://127.0.0.1:1080',udpProxyDesc:'SOCKS5만 (pip install PySocks)',seconds:'초',second:'초',minute:'분',minutes:'분',hour:'시간',disabled:'비활성',logTitle:'로그 설정',maxLogEntries:'최대 로그 수',maxLogEntriesDesc:'초과 시 오래된 로그 자동 삭제',default:'기본값',dnsTitle:'DNS 설정',dnsMode:'DNS 모드',dnsModeDesc:'DNS 해석 방식',dnsModeSystem:'시스템 DNS（권장）',dnsModePython:'dnspython',dnsModeCustom:'사용자 정의 DNS',dnsCustom:'DNS 서버',dnsCustomPlaceholder:'8.8.8.8',dnsCustomDesc:'사용자 정의 모드만'},modal:{addTracker:'추가',trackerUrl:'URL',urlPlaceholder:'udp://tracker.example.com:80/announce',urlExample:'udp://, http://, https://'},links:{github:'GitHub',githubUrl:'https://github.com/game-turn-over-skill-group/Network-Monitor'},common:{add:'추가',cancel:'취소',search:'검색...',delete:'삭제',confirm:'확인',searchLevelHint:'레벨 검색 (error/info/warn)...'},users:{username:'사용자명',newPassword:'새 비밀번호 (빈칸=유지)',role:'역할',adminShort:'admin=전체',operatorShort:'operator=편집+500ms',viewerShort:'viewer=읽기+1s',roleAdminDesc:'전체 권한, 제한 없음',roleOperatorDesc:'추가/삭제, 500ms 제한',roleViewerDesc:'읽기 전용, 1s 제한',saveBtn:'저장',addBtn:'+ 사용자 추가'},dash:{rankTitle:'가용률 순위 TOP10',alertTitle:'경보 센터',alertThreshold:'5회 연속 실패 시 발동',worst:'최악',best:'최고',goRanking:'순위',noAlerts:'모두 정상',consecFail:'연속 실패',curOnline:'온라인',curOffline:'오프라인',timeout:'타임아웃',errorLogTitle:'최근 오류',qsTitle:'빠른 검색',qsHint:'도메인 / IP / ISP / 국가',qsPlaceholder:'도메인, IP, 국가, ISP, online/offline...',qsEmptyHint:'키워드 입력',noResults:'결과 없음',qsTotal:'합계',selected:'선택됨'}}
+    zh:{nav:{appTitle:'网络监控',dashboard:'仪表盘',trackers:'监控列表',ranking:'可用率排行',logs:'日志',config:'配置',toggleTheme:'切换主题',lightMode:'日间模式',darkMode:'夜间模式',userMgmt:'用户管理'},stats:{total:'总监控IP',alive:'在线IP',ipv4:'IPv4',ipv6:'IPv6',offline:'故障IP',offlineDesc:'当前离线',avgLatency:'平均延迟',onlineRate:'在线率',alerts:'未处理告警',allNormal:'全部正常'},tracker:{title:'监控列表',domain:'域名',ip:'IP地址',country:'归属地',isp:'运营商',status:'状态',latency:'延迟',addedTime:'添加时间',lastCheck:'最后检查',ips:'IPs',empty:'暂无Tracker',port:'端口',protocol:'协议',uptimeLbl:'可用率',expandHint:'点击：展开≤5IP / 展开全部 / 收起'},ranking:{'24h':'24小时','export':'导出 TXT','7d':'7天','30d':'30天',filterLabel:'最低可用率',empty:'暂无符合条件的Tracker'},logs:{title:'请求结果',entries:'条',clear:'清空',empty:'暂无日志',all:'全部'},config:{title:'配置',monitorTitle:'监控配置',displayTitle:'显示配置',proxyTitle:'代理配置',cacheTitle:'缓存配置',cacheHistory:'缓存统计可用率',cacheHistoryDesc:'开启后重启不丢失历史统计，排行榜长期有效',clearHistory:'清空缓存',clearHistoryConfirm:'确定要清空缓存？当前统计不受影响，重启后从零开始。',clearHistoryDone:'缓存已清空，重启后生效',clearCacheNeedOff:'请先关闭【缓存统计可用率】开关，再清空缓存',clearCacheEmpty:'缓存中暂无历史数据，无需清空',checkInterval:'监控间隔',checkIntervalDesc:'每隔多少秒检测一次所有tracker',timeout:'连接超时',timeoutDesc:'TCP/UDP最大等待时间',retryMode:'重试模式',retryModeDesc:'轮询: 5s→15s→30s→60s→5s... 循环递增',retryPolling:'轮询',retryInterval:'固定间隔',retryIntervalDesc:'固定秒数重试（替代轮询）',consoleLog:'日志级别',consoleLogDesc:'控制台输出和磁盘日志的详细程度',consoleNone:'无 - 不输出任何内容',consoleInfo:'基础 - 仅访问请求日志（推荐）',consoleError:'错误 - 基础+所有失败/超时/错误（磁盘仅存错误）',consoleDebug:'调试 - 全部（含每IP成功结果，不含轮询刷新）',trackerStatPeriod:'监控列表统计周期',trackerStatPeriodDesc:'监控列表中可用率%的计算窗口',rankStatPeriod:'排行榜统计周期',rankStatPeriodDesc:'可用率排行榜的计算窗口',autoRefresh:'页面刷新',autoRefreshDesc:'自动刷新间隔',monitorWorkers:'并发检测数',monitorWorkersDesc:'同时检测的最大线程数，IP数量多时可适当调高',tabSwitchRefresh:'切换时刷新',tabSwitchRefreshDesc:'切换标签页时重新拉取仪表盘/监控数据',logToDisk:'日志存盘',logToDiskDesc:'重启后日志不丢失',enable:'启用',httpProxy:'HTTP代理',httpProxyPlaceholder:'http://127.0.0.1:7890 或 socks5://127.0.0.1:1080',httpProxyDesc:'支持HTTP/HTTPS/SOCKS5（包括API请求和IP归属地查询）',udpProxy:'UDP代理',udpProxyPlaceholder:'socks5://127.0.0.1:1080',udpProxyDesc:'UDP通常只支持SOCKS5（需安装PySocks: pip install PySocks）',seconds:'秒',second:'秒',minute:'分钟',minutes:'分钟',hour:'小时',disabled:'禁用',logTitle:'日志配置',maxLogEntries:'日志最大条目',maxLogEntriesDesc:'超过上限后自动删除最旧的日志',default:'默认',dnsTitle:'DNS配置',dnsMode:'解析模式',dnsModeDesc:'选择DNS解析方式，影响域名IP获取准确性',dnsModeSystem:'系统DNS（推荐）- 与nslookup/浏览器一致',dnsModePython:'dnspython - 内置解析器',dnsModeCustom:'自定义DNS服务器',dnsCustom:'自定义DNS服务器',dnsCustomPlaceholder:'8.8.8.8 或 8.8.8.8,8.8.4.4',dnsCustomDesc:'仅在自定义模式下生效，多个服务器用逗号分隔'},modal:{addTracker:'添加Tracker',trackerUrl:'Tracker URL',urlPlaceholder:'udp://tracker.example.com:80/announce\nudp://tracker2.example.com:1337/announce\nhttp://tracker.example.com:6969/announce',urlExample:'支持 udp://, http://, https:// 协议'},links:{github:'项目地址',githubUrl:'https://github.com/game-turn-over-skill-group/Network-Monitor'},common:{add:'添加',cancel:'取消',search:'搜索...',delete:'删除',confirm:'确认',searchLevelHint:'搜索内容/级别(error/info/warn)...'},users:{username:'用户名',newPassword:'新密码（留空=不改）',role:'角色',adminShort:'admin=全权',operatorShort:'operator=增删+限速500ms',viewerShort:'viewer=只读+限速1s',roleAdminDesc:'全部权限，重试不限速',roleOperatorDesc:'增删Tracker，重试500ms',roleViewerDesc:'只读，重试1s',saveBtn:'保存用户配置',addBtn:'+ 添加用户'},dash:{rankTitle:'可用率排行 TOP10',alertTitle:'告警中心',alertThreshold:'连续失败 ≥5次触发',worst:'最差',best:'最佳',goRanking:'排行榜',noAlerts:'全部正常，暂无告警',consecFail:'连续失败',curOnline:'当前在线',curOffline:'当前离线',timeout:'超时',errorLogTitle:'最近错误日志',qsTitle:'快速搜索',qsHint:'域名 / IP / 运营商 / 国家 / 状态',qsPlaceholder:'搜索域名、IP、国家、运营商、online/offline/http/https...',qsEmptyHint:'输入关键词搜索',noResults:'无匹配结果',qsTotal:'共',selected:'已选'}},
+    en:{nav:{appTitle:'Network Monitor',dashboard:'Dashboard',trackers:'Monitor List',ranking:'Ranking',logs:'Logs',config:'Config',toggleTheme:'Toggle Theme',lightMode:'Light Mode',darkMode:'Dark Mode',userMgmt:'User Management'},stats:{total:'Total IPs',alive:'Online IPs',ipv4:'IPv4',ipv6:'IPv6',offline:'Offline IPs',offlineDesc:'Currently offline',avgLatency:'Avg Latency',onlineRate:'Online Rate',alerts:'Active Alerts',allNormal:'All Normal'},tracker:{title:'Monitor List',domain:'Domain',ip:'IP Address',country:'Country',isp:'ISP',status:'Status',latency:'Latency',addedTime:'Added',lastCheck:'Last Check',ips:'IPs',empty:'No trackers yet',port:'Port',protocol:'Protocol',uptimeLbl:'Uptime',expandHint:'Click: expand ≤5 IPs / expand all / collapse'},ranking:{'24h':'24 Hours','export':'Export TXT','7d':'7 Days','30d':'30 Days',filterLabel:'Min Uptime',empty:'No matching trackers'},logs:{title:'Request Logs',entries:'entries',clear:'Clear',empty:'No logs yet',all:'All'},config:{title:'Config',monitorTitle:'Monitor Settings',displayTitle:'Display Settings',proxyTitle:'Proxy Settings',cacheTitle:'Cache Settings',cacheHistory:'Cache Uptime Stats',cacheHistoryDesc:'Keep uptime history on restart, rankings stay valid long-term',clearHistory:'Clear Cache',clearHistoryConfirm:'Clear cached history? Current stats are unaffected. Takes effect on restart.',clearHistoryDone:'Cache cleared, restart to apply',clearCacheNeedOff:'Please turn off [Cache Uptime Stats] first',clearCacheEmpty:'No cached history found, nothing to clear',checkInterval:'Check Interval',checkIntervalDesc:'How often to check all trackers',timeout:'Connection Timeout',timeoutDesc:'TCP/UDP wait timeout',retryMode:'Retry Mode',retryModeDesc:'Polling: 5s→15s→30s→60s→5s... cycling',retryPolling:'Polling',retryInterval:'Fixed Interval',retryIntervalDesc:'Fixed seconds retry (replaces polling)',consoleLog:'Log Level',consoleLogDesc:'Verbosity of console and disk log output',consoleNone:'None - no output',consoleInfo:'Info - access/request log only (recommended)',consoleError:'Error - info + failures/timeouts (disk: errors only)',consoleDebug:'Debug - all results (no polling noise)',trackerStatPeriod:'Tracker Stat Period',trackerStatPeriodDesc:'Time window for uptime% in tracker list',rankStatPeriod:'Ranking Stat Period',rankStatPeriodDesc:'Time window for uptime ranking',autoRefresh:'Auto Refresh',autoRefreshDesc:'Page refresh interval',monitorWorkers:'Concurrent Workers',monitorWorkersDesc:'Max parallel check threads (increase for large IP lists)',tabSwitchRefresh:'Refresh on Tab Switch',tabSwitchRefreshDesc:'Re-fetch dashboard/tracker data when switching tabs',logToDisk:'Log to Disk',logToDiskDesc:'Persist logs after restart',enable:'Enable',httpProxy:'HTTP Proxy',httpProxyPlaceholder:'http://127.0.0.1:7890 or socks5://127.0.0.1:1080',httpProxyDesc:'HTTP, HTTPS, SOCKS5 (all API requests)',udpProxy:'UDP Proxy',udpProxyPlaceholder:'socks5://127.0.0.1:1080',udpProxyDesc:'SOCKS5 only (requires pip install PySocks)',seconds:'s',second:'s',minute:'min',minutes:'mins',hour:'hour',disabled:'Disabled',logTitle:'Log Settings',maxLogEntries:'Max Log Entries',maxLogEntriesDesc:'Auto-remove oldest logs when limit is reached',default:'default',dnsTitle:'DNS Settings',dnsMode:'Resolve Mode',dnsModeDesc:'DNS resolution strategy for domain lookups',dnsModeSystem:'System DNS (recommended) - same as nslookup',dnsModePython:'dnspython - built-in resolver',dnsModeCustom:'Custom DNS Server',dnsCustom:'Custom DNS Server',dnsCustomPlaceholder:'8.8.8.8 or 8.8.8.8,8.8.4.4',dnsCustomDesc:'Only used in custom mode, separate multiple servers with comma'},modal:{addTracker:'Add Tracker',trackerUrl:'Tracker URL',urlPlaceholder:'udp://tracker.example.com:80/announce',urlExample:'Supports udp://, http://, https://'},links:{github:'GitHub',githubUrl:'https://github.com/game-turn-over-skill-group/Network-Monitor'},common:{add:'Add',cancel:'Cancel',search:'Search...',delete:'Delete',confirm:'Confirm',searchLevelHint:'Search content/level (error/info/warn)...'},users:{username:'Username',newPassword:'New Password (blank = keep)',role:'Role',adminShort:'admin=full',operatorShort:'operator=edit+500ms',viewerShort:'viewer=readonly+1s',roleAdminDesc:'Full access, no rate limit',roleOperatorDesc:'Add/delete Trackers, 500ms cooldown',roleViewerDesc:'Read-only, 1s cooldown',saveBtn:'Save User Config',addBtn:'+ Add User'},dash:{rankTitle:'Uptime Ranking TOP10',alertTitle:'Alert Center',alertThreshold:'Triggered by ≥5 consecutive failures',worst:'Worst',best:'Best',goRanking:'Ranking',noAlerts:'All normal, no alerts',consecFail:'Consecutive failures',curOnline:'Online',curOffline:'Offline',timeout:'Timeout',errorLogTitle:'Recent Error Logs',qsTitle:'Quick Search',qsHint:'Domain / IP / ISP / Country / Status',qsPlaceholder:'Search domain, IP, country, ISP, online/offline/http/https...',qsEmptyHint:'Enter keyword to search',noResults:'No results',qsTotal:'Total',selected:'selected'}},
+    ru:{nav:{appTitle:'Сетевой монитор',dashboard:'Панель',trackers:'Мониторинг',ranking:'Рейтинг',logs:'Логи',config:'Настройки',toggleTheme:'Тема',lightMode:'Светлая',darkMode:'Тёмная',userMgmt:'Управление пользователями'},stats:{total:'Всего IP',alive:'Онлайн',ipv4:'IPv4',ipv6:'IPv6',offline:'Отключено',offlineDesc:'Сейчас офлайн',avgLatency:'Ср. задержка',onlineRate:'Онлайн %',alerts:'Предупреждения',allNormal:'Всё нормально'},tracker:{title:'Список мониторинга',domain:'Домен',ip:'IP адрес',country:'Страна',isp:'Провайдер',status:'Статус',latency:'Задержка',addedTime:'Добавлен',lastCheck:'Последняя проверка',ips:'IP',empty:'Нет трекеров',port:'Порт',protocol:'Протокол',uptimeLbl:'Доступность',expandHint:'Клик: развернуть ≤5 IP / все / свернуть'},ranking:{'24h':'24 часа','export':'Экспорт TXT','7d':'7 дней','30d':'30 дней',filterLabel:'Мин. доступность',empty:'Нет подходящих'},logs:{title:'Системные логи',entries:'записей',clear:'Очистить',empty:'Нет логов',all:'Все'},config:{title:'Настройки',monitorTitle:'Мониторинг',displayTitle:'Отображение',proxyTitle:'Прокси',cacheTitle:'Кэш',cacheHistory:'Кэш статистики',cacheHistoryDesc:'Сохранять историю доступности',clearHistory:'Очистить кэш',clearHistoryConfirm:'Очистить кэш? Текущая статистика не изменится. Вступит в силу после перезапуска.',clearHistoryDone:'Кэш очищен, перезапустите',clearCacheNeedOff:'Сначала отключите [Кэш статистики]',clearCacheEmpty:'Кэш пуст, нечего очищать',checkInterval:'Интервал',checkIntervalDesc:'Интервал проверки',timeout:'Таймаут',timeoutDesc:'TCP/UDP таймаут',retryMode:'Режим повтора',retryModeDesc:'Опрос: 5с→15с→30с→60с→...',retryPolling:'Опрос',retryInterval:'Фикс. интервал',retryIntervalDesc:'Фиксированный интервал повтора',consoleLog:'Уровень логов консоли',consoleLogDesc:'Детализация вывода консоли',consoleNone:'Нет - без вывода',consoleInfo:'Инфо - доступ + сводка (рек.)',consoleError:'Ошибки - инфо + ошибки',consoleDebug:'Отладка - всё',trackerStatPeriod:'Период статистики',trackerStatPeriodDesc:'Окно расчёта доступности',rankStatPeriod:'Период рейтинга',rankStatPeriodDesc:'Окно рейтинга доступности',autoRefresh:'Автообновление',autoRefreshDesc:'Интервал обновления',monitorWorkers:'Потоков проверки',monitorWorkersDesc:'Макс. параллельных потоков проверки',tabSwitchRefresh:'Обновление при переключении',tabSwitchRefreshDesc:'Перезагружать данные при смене вкладки',logToDisk:'Логи на диск',logToDiskDesc:'Сохранять логи',enable:'Включить',httpProxy:'HTTP прокси',httpProxyPlaceholder:'http://127.0.0.1:7890',httpProxyDesc:'HTTP, SOCKS5',udpProxy:'UDP прокси',udpProxyPlaceholder:'socks5://127.0.0.1:1080',udpProxyDesc:'Обычно SOCKS5 (pip install PySocks)',seconds:'с',second:'с',minute:'мин',minutes:'мин',hour:'ч',disabled:'Откл',logTitle:'Логи',maxLogEntries:'Макс. записей',maxLogEntriesDesc:'Авто-удаление старых логов',default:'по умол.',dnsTitle:'DNS',dnsMode:'Режим DNS',dnsModeDesc:'Стратегия разрешения DNS',dnsModeSystem:'Системный DNS (рек.)',dnsModePython:'dnspython',dnsModeCustom:'Свой DNS',dnsCustom:'DNS сервер',dnsCustomPlaceholder:'8.8.8.8',dnsCustomDesc:'Только для режима Custom'},modal:{addTracker:'Добавить трекер',trackerUrl:'URL',urlPlaceholder:'udp://tracker.example.com:80/announce',urlExample:'udp://, http://, https://'},links:{github:'GitHub',githubUrl:'https://github.com/game-turn-over-skill-group/Network-Monitor'},common:{add:'Добавить',cancel:'Отмена',search:'Поиск...',delete:'Удалить',confirm:'Подтвердить',searchLevelHint:'Поиск по уровню (error/info/warn)...'},users:{username:'Имя пользователя',newPassword:'Новый пароль (пусто=без изменений)',role:'Роль',adminShort:'admin=полный',operatorShort:'operator=редакт.+500мс',viewerShort:'viewer=чтение+1с',roleAdminDesc:'Полный доступ, без лимита',roleOperatorDesc:'Добавить/удалить трекеры, 500мс',roleViewerDesc:'Только чтение, 1с',saveBtn:'Сохранить',addBtn:'+ Добавить пользователя'},dash:{rankTitle:'Рейтинг TOP10',alertTitle:'Центр уведомлений',alertThreshold:'≥5 подряд сбоев',worst:'Худшие',best:'Лучшие',goRanking:'Рейтинг',noAlerts:'Всё нормально',consecFail:'Подряд сбоев',curOnline:'Онлайн',curOffline:'Офлайн',timeout:'Таймаут',errorLogTitle:'Последние ошибки',qsTitle:'Быстрый поиск',qsHint:'Домен / IP / Провайдер / Страна',qsPlaceholder:'Домен, IP, страна, провайдер, online/offline...',qsEmptyHint:'Введите запрос',noResults:'Нет результатов',qsTotal:'Всего',selected:'выбрано'}},
+    fr:{nav:{appTitle:'Moniteur Réseau',dashboard:'Tableau',trackers:'Trackers',ranking:'Classement',logs:'Journaux',config:'Config',toggleTheme:'Thème',lightMode:'Clair',darkMode:'Sombre',userMgmt:'Gestion des utilisateurs'},stats:{total:'Total IP',alive:'En ligne',ipv4:'IPv4',ipv6:'IPv6',offline:'Hors ligne',offlineDesc:'Actuellement hors ligne',avgLatency:'Lat. moy.',onlineRate:'Taux en ligne',alerts:'Alertes actives',allNormal:'Tout normal'},tracker:{title:'Liste de surveillance',domain:'Domaine',ip:'Adresse IP',country:'Pays',isp:'FAI',status:'Statut',latency:'Latence',addedTime:'Ajouté',lastCheck:'Dernière vérif.',ips:'IPs',empty:'Aucun tracker',port:'Port',protocol:'Protocole',uptimeLbl:'Disponibilité',expandHint:'Clic: ≤5 IP / tout / réduire'},ranking:{'24h':'24h','export':'Exporter TXT','7d':'7 jours','30d':'30 jours',filterLabel:'Disponibilité min',empty:'Aucun résultat'},logs:{title:'Journaux',entries:'entrées',clear:'Effacer',empty:'Aucun journal',all:'Tout'},config:{title:'Configuration',monitorTitle:'Surveillance',displayTitle:'Affichage',proxyTitle:'Proxy',cacheTitle:'Cache',cacheHistory:'Cache statistiques',cacheHistoryDesc:'Conserver l\'historique après redémarrage',clearHistory:'Vider le cache',clearHistoryConfirm:'Vider le cache? Stats actuelles inchangées. Redémarrage requis.',clearHistoryDone:'Cache vidé, redémarrer',clearCacheNeedOff:'Désactivez d\'abord [Cache statistiques]',clearCacheEmpty:'Aucun cache à vider',checkInterval:'Intervalle',checkIntervalDesc:'Intervalle de vérification',timeout:'Délai',timeoutDesc:'Délai TCP/UDP',retryMode:'Mode retry',retryModeDesc:'Polling: 5s→15s→30s→60s→...',retryPolling:'Polling',retryInterval:'Intervalle fixe',retryIntervalDesc:'Intervalle fixe de retry',consoleLog:'Niveau log console',consoleLogDesc:'Verbosité de la console',consoleNone:'Aucun',consoleInfo:'Info (recommandé)',consoleError:'Erreurs',consoleDebug:'Débogage',trackerStatPeriod:'Période stat.',trackerStatPeriodDesc:'Fenêtre de calcul du taux',rankStatPeriod:'Période classement',rankStatPeriodDesc:'Fenêtre du classement',monitorWorkers:'Threads de vérif.',monitorWorkersDesc:'Nombre max de threads parallèles',tabSwitchRefresh:'Rafraîchir onglet',tabSwitchRefreshDesc:'Recharger données en changeant d\'onglet',autoRefresh:'Actualisation',autoRefreshDesc:"Intervalle d'actualisation",logToDisk:'Journaux',logToDiskDesc:'Persister journaux',enable:'Activer',httpProxy:'Proxy HTTP',httpProxyPlaceholder:'http://127.0.0.1:7890',httpProxyDesc:'HTTP, SOCKS5',udpProxy:'Proxy UDP',udpProxyPlaceholder:'socks5://127.0.0.1:1080',udpProxyDesc:'SOCKS5 (pip install PySocks)',seconds:'s',second:'s',minute:'min',minutes:'min',hour:'h',disabled:'Désactivé',logTitle:'Journaux',maxLogEntries:'Max entrées',maxLogEntriesDesc:'Supprime les anciens journaux',default:'défaut',dnsTitle:'DNS',dnsMode:'Mode DNS',dnsModeDesc:'Stratégie de résolution DNS',dnsModeSystem:'DNS système (recommandé)',dnsModePython:'dnspython',dnsModeCustom:'DNS personnalisé',dnsCustom:'Serveur DNS',dnsCustomPlaceholder:'8.8.8.8',dnsCustomDesc:'Mode custom uniquement'},modal:{addTracker:'Ajouter',trackerUrl:'URL',urlPlaceholder:'udp://tracker.example.com:80/announce',urlExample:'udp://, http://, https://'},links:{github:'GitHub',githubUrl:'https://github.com/game-turn-over-skill-group/Network-Monitor'},common:{add:'Ajouter',cancel:'Annuler',search:'Rechercher...',delete:'Supprimer',confirm:'Confirmer',searchLevelHint:'Niveau (error/info/warn)...'},users:{username:'Nom d\'utilisateur',newPassword:'Nouveau mot de passe (vide=inchangé)',role:'Rôle',adminShort:'admin=complet',operatorShort:'operator=édition+500ms',viewerShort:'viewer=lecture+1s',roleAdminDesc:'Accès complet, sans limite',roleOperatorDesc:'Ajouter/supprimer trackers, 500ms',roleViewerDesc:'Lecture seule, 1s',saveBtn:'Enregistrer',addBtn:'+ Ajouter utilisateur'},dash:{rankTitle:'Classement TOP10',alertTitle:'Centre d\'alertes',alertThreshold:'≥5 échecs consécutifs',worst:'Pires',best:'Meilleurs',goRanking:'Classement',noAlerts:'Tout normal',consecFail:'Échecs consécutifs',curOnline:'En ligne',curOffline:'Hors ligne',timeout:'Délai',errorLogTitle:'Erreurs récentes',qsTitle:'Recherche rapide',qsHint:'Domaine / IP / FAI / Pays',qsPlaceholder:'Domaine, IP, pays, FAI, online/offline...',qsEmptyHint:'Saisir un mot-clé',noResults:'Aucun résultat',qsTotal:'Total',selected:'sélectionné'}},
+    ja:{nav:{appTitle:'ネットワーク監視',dashboard:'ダッシュボード',trackers:'監視リスト',ranking:'ランキング',logs:'ログ',config:'設定',toggleTheme:'テーマ切替',lightMode:'ライト',darkMode:'ダーク',userMgmt:'ユーザー管理'},stats:{total:'合計IP',alive:'オンライン',ipv4:'IPv4',ipv6:'IPv6',offline:'オフライン',offlineDesc:'現在オフライン',avgLatency:'平均遅延',onlineRate:'オンライン率',alerts:'アラート',allNormal:'正常'},tracker:{title:'監視リスト',domain:'ドメイン',ip:'IPアドレス',country:'国',isp:'ISP',status:'状態',latency:'遅延',addedTime:'追加日時',lastCheck:'最終確認',ips:'IPs',empty:'なし',port:'ポート',protocol:'プロトコル',uptimeLbl:'稼働率',expandHint:'クリック: ≤5 IP / 全展開 / 折り畳み'},ranking:{'24h':'24時間','export':'TXTエクスポート','7d':'7日','30d':'30日',filterLabel:'最低稼働率',empty:'該当なし'},logs:{title:'ログ',entries:'件',clear:'クリア',empty:'なし',all:'全て'},config:{title:'設定',monitorTitle:'監視',displayTitle:'表示',proxyTitle:'プロキシ',cacheTitle:'キャッシュ',cacheHistory:'統計キャッシュ',cacheHistoryDesc:'再起動後も履歴を保持',clearHistory:'キャッシュをクリア',clearHistoryConfirm:'キャッシュをクリアしますか？現在の統計は維持されます。再起動後に反映。',clearHistoryDone:'クリア済み、再起動後に反映',clearCacheNeedOff:'先に[統計キャッシュ]をオフにしてください',clearCacheEmpty:'キャッシュデータがありません',checkInterval:'間隔',checkIntervalDesc:'確認間隔',timeout:'タイムアウト',timeoutDesc:'TCP/UDPタイムアウト',retryMode:'リトライモード',retryModeDesc:'ポーリング: 5s→15s→30s→60s→...',retryPolling:'ポーリング',retryInterval:'固定間隔',retryIntervalDesc:'固定秒数でリトライ',consoleLog:'コンソールログレベル',consoleLogDesc:'コンソール出力の詳細度',consoleNone:'なし',consoleInfo:'情報（推奨）',consoleError:'エラー',consoleDebug:'デバッグ',trackerStatPeriod:'統計期間',trackerStatPeriodDesc:'可用率の計算ウィンドウ',rankStatPeriod:'ランキング期間',rankStatPeriodDesc:'ランキングの計算ウィンドウ',monitorWorkers:'並列スレッド数',monitorWorkersDesc:'最大並列チェックスレッド数',tabSwitchRefresh:'タブ切替で更新',tabSwitchRefreshDesc:'タブ切替時にデータを再取得',autoRefresh:'自動更新',autoRefreshDesc:'更新間隔',logToDisk:'ログ保存',logToDiskDesc:'再起動後も保持',enable:'有効',httpProxy:'HTTPプロキシ',httpProxyPlaceholder:'http://127.0.0.1:7890',httpProxyDesc:'HTTP, SOCKS5',udpProxy:'UDPプロキシ',udpProxyPlaceholder:'socks5://127.0.0.1:1080',udpProxyDesc:'SOCKS5のみ (pip install PySocks)',seconds:'秒',second:'秒',minute:'分',minutes:'分',hour:'時間',disabled:'無効',logTitle:'ログ設定',maxLogEntries:'最大ログ件数',maxLogEntriesDesc:'上限超過時に古いログを削除',default:'デフォルト',dnsTitle:'DNS設定',dnsMode:'解決モード',dnsModeDesc:'DNS解決の方式',dnsModeSystem:'システムDNS（推奨）',dnsModePython:'dnspython',dnsModeCustom:'カスタムDNS',dnsCustom:'DNSサーバー',dnsCustomPlaceholder:'8.8.8.8',dnsCustomDesc:'カスタムモードのみ'},modal:{addTracker:'追加',trackerUrl:'URL',urlPlaceholder:'udp://tracker.example.com:80/announce',urlExample:'udp://, http://, https://'},links:{github:'GitHub',githubUrl:'https://github.com/game-turn-over-skill-group/Network-Monitor'},common:{add:'追加',cancel:'キャンセル',search:'検索...',delete:'削除',confirm:'確認',searchLevelHint:'レベル検索 (error/info/warn)...'},users:{username:'ユーザー名',newPassword:'新しいパスワード（空欄=変更なし）',role:'ロール',adminShort:'admin=全権限',operatorShort:'operator=編集+500ms',viewerShort:'viewer=読取+1s',roleAdminDesc:'全権限、制限なし',roleOperatorDesc:'追加/削除、500ms制限',roleViewerDesc:'読み取りのみ、1s制限',saveBtn:'保存',addBtn:'+ ユーザー追加'},dash:{rankTitle:'稼働率ランキング TOP10',alertTitle:'アラートセンター',alertThreshold:'5回連続失敗で発動',worst:'最悪',best:'最良',goRanking:'ランキング',noAlerts:'全て正常',consecFail:'連続失敗',curOnline:'オンライン',curOffline:'オフライン',timeout:'タイムアウト',errorLogTitle:'最近のエラー',qsTitle:'クイック検索',qsHint:'ドメイン / IP / ISP / 国',qsPlaceholder:'ドメイン、IP、国、ISP、online/offline...',qsEmptyHint:'キーワードを入力',noResults:'結果なし',qsTotal:'合計',selected:'選択済み'}},
+    ko:{nav:{appTitle:'네트워크 모니터',dashboard:'대시보드',trackers:'모니터 목록',ranking:'순위',logs:'로그',config:'설정',toggleTheme:'테마',lightMode:'라이트',darkMode:'다크',userMgmt:'사용자 관리'},stats:{total:'총 IP',alive:'온라인',ipv4:'IPv4',ipv6:'IPv6',offline:'오프라인',offlineDesc:'현재 오프라인',avgLatency:'평균 지연',onlineRate:'온라인율',alerts:'경보',allNormal:'모두 정상'},tracker:{title:'모니터 목록',domain:'도메인',ip:'IP 주소',country:'국가',isp:'ISP',status:'상태',latency:'지연',addedTime:'추가 시간',lastCheck:'마지막 확인',ips:'IPs',empty:'없음',port:'포트',protocol:'프로토콜',uptimeLbl:'가용률',expandHint:'클릭: ≤5 IP / 전체 / 접기'},ranking:{'24h':'24시간','export':'TXT 내보내기','7d':'7일','30d':'30일',filterLabel:'최소 가용률',empty:'해당 없음'},logs:{title:'로그',entries:'건',clear:'지우기',empty:'없음',all:'전체'},config:{title:'설정',monitorTitle:'모니터링',displayTitle:'표시',proxyTitle:'프록시',cacheTitle:'캐시',cacheHistory:'통계 캐시',cacheHistoryDesc:'재시작 후에도 기록 유지',clearHistory:'캐시 초기화',clearHistoryConfirm:'캐시를 초기화하시겠습니까? 현재 통계는 유지됩니다. 재시작 후 적용됩니다.',clearHistoryDone:'캐시 초기화 완료, 재시작 후 적용',clearCacheNeedOff:'먼저 [통계 캐시]를 비활성화하세요',clearCacheEmpty:'캐시 데이터가 없습니다',checkInterval:'간격',checkIntervalDesc:'확인 간격',timeout:'타임아웃',timeoutDesc:'TCP/UDP 타임아웃',retryMode:'재시도 모드',retryModeDesc:'폴링: 5s→15s→30s→60s→...',retryPolling:'폴링',retryInterval:'고정 간격',retryIntervalDesc:'고정 초 재시도',consoleLog:'콘솔 로그 레벨',consoleLogDesc:'콘솔 출력 상세도',consoleNone:'없음',consoleInfo:'정보（권장）',consoleError:'오류',consoleDebug:'디버그',trackerStatPeriod:'통계 기간',trackerStatPeriodDesc:'가용률 계산 창',rankStatPeriod:'순위 기간',rankStatPeriodDesc:'순위 계산 창',monitorWorkers:'동시 검사 수',monitorWorkersDesc:'최대 병렬 검사 스레드 수',tabSwitchRefresh:'탭 전환 시 새로고침',tabSwitchRefreshDesc:'탭 전환 시 데이터 재로드',autoRefresh:'자동 새로고침',autoRefreshDesc:'새로고침 간격',logToDisk:'로그 저장',logToDiskDesc:'재시작 후 유지',enable:'활성화',httpProxy:'HTTP 프록시',httpProxyPlaceholder:'http://127.0.0.1:7890',httpProxyDesc:'HTTP, SOCKS5',udpProxy:'UDP 프록시',udpProxyPlaceholder:'socks5://127.0.0.1:1080',udpProxyDesc:'SOCKS5만 (pip install PySocks)',seconds:'초',second:'초',minute:'분',minutes:'분',hour:'시간',disabled:'비활성',logTitle:'로그 설정',maxLogEntries:'최대 로그 수',maxLogEntriesDesc:'초과 시 오래된 로그 자동 삭제',default:'기본값',dnsTitle:'DNS 설정',dnsMode:'DNS 모드',dnsModeDesc:'DNS 해석 방식',dnsModeSystem:'시스템 DNS（권장）',dnsModePython:'dnspython',dnsModeCustom:'사용자 정의 DNS',dnsCustom:'DNS 서버',dnsCustomPlaceholder:'8.8.8.8',dnsCustomDesc:'사용자 정의 모드만'},modal:{addTracker:'추가',trackerUrl:'URL',urlPlaceholder:'udp://tracker.example.com:80/announce',urlExample:'udp://, http://, https://'},links:{github:'GitHub',githubUrl:'https://github.com/game-turn-over-skill-group/Network-Monitor'},common:{add:'추가',cancel:'취소',search:'검색...',delete:'삭제',confirm:'확인',searchLevelHint:'레벨 검색 (error/info/warn)...'},users:{username:'사용자명',newPassword:'새 비밀번호 (빈칸=유지)',role:'역할',adminShort:'admin=전체',operatorShort:'operator=편집+500ms',viewerShort:'viewer=읽기+1s',roleAdminDesc:'전체 권한, 제한 없음',roleOperatorDesc:'추가/삭제, 500ms 제한',roleViewerDesc:'읽기 전용, 1s 제한',saveBtn:'저장',addBtn:'+ 사용자 추가'},dash:{rankTitle:'가용률 순위 TOP10',alertTitle:'경보 센터',alertThreshold:'5회 연속 실패 시 발동',worst:'최악',best:'최고',goRanking:'순위',noAlerts:'모두 정상',consecFail:'연속 실패',curOnline:'온라인',curOffline:'오프라인',timeout:'타임아웃',errorLogTitle:'최근 오류',qsTitle:'빠른 검색',qsHint:'도메인 / IP / ISP / 국가',qsPlaceholder:'도메인, IP, 국가, ISP, online/offline...',qsEmptyHint:'키워드 입력',noResults:'결과 없음',qsTotal:'합계',selected:'선택됨'}}
 };
 
 const i18n = createI18n({ legacy:false, locale:'zh', fallbackLocale:'zh', messages: msgs });
@@ -1849,7 +1645,7 @@ createApp({
         const currentTab = ref('dashboard');
         const locale = ref('zh');
         const isDark = ref(true); // 默认夜间模式
-        const layoutWidth = ref('1700'); // 默认70%，优先级：cookie > 配置 > 此默认值
+        const layoutWidth = ref('1900'); // 默认90% = 1900px max-width
 
         const applyLayout = () => {
             document.cookie = 'layoutWidth=' + layoutWidth.value + ';path=/;max-age=' + (365*24*3600);
@@ -1857,36 +1653,13 @@ createApp({
         const loading = ref(true);
         const trackers = ref({});
         const stats = ref({total:0,alive:0,ipv4:0,ipv6:0,alive_v4:0,alive_v6:0});
-        const expanded  = ref([]);   // 手动展开的域名（≥5 IP）
-        const collapsed = ref([]);   // 手动折叠的域名（< 5 IP 默认展开，加入此集合后收起）
+        const expanded = ref([]);
         const searchQ = ref('');
         const showAdd = ref(false);
         const addUrl = ref('');
         const adding = ref(false);
         const addMsg = ref(null);
         const ranking = ref([]);
-        // 排行榜前端筛选（proto + ip_ver），直接在 ranking 数据上过滤
-        const filteredRanking = computed(() => {
-            let list = ranking.value;
-            if (exportProto.value && exportProto.value !== 'all') {
-                const p = exportProto.value;
-                list = list.filter(item => {
-                    const proto = (item.protocol||'tcp').toLowerCase();
-                    if (p === 'udp')   return proto === 'udp';
-                    if (p === 'tcp')   return proto !== 'udp';  // TCP含所有非UDP
-                    if (p === 'https') return proto === 'https';
-                    if (p === 'http')  return proto !== 'udp' && proto !== 'https';
-                    return true;
-                });
-            }
-            if (exportIpVer.value && exportIpVer.value !== 'all') {
-                const ver = exportIpVer.value;
-                list = list.filter(item =>
-                    ver === 'ipv4' ? item.has_v4 : item.has_v6
-                );
-            }
-            return list;
-        });
         // rankPeriod：页面内临时状态，切换不触发配置保存（避免日志刷屏）
         // 初始值由 loadCfg() 后同步，见 watch(cfg, ...)
         const rankPeriod = ref('24h');
@@ -1896,27 +1669,17 @@ createApp({
         const exportIpVer  = ref('all');   // 导出IP版本过滤
 
         const exportRanking = () => {
-            const list = filteredRanking.value;
-            if (!list.length) { showToast('暂无可导出数据', 'warn'); return; }
-            const suffix = cfg.value.export_suffix || '/announce';
-            const lines = list.map(item => {
-                const proto = (item.protocol||'tcp').toLowerCase();
-                const scheme = proto === 'https' ? 'https' : proto === 'udp' ? 'udp' : 'http';
-                return `${scheme}://${item.domain}:${item.port}${suffix}`;
-            });
-            const text = lines.join('\n');
-            const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
-            const burl = URL.createObjectURL(blob);
+            const min = filterEnabled.value ? filterThreshold.value : 0;
+            const url = `/api/ranking/export?period=${rankPeriod.value}&min_uptime=${min}&proto=${exportProto.value}&ip_ver=${exportIpVer.value}&suffix=/announce`;
             const a = document.createElement('a');
-            a.href = burl; a.download = `trackers-${rankPeriod.value}.txt`;
-            document.body.appendChild(a); a.click();
-            setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(burl); }, 500);
-            showToast(`导出成功 ${lines.length} 条`, 'success');
+            a.href = url;
+            a.download = `trackers-${rankPeriod.value}.txt`;
+            a.click();
         };
         const logs = ref([]);
         const logLvl = ref('');
         const logSearch = ref('');
-        const cfg = ref({log_to_disk:false,check_interval:30,timeout:5,retry_mode:'polling',retry_interval:5,console_log_level:'info',http_proxy:'',udp_proxy:'',proxy_enabled:false,dns_mode:'system',dns_custom:'8.8.8.8',max_log_entries:2000,page_refresh_ms:30000,tracker_stat_period:'24h',rank_stat_period:'24h',cache_history:true,tab_switch_refresh:true,monitor_workers:120,export_suffix:'/announce',show_removed_ips:true,default_layout_width:'1700'});
+        const cfg = ref({log_to_disk:false,check_interval:30,timeout:5,retry_mode:'polling',retry_interval:5,console_log_level:'info',http_proxy:'',udp_proxy:'',proxy_enabled:false,dns_mode:'system',dns_custom:'8.8.8.8',max_log_entries:2000,page_refresh_ms:30000,tracker_stat_period:'24h',rank_stat_period:'24h',cache_history:true,tab_switch_refresh:true,monitor_workers:120});
         // 仪表盘 rank 切换 / 快速搜索
         const dashRankMode = ref('worst'); // 'worst' | 'best'
         const qsSearch = ref('');
@@ -1947,33 +1710,6 @@ createApp({
 
         // 协议筛选
         const protoFilter = ref('');
-        const ipVerFilter = ref('all');  // all | ipv4 | ipv6 — 全局IP版本过滤
-        const statusFilter = ref('');   // '' | 'online' | 'offline' | 'paused'
-
-        // 一键展开/折叠全部域名
-        const expandAll = () => {
-            const allDomains = Object.keys(filteredTrackers.value);
-            const smallDomains = allDomains.filter(d => {
-                const tr = filteredTrackers.value[d];
-                return tr && (tr.ips||[]).filter(i=>!i.removed).length < 5;
-            });
-            const bigDomains = allDomains.filter(d => {
-                const tr = filteredTrackers.value[d];
-                return tr && (tr.ips||[]).filter(i=>!i.removed).length >= 5;
-            });
-            // 判断当前是否"全展开"状态：大域名全在 expanded 且小域名全不在 collapsed
-            const allBigExpanded = bigDomains.every(d => expanded.value.includes(d));
-            const allSmallVisible = smallDomains.every(d => !collapsed.value.includes(d));
-            if (allBigExpanded && allSmallVisible) {
-                // 全部展开 → 折叠全部
-                expanded.value = [];
-                collapsed.value = [...smallDomains];
-            } else {
-                // 否则 → 展开全部
-                expanded.value = [...new Set([...expanded.value, ...bigDomains])];
-                collapsed.value = [];
-            }
-        };
 
         // ── 认证状态 ──
         const authUser = ref({logged_in: false, role: null, username: null});
@@ -2103,7 +1839,7 @@ createApp({
 
         // 排序状态：sortKey = 'domain'|'uptime'|null，sortDir 循环次数
         const sortKey = ref('uptime');
-        const sortDir = ref(1); // 1=降序, -1=升序, 0=还原
+        const sortDir = ref(1); // domain: 1=升 -1=降 0=还原; uptime: 1=高→低 2=低→高 3=●绿在线优先 4=●红离线优先 0=还原
 
         const cycleSort = (key) => {
             if (sortKey.value !== key) { sortKey.value = key; sortDir.value = 1; return; }
@@ -2120,65 +1856,43 @@ createApp({
 
         const filteredTrackers = computed(() => {
             let base = trackers.value;
-            // 协议筛选
+            // 协议筛选：支持 http/https（映射到tcp+端口）
             if (protoFilter.value) {
                 const pf = {};
                 for (const [d,data] of Object.entries(base)) {
                     const proto = (data.protocol||'tcp').toLowerCase();
                     const port = data.port || 80;
-                    const isUdp   = proto === 'udp';
-                    const isHttps = proto === 'https' || (proto === 'tcp' && port === 443);
-                    const isHttp  = !isUdp && !isHttps;  // TCP 非443
-                    let match = false;
-                    if (protoFilter.value === 'udp')   match = isUdp;
-                    else if (protoFilter.value === 'https') match = isHttps;
-                    else if (protoFilter.value === 'http')  match = isHttp && proto !== 'https';
-                    else if (protoFilter.value === 'tcp')   match = !isUdp;  // TCP = HTTP + HTTPS
+                    let match = proto === protoFilter.value;
+                    // https: protocol字段='https' OR tcp+443; http: tcp+非443
+                    if (protoFilter.value === 'https') match = proto === 'https' || (proto === 'tcp' && port === 443);
+                    else if (protoFilter.value === 'http') match = proto === 'tcp' && port !== 443 && proto !== 'https';
                     if (match) pf[d] = data;
                 }
                 base = pf;
-            }
-            // 在线状态筛选（域名级：任一IP符合即显示）
-            if (statusFilter.value) {
-                const sf = {};
-                for (const [d,data] of Object.entries(base)) {
-                    const activeIPs = (data.ips||[]).filter(i=>!i.removed);
-                    if (statusFilter.value === 'paused') {
-                        if (data.paused || activeIPs.some(i=>i.paused)) sf[d] = data;
-                    } else if (statusFilter.value === 'online') {
-                        if (activeIPs.some(i=>i.status==='online'&&!i.paused)) sf[d] = data;
-                    } else if (statusFilter.value === 'offline') {
-                        if (activeIPs.some(i=>i.status==='offline'&&!i.paused)) sf[d] = data;
-                    }
-                }
-                base = sf;
             }
             if (!searchQ.value) return base;
             const q = searchQ.value.toLowerCase();
             const r = {};
             for (const [d,data] of Object.entries(base)) {
                 if (d.toLowerCase().includes(q)) { r[d]=data; continue; }
-                // 端口搜索
-                if (String(data.port).includes(q)) { r[d]=data; continue; }
-                // 添加时间
+                // 支持搜索时间戳 (added_time格式化后)
                 const addedFmt = data.added_time ? (() => {
                     const dd = new Date(data.added_time);
                     const pad = n => String(n).padStart(2,'0');
                     return `${dd.getFullYear()}/${pad(dd.getMonth()+1)}/${pad(dd.getDate())} ${pad(dd.getHours())}:${pad(dd.getMinutes())}`;
                 })() : '';
                 if (addedFmt.includes(q)) { r[d]=data; continue; }
-                // 协议关键词
+                // 协议关键词搜索
                 const proto = (data.protocol||'tcp').toLowerCase();
                 const port = data.port || 80;
                 const protoLabel = proto==='https' ? 'https' : proto==='tcp' ? (port===443?'https':'http') : proto;
                 if (protoLabel.includes(q) || proto.includes(q)) { r[d]=data; continue; }
-                // IP / 国家 / 归属地 / 运营商 / 状态 / 最后检查
                 const ipMatch = data.ips.filter(ip =>
                     ip.ip.toLowerCase().includes(q) ||
                     (ip.country?.country||'').toLowerCase().includes(q) ||
-                    (ip.country?.country_code||'').toLowerCase().includes(q) ||
                     (ip.country?.isp||'').toLowerCase().includes(q) ||
                     (ip.status||'').toLowerCase().includes(q) ||
+                    // 支持搜索IP最后检查时间
                     (ip.last_check ? (() => {
                         const dd = new Date(ip.last_check);
                         const pad = n => String(n).padStart(2,'0');
@@ -2190,54 +1904,78 @@ createApp({
             return r;
         });
 
-        // sortedTrackers：在 filteredTrackers 基础上排序，返回 [[domain, data], ...] 数组
+        // sortedTrackers：在 filteredTrackers 基础上排序，不影响原始数据
         const sortedTrackers = computed(() => {
             const base = filteredTrackers.value;
+            if (!sortKey.value || sortDir.value === 0) return base;
             const entries = Object.entries(base);
-            const dir = sortDir.value; // 1=降序(高→低), -1=升序(低→高)
 
+            // 使用IP级可用率均值（与 uptime() 函数一致，修正域名 any(online) 逻辑）
             const uptimeFn = (data) => {
                 const p = cfg.value.tracker_stat_period || '24h';
                 const pkMap = {'24h':'uptime_24h','7d':'uptime_7d','30d':'uptime_30d'};
                 const pk = pkMap[p] || 'ip_uptime';
                 const activeIps = (data.ips || []).filter(ip => !ip.removed);
                 if (!activeIps.length) return null;
-                const vals = activeIps.map(ip => ip[pk] ?? ip.ip_uptime ?? null).filter(v => v !== null);
+                const vals = activeIps.map(ip => ip[pk] !== null && ip[pk] !== undefined ? ip[pk] : (ip.ip_uptime !== null && ip.ip_uptime !== undefined ? ip.ip_uptime : null)).filter(v => v !== null);
                 return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
             };
-            const uv = (v) => v === null ? -1 : v; // null 排末
+            // null（未知）在排序中视为 -1，排在最末
+            const uptimeVal = (v) => v === null ? -1 : v;
+            const onlineCount = (data) => data.ips.filter(ip => ip.status === 'online').length;
+            const totalCount  = (data) => data.ips.length;
 
             entries.sort(([da,a],[db,b]) => {
-                const k = sortKey.value;
-                if (!k || dir === 0) return 0;
-                if (k === 'domain') return dir * da.localeCompare(db);
-                if (k === 'uptime') {
-                    const ua = uv(uptimeFn(a)), ub = uv(uptimeFn(b));
-                    const ipCntA = (a.ips||[]).filter(i=>!i.removed).length;
-                    const ipCntB = (b.ips||[]).filter(i=>!i.removed).length;
-                    // 主排序：可用率高→低（降序）or 低→高（升序）
-                    // 次排序：IP 数量多→少（IP 多的优先）
-                    const utimeDiff = dir === 1 ? ub - ua : ua - ub;
-                    if (Math.abs(utimeDiff) > 0.01) return utimeDiff;
-                    return ipCntB - ipCntA; // IP 数多的排前面（固定次排序）
+                if (sortKey.value === 'domain') {
+                    return sortDir.value * da.localeCompare(db);
                 }
-                if (k === 'port')    return dir * ((a.port||80) - (b.port||80));
-                if (k === 'latency') {
-                    const avgLat = (d) => { const ls=d.ips.filter(i=>!i.removed&&i.latency>=0).map(i=>i.latency); return ls.length?ls.reduce((a,b)=>a+b,0)/ls.length:Infinity; };
-                    return dir * (avgLat(a) - avgLat(b));
+                if (sortKey.value === 'uptime') {
+                    const ua = uptimeVal(uptimeFn(a)), ub = uptimeVal(uptimeFn(b));
+                    const oa = onlineCount(a), ob = onlineCount(b);
+                    const ta = totalCount(a),  tb = totalCount(b);
+
+                    if (sortDir.value === 1) {
+                        // 第1次▲：可用率高→低
+                        if (ua !== ub) return ub - ua;
+                        return ob - oa;
+                    }
+                    if (sortDir.value === 2) {
+                        // 第2次▼：可用率低→高
+                        if (ua !== ub) return ua - ub;
+                        return oa - ob;
+                    }
+                    if (sortDir.value === 3) {
+                        // 第3次●绿：含在线IP的域名优先（只要有>=1个在线就靠前）
+                        const aoOnline = oa > 0 ? 1 : 0;
+                        const boOnline = ob > 0 ? 1 : 0;
+                        if (aoOnline !== boOnline) return boOnline - aoOnline;
+                        if (ua !== ub) return ub - ua;
+                        return ob - oa;
+                    }
+                    if (sortDir.value === 4) {
+                        // 第4次●红：含离线IP的域名优先（只要有>=1个离线就靠前）
+                        const offA = ta - oa, offB = tb - ob;
+                        const aHasOff = offA > 0 ? 1 : 0;
+                        const bHasOff = offB > 0 ? 1 : 0;
+                        if (aHasOff !== bHasOff) return bHasOff - aHasOff;
+                        if (ua !== ub) return ua - ub;
+                        return offB - offA;
+                    }
                 }
-                if (k === 'added') {
-                    const ta = a.added_time ? new Date(a.added_time).getTime() : 0;
-                    const tb = b.added_time ? new Date(b.added_time).getTime() : 0;
-                    return dir === 1 ? tb - ta : ta - tb; // 默认最新在前
+                if (sortKey.value === 'port') {
+                    return sortDir.value * ((a.port||80) - (b.port||80));
                 }
-                if (k === 'lastcheck') {
-                    const lastChk = (d) => { const ts=d.ips.filter(i=>!i.removed&&i.last_check).map(i=>new Date(i.last_check).getTime()); return ts.length?Math.max(...ts):0; };
-                    return dir === 1 ? lastChk(b)-lastChk(a) : lastChk(a)-lastChk(b);
+                if (sortKey.value === 'latency') {
+                    // 取域名下所有活跃IP的平均延迟（-1表示无数据，排末尾）
+                    const avgLat = (d) => {
+                        const lats = d.ips.filter(ip=>!ip.removed&&ip.latency>=0).map(ip=>ip.latency);
+                        return lats.length ? lats.reduce((a,b)=>a+b,0)/lats.length : Infinity;
+                    };
+                    return sortDir.value * (avgLat(a) - avgLat(b));
                 }
                 return 0;
             });
-            return entries; // [[domain, data], ...]
+            return Object.fromEntries(entries);
         });
 
         const filteredLogs = computed(() => {
@@ -2277,31 +2015,14 @@ createApp({
                     data.console_log_level = data.log_level;
                 }
                 cfg.value = {...cfg.value, ...data}; 
-                rankPeriod.value = cfg.value.rank_stat_period || '24h';
-                // 若 cookie 里没有 layoutWidth 覆盖，则应用配置中的默认视野
-                const hasCookieLW = document.cookie.split(';').some(c => c.trim().startsWith('layoutWidth='));
-                if (!hasCookieLW && cfg.value.default_layout_width) {
-                    const valid = ['1500','1600','1700','1800','1900','2000'];
-                    if (valid.includes(String(cfg.value.default_layout_width))) {
-                        layoutWidth.value = String(cfg.value.default_layout_width);
-                    }
-                }
+                rankPeriod.value = cfg.value.rank_stat_period || '24h'; 
                 // resetRefresh 由 onMounted 统一调用，避免产生双重 timer
             } catch(e){} 
         };
 
         const toggleExpand = (d) => {
-            const tr = filteredTrackers.value[d] || Object.values(trackers.value).find((_,k)=>k===d) || trackers.value[d];
-            const activeLen = tr ? (tr.ips||[]).filter(i=>!i.removed).length : 99;
-            if (activeLen < 5) {
-                // 小于5个IP：默认展开，点击切换折叠状态
-                const ci = collapsed.value.indexOf(d);
-                ci > -1 ? collapsed.value.splice(ci, 1) : collapsed.value.push(d);
-            } else {
-                // 5个及以上：默认折叠，点击切换展开状态
-                const i = expanded.value.indexOf(d);
-                i > -1 ? expanded.value.splice(i, 1) : expanded.value.push(d);
-            }
+            const i = expanded.value.indexOf(d);
+            i>-1 ? expanded.value.splice(i,1) : expanded.value.push(d);
         };
 
         const openAdd = () => { showAdd.value=true; addMsg.value=null; };
@@ -2424,9 +2145,6 @@ createApp({
                     cache_history:cfg.value.cache_history,
                     tab_switch_refresh:cfg.value.tab_switch_refresh,
                     monitor_workers:cfg.value.monitor_workers||120,
-                    export_suffix:cfg.value.export_suffix||'/announce',
-                    show_removed_ips:cfg.value.show_removed_ips !== false,
-                    default_layout_width:cfg.value.default_layout_width||'1700',
                 });
             } catch(e){}
         };
@@ -2533,16 +2251,6 @@ createApp({
             const d = new Date(ts);
             const pad = n => String(n).padStart(2,'0');
             return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-        };
-        // 短时间格式：今天显示 HH:MM，其他显示 M/D HH:MM
-        const fmtShortTime = (ts) => {
-            if (!ts) return '-';
-            const d = new Date(ts);
-            const now = new Date();
-            const pad = n => String(n).padStart(2,'0');
-            if (d.toDateString() === now.toDateString())
-                return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-            return `${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
         };
         const fmtLogTime = (ts) => ts ? new Date(ts).toLocaleString() : '';
         const flag = (code) => {
@@ -3048,20 +2756,19 @@ createApp({
         });
 
         return {
-            currentTab, locale, isDark, toggleTheme, layoutWidth, applyLayout, loading, trackers, stats, expanded, collapsed, searchQ, logSearch,
+            currentTab, locale, isDark, toggleTheme, layoutWidth, applyLayout, loading, trackers, stats, expanded, searchQ, logSearch,
             sortKey, sortDir, cycleSort, sortedTrackers,
-            showAdd, addUrl, adding, addMsg, ranking, filteredRanking, rankPeriod, filterEnabled, filterThreshold,
-            exportRanking, exportProto, exportIpVer,
+            showAdd, addUrl, adding, addMsg, ranking, rankPeriod, filterEnabled, filterThreshold,
             logs, logLvl, cfg, refreshMs,
             filteredTrackers, filteredLogs,
-            protoFilter, ipVerFilter, statusFilter, expandAll,
+            protoFilter,
             authUser, showLogin, loginForm, loginError, loginLoading, doLogin, doLogout, visibleTabs,
             showChpw, chpwLoading, chpwMsg, chpwForm, closeChpw, doChpw,
             userRows, userSaving, userSaveMsg, addUserRow, removeUserRow, saveUsers,
             tabIcon, go, loadRanking, toggleExpand, openAdd, closeAdd, doAdd,
             delTracker, pauseDomain, pauseIp, pauseAll, allPaused, retryDomain, retryIp, clearLogs, saveCfg, changeLocale,
             uptime, uptimeCls, stCls, stIcon, stTxt, latCls, latW,
-            fmtTime, fmtFullTime, fmtShortTime, fmtLogTime, flag, resetRefresh, clearHistory, clearHistoryMsg, toast, showToast,
+            fmtTime, fmtFullTime, fmtLogTime, flag, resetRefresh, clearHistory, clearHistoryMsg, toast, showToast,
             dashRankMode, dashRankList, dashAlerts, dashErrorGroups, dashErrorLogs,
             dashAvgLatency, dashP95Latency, statCardTrend,
             qsSearch, qsFilterDomain, qsPage, qsSelected, qsSelectAll,

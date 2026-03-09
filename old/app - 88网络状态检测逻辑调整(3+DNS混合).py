@@ -50,7 +50,6 @@ DEFAULT_CONFIG = {
     'tab_switch_refresh': True,   # 切换仪表盘/监控列表时是否刷新数据
     'export_suffix': '/announce',   # 导出 tracker 列表时追加的路径后缀
     'show_removed_ips': True,       # 是否显示已移除的历史IP（前端控制）
-    'default_layout_width': '1700', # 默认页面视野宽度（px字符串，对应50%~100%）
     'users': [
         {"username": "admin",    "password": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", "role": "admin"},
         {"username": "operator", "password": "06e55b633481f7bb072957eabcf110c972e86691c3cfedabe088024bffe42f23", "role": "operator"},
@@ -70,7 +69,7 @@ def load_config():
                       'log_to_disk','log_level','console_log_level',
                       'http_proxy','udp_proxy','proxy_enabled',
                       'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
-                      'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','users']:
+                      'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh','export_suffix','show_removed_ips','users']:
                 if k in saved:
                     cfg[k] = saved[k]
             # 向后兼容：旧配置文件用 console_log_level，迁移到 log_level
@@ -88,7 +87,7 @@ def persist_config(cfg):
                                         'http_proxy','udp_proxy','proxy_enabled',
                                         'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
                                         'tracker_stat_period','rank_stat_period','cache_history',
-                                        'tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','users']
+                                        'tab_switch_refresh','export_suffix','show_removed_ips','users']
                    if k in cfg}
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(savable, f, indent=2, ensure_ascii=False)
@@ -2502,7 +2501,7 @@ def api_config():
             return jsonify({'error': '权限不足'}), 403
         data = request.json or {}
         keys = ['check_interval','timeout','retry_mode','retry_interval',
-                'monitor_workers','export_suffix','show_removed_ips','default_layout_width',
+                'monitor_workers','export_suffix','show_removed_ips',
                 'log_to_disk','log_level','console_log_level','http_proxy','udp_proxy','proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
                 'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh']
@@ -2569,7 +2568,7 @@ def api_config():
 
     # GET 读取配置：未登录只返回前端行为控制必要字段（不含账户/代理等敏感信息）
     # 已登录用户额外返回运维相关字段（仍不含账户信息）
-    public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'tracker_stat_period', 'rank_stat_period', 'show_removed_ips', 'default_layout_width']
+    public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'tracker_stat_period', 'rank_stat_period', 'show_removed_ips']
     if not session.get('role'):
         return jsonify({k: CONFIG.get(k) for k in public_keys})
     # 已登录用户返回更多展示字段，但不含账户信息（users/密钥）
@@ -2577,7 +2576,7 @@ def api_config():
                 'log_to_disk','log_level','http_proxy','udp_proxy','proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
                 'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh',
-                'show_removed_ips','monitor_workers','export_suffix','default_layout_width']
+                'show_removed_ips','monitor_workers','export_suffix']
     return jsonify({k: CONFIG.get(k) for k in all_keys})
 
 @app.route('/api/users', methods=['GET'])
@@ -2628,36 +2627,6 @@ def api_users_save():
 if __name__ == '__main__':
     db.load()
     db.add_log("网络监控服务启动", 'info')
-
-    # 启动后台 geo 补查线程：修复 data.json 中遗留的 XX/Unknown 归属地
-    def _geo_repair_loop():
-        """启动后延迟10s开始，逐个补查归属地为 Unknown 的 IP，避免启动时并发过高"""
-        import time as _time
-        _time.sleep(10)
-        with db.lock:
-            xx_ips = []
-            for domain, td in db.trackers.items():
-                for ip_obj in td.get('ips', []):
-                    c = ip_obj.get('country', {})
-                    if isinstance(c, dict) and c.get('country_code', 'XX') == 'XX':
-                        xx_ips.append((domain, ip_obj))
-        if xx_ips:
-            cprint(f"[geo] 发现 {len(xx_ips)} 个未知归属地IP，开始后台补查…", 'info')
-        for domain, ip_obj in xx_ips:
-            ip = ip_obj.get('ip', '')
-            if not ip: continue
-            new_geo = get_geo(ip)
-            if new_geo.get('country_code', 'XX') != 'XX':
-                with db.lock:
-                    for td in db.trackers.values():
-                        for obj in td.get('ips', []):
-                            if obj.get('ip') == ip:
-                                obj['country'] = new_geo
-                cprint(f"[geo] 补查完成: {ip} → {new_geo['country']} / {new_geo['isp']}", 'info')
-            _time.sleep(0.5)  # 限速，避免 ip-api 429
-
-    geo_repair_t = threading.Thread(target=_geo_repair_loop, daemon=True)
-    geo_repair_t.start()
 
     t = threading.Thread(target=monitor_loop, daemon=True)
     t.start()

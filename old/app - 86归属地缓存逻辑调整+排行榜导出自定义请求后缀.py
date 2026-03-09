@@ -50,7 +50,6 @@ DEFAULT_CONFIG = {
     'tab_switch_refresh': True,   # 切换仪表盘/监控列表时是否刷新数据
     'export_suffix': '/announce',   # 导出 tracker 列表时追加的路径后缀
     'show_removed_ips': True,       # 是否显示已移除的历史IP（前端控制）
-    'default_layout_width': '1700', # 默认页面视野宽度（px字符串，对应50%~100%）
     'users': [
         {"username": "admin",    "password": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", "role": "admin"},
         {"username": "operator", "password": "06e55b633481f7bb072957eabcf110c972e86691c3cfedabe088024bffe42f23", "role": "operator"},
@@ -70,7 +69,7 @@ def load_config():
                       'log_to_disk','log_level','console_log_level',
                       'http_proxy','udp_proxy','proxy_enabled',
                       'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
-                      'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','users']:
+                      'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh','export_suffix','show_removed_ips','users']:
                 if k in saved:
                     cfg[k] = saved[k]
             # 向后兼容：旧配置文件用 console_log_level，迁移到 log_level
@@ -88,7 +87,7 @@ def persist_config(cfg):
                                         'http_proxy','udp_proxy','proxy_enabled',
                                         'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
                                         'tracker_stat_period','rank_stat_period','cache_history',
-                                        'tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','users']
+                                        'tab_switch_refresh','export_suffix','show_removed_ips','users']
                    if k in cfg}
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(savable, f, indent=2, ensure_ascii=False)
@@ -474,18 +473,12 @@ class TrackerDB:
                 uptime = (sum(h)/len(h)*100) if h else None
                 if uptime is None and min_uptime > 0: continue
                 if uptime is not None and uptime < min_uptime: continue
-                active_ips = [ip for ip in d['ips'] if not ip.get('removed')]
-                online_count = sum(1 for ip in active_ips if ip.get('status') == 'online')
-                # 收集 IP 版本集合
-                versions = list({ip.get('version','ipv4') for ip in active_ips})
-                has_v4 = 'ipv4' in versions
-                has_v6 = 'ipv6' in versions
+                online_count = sum(1 for ip in d['ips'] if ip.get('status') == 'online' and not ip.get('removed'))
                 out.append({'domain': domain, 'port': d.get('port',80),
                             'protocol': d.get('protocol','tcp'),
                             'uptime': round(uptime,2) if uptime is not None else None,
-                            'ip_count': len(active_ips),
-                            'online_count': online_count,
-                            'has_v4': has_v4, 'has_v6': has_v6})
+                            'ip_count': len(d['ips']),
+                            'online_count': online_count})
         # 主排序：可用率高→低；同可用率：在线数多→少；再同：名称字母序
         out.sort(key=lambda x: (-(x['uptime'] if x['uptime'] is not None else -1), -x['online_count'], x['domain']))
         return out[:limit]
@@ -1737,43 +1730,33 @@ _probe_ok   = True    # 探针当前状态（True=可达，False=不可达）
 _probe_lock = threading.Lock()
 
 def _probe_loop():
-    """后台探针线程：多目标探测，任一可达即视为网络正常，全部不可达才告警。"""
+    """后台探针线程：与监控间隔同步检测 8.8.8.8:53，更新 _probe_ok 状态。"""
     global _probe_ok
     _warned = False
-    # 多个探针目标：任一可达即认为网络正常（避免单点误判）
-    PROBE_TARGETS = [
-        ('8.8.8.8',   53),   # Google DNS
-        ('1.1.1.1',   53),   # Cloudflare DNS
-        ('114.114.114.114', 53),  # 国内DNS（服务器在国内也能探到）
-    ]
+    PROBE_HOST = '8.8.8.8'
+    PROBE_PORT = 53
     PROBE_TIMEOUT = 3
 
     while True:
-        probe_interval = CONFIG.get('check_interval', 30)
-        reachable = False
-        hit_target = ''
-        for host, port in PROBE_TARGETS:
-            try:
-                s = socket.create_connection((host, port), timeout=PROBE_TIMEOUT)
-                s.close()
-                reachable = True
-                hit_target = f"{host}:{port}"
-                break
-            except Exception:
-                continue
+        probe_interval = CONFIG.get('check_interval', 30)  # 与监控间隔同步
+        try:
+            s = socket.create_connection((PROBE_HOST, PROBE_PORT), timeout=PROBE_TIMEOUT)
+            s.close()
+            reachable = True
+        except Exception:
+            reachable = False
 
         with _probe_lock:
             prev = _probe_ok
             _probe_ok = reachable
 
         if not reachable and not _warned:
-            targets_str = ', '.join(f"{h}:{p}" for h,p in PROBE_TARGETS)
-            msg = f"[探针] 全部目标({targets_str})均不可达，本地网络可能异常"
+            msg = f"[探针] 无法连接 {PROBE_HOST}:{PROBE_PORT}，本地网络可能异常"
             db.add_log(msg, 'error')
             cprint(msg, 'error')
             _warned = True
         elif reachable and _warned:
-            msg = f"[探针] 网络已恢复，{hit_target} 可达"
+            msg = f"[探针] 网络已恢复，{PROBE_HOST}:{PROBE_PORT} 可达"
             db.add_log(msg, 'info')
             cprint(msg, 'info')
             _warned = False
@@ -2502,7 +2485,7 @@ def api_config():
             return jsonify({'error': '权限不足'}), 403
         data = request.json or {}
         keys = ['check_interval','timeout','retry_mode','retry_interval',
-                'monitor_workers','export_suffix','show_removed_ips','default_layout_width',
+                'monitor_workers','export_suffix','show_removed_ips',
                 'log_to_disk','log_level','console_log_level','http_proxy','udp_proxy','proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
                 'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh']
@@ -2569,7 +2552,7 @@ def api_config():
 
     # GET 读取配置：未登录只返回前端行为控制必要字段（不含账户/代理等敏感信息）
     # 已登录用户额外返回运维相关字段（仍不含账户信息）
-    public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'tracker_stat_period', 'rank_stat_period', 'show_removed_ips', 'default_layout_width']
+    public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'tracker_stat_period', 'rank_stat_period', 'show_removed_ips']
     if not session.get('role'):
         return jsonify({k: CONFIG.get(k) for k in public_keys})
     # 已登录用户返回更多展示字段，但不含账户信息（users/密钥）
@@ -2577,7 +2560,7 @@ def api_config():
                 'log_to_disk','log_level','http_proxy','udp_proxy','proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
                 'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh',
-                'show_removed_ips','monitor_workers','export_suffix','default_layout_width']
+                'show_removed_ips','monitor_workers','export_suffix']
     return jsonify({k: CONFIG.get(k) for k in all_keys})
 
 @app.route('/api/users', methods=['GET'])
@@ -2628,36 +2611,6 @@ def api_users_save():
 if __name__ == '__main__':
     db.load()
     db.add_log("网络监控服务启动", 'info')
-
-    # 启动后台 geo 补查线程：修复 data.json 中遗留的 XX/Unknown 归属地
-    def _geo_repair_loop():
-        """启动后延迟10s开始，逐个补查归属地为 Unknown 的 IP，避免启动时并发过高"""
-        import time as _time
-        _time.sleep(10)
-        with db.lock:
-            xx_ips = []
-            for domain, td in db.trackers.items():
-                for ip_obj in td.get('ips', []):
-                    c = ip_obj.get('country', {})
-                    if isinstance(c, dict) and c.get('country_code', 'XX') == 'XX':
-                        xx_ips.append((domain, ip_obj))
-        if xx_ips:
-            cprint(f"[geo] 发现 {len(xx_ips)} 个未知归属地IP，开始后台补查…", 'info')
-        for domain, ip_obj in xx_ips:
-            ip = ip_obj.get('ip', '')
-            if not ip: continue
-            new_geo = get_geo(ip)
-            if new_geo.get('country_code', 'XX') != 'XX':
-                with db.lock:
-                    for td in db.trackers.values():
-                        for obj in td.get('ips', []):
-                            if obj.get('ip') == ip:
-                                obj['country'] = new_geo
-                cprint(f"[geo] 补查完成: {ip} → {new_geo['country']} / {new_geo['isp']}", 'info')
-            _time.sleep(0.5)  # 限速，避免 ip-api 429
-
-    geo_repair_t = threading.Thread(target=_geo_repair_loop, daemon=True)
-    geo_repair_t.start()
 
     t = threading.Thread(target=monitor_loop, daemon=True)
     t.start()
