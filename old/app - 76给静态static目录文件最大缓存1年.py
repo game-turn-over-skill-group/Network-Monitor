@@ -181,9 +181,6 @@ _login_fail_lock = threading.Lock()
 _LOGIN_MAX_FAIL  = 10          # 最大连续失败次数
 _LOGIN_LOCKOUT_S = 600         # 锁定时长（秒）= 10分钟
 
-# 日志写入锁：防止多线程并发写入造成行截断
-_log_write_lock = threading.Lock()
-
 def _login_check_and_record(ip: str, success: bool) -> tuple:
     """检查是否被锁定，并记录结果。
     返回 (is_locked, seconds_remaining)。
@@ -232,9 +229,9 @@ _NOISY_PATHS = {'/api/auth/whoami', '/api/nav'}
 _ACCESS_LOG_FILE = 'access.log'
 
 def cprint(msg: str, level: str = 'info', raw: bool = False):
-    """根据 log_level 决定是否打印到控制台。加锁保证多线程下不截断。
-    raw=True：原样输出（nginx access log 格式，不加前缀）
-    raw=False：加 YYYY/M/D HH:MM:SS [LEVEL] 前缀；info级别同步写入 access.log
+    """根据 log_level 决定是否打印到控制台。
+    raw=True：原样输出（nginx access log 或自定义格式，不加前缀）
+    raw=False：加 YYYY/M/D HH:MM:SS [LEVEL] 前缀（内部日志）；同时写入 access.log
     """
     cl = CONFIG.get('log_level', CONFIG.get('console_log_level', 'info'))
     if cl == 'none':
@@ -246,32 +243,29 @@ def cprint(msg: str, level: str = 'info', raw: bool = False):
     if cl == 'error' and level not in ('info', 'error'):
         return
     if raw:
-        with _log_write_lock:
-            print(msg, flush=True)
+        print(msg, flush=True)
     else:
         now = datetime.now()
         ts = f"{now.year}/{now.month}/{now.day} {now.strftime('%H:%M:%S')}"
         prefix = {'info': '[INFO]', 'error': '[ERROR]', 'debug': '[DEBUG]'}.get(level, '[INFO]')
         line = f"  {ts} {prefix} {msg}"
-        with _log_write_lock:
-            print(line, flush=True)
-            # info 级别写入 access.log；error 已有 error.log，不重复写入
-            if level == 'info' and CONFIG.get('log_to_disk'):
-                try:
-                    with open(_ACCESS_LOG_FILE, 'a', encoding='utf-8') as f:
-                        f.write(line + '\n')
-                except Exception:
-                    pass
-
-def _write_access_log(line: str):
-    """把一行 nginx 格式日志写入 access.log（仅 log_to_disk=True 时）。加锁防截断。"""
-    if CONFIG.get('log_to_disk'):
-        with _log_write_lock:
+        print(line, flush=True)
+        # info 级别写入 access.log；error 级别已有 error.log 专门记录，不重复写入
+        if level == 'info' and CONFIG.get('log_to_disk'):
             try:
                 with open(_ACCESS_LOG_FILE, 'a', encoding='utf-8') as f:
                     f.write(line + '\n')
             except Exception:
                 pass
+
+def _write_access_log(line: str):
+    """把一行 nginx 格式日志写入 access.log（仅 log_to_disk=True 时）"""
+    if CONFIG.get('log_to_disk'):
+        try:
+            with open(_ACCESS_LOG_FILE, 'a', encoding='utf-8') as f:
+                f.write(line + '\n')
+        except Exception:
+            pass
 
 def access_log(msg: str):
     """业务操作日志（登录/登出/添加/删除/重试/配置变更等）。
@@ -1668,57 +1662,11 @@ def _check_one(domain, ip_info):
         cprint(msg, 'error')
 
 
-# ==================== 网络探针 ====================
-# 双重网络健康判断：
-#   方案A（探针）：后台定期 TCP 连接 8.8.8.8:53，维护 _probe_ok 状态
-#   方案B（失败率）：monitor_loop 每轮统计，≥90% 失败视为本地网络异常
-# 两种方案任一触发，即认定本地网络异常，跳过本轮历史写入
-
-_probe_ok   = True    # 探针当前状态（True=可达，False=不可达）
-_probe_lock = threading.Lock()
-
-def _probe_loop():
-    """后台探针线程：每30秒 TCP 连接 8.8.8.8:53，更新 _probe_ok 状态。
-    失败时只打一次告警，恢复时打一次恢复提示。"""
-    global _probe_ok
-    _warned = False
-    PROBE_HOST = '8.8.8.8'
-    PROBE_PORT = 53
-    PROBE_TIMEOUT = 3
-    PROBE_INTERVAL = 30
-
-    while True:
-        try:
-            s = socket.create_connection((PROBE_HOST, PROBE_PORT), timeout=PROBE_TIMEOUT)
-            s.close()
-            reachable = True
-        except Exception:
-            reachable = False
-
-        with _probe_lock:
-            prev = _probe_ok
-            _probe_ok = reachable
-
-        if not reachable and not _warned:
-            msg = f"[探针] 无法连接 {PROBE_HOST}:{PROBE_PORT}，本地网络可能异常"
-            db.add_log(msg, 'error')
-            cprint(msg, 'error')
-            _warned = True
-        elif reachable and _warned:
-            msg = f"[探针] 网络已恢复，{PROBE_HOST}:{PROBE_PORT} 可达"
-            db.add_log(msg, 'info')
-            cprint(msg, 'info')
-            _warned = False
-
-        time.sleep(PROBE_INTERVAL)
-
-
 def monitor_loop():
     db.add_log("监控服务启动", 'info')
     cprint("监控服务启动", 'info')
+    # 并发工作线程数：提高并发减少排队（200+IP时32不够，超时IP会占满线程池）
     MONITOR_WORKERS = 120
-    _net_warn_printed = False   # 本次网络异常告警只打一次，恢复后重置
-
     while True:
         try:
             snapshot = db.get_trackers()
@@ -1738,51 +1686,15 @@ def monitor_loop():
                         cprint(f"DNS线程异常: {e}", 'error')
 
             # ── 第二步：并行检测所有 IP ───────────────────────────────────
+            # 重新取快照（DNS更新后IP列表可能变化）
             snapshot = db.get_trackers()
             tasks = []
             for domain, data in snapshot.items():
-                if data.get('paused'):        # 整个域名暂停，跳过
-                    continue
                 for ip_info in data.get('ips', []):
-                    if not ip_info.get('removed') and not ip_info.get('paused'):
-                        tasks.append((domain, ip_info))
-
-            # 用计数器收集本轮检测结果，检测完后判断网络健康度
-            _round_ok  = [0]
-            _round_fail = [0]
-            _round_lock = threading.Lock()
-
-            def _check_one_counted(domain, ip_info):
-                ip = ip_info['ip']
-                with db.lock:
-                    td       = db.trackers.get(domain, {})
-                    port     = td.get('port', 80)
-                    protocol = td.get('protocol', 'tcp')
-                proto_s = protocol.upper()
-                try:
-                    status, lat, err = check_ip(domain, ip_info, retry=True)
-                    lat_s = f"{lat}ms" if lat >= 0 else "N/A"
-                    if status == 'skipped':
-                        cprint(f"⏭ {proto_s}://{domain}:{port} ({ip}) 跳过 | {err}", 'debug')
-                    elif status == 'online':
-                        msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}"
-                        db.add_log(msg, 'success')
-                        cprint(msg, 'success')
-                        with _round_lock: _round_ok[0] += 1
-                    else:
-                        reason = f" | {err}" if err else ""
-                        msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}"
-                        db.add_log(msg, 'error')
-                        cprint(msg, 'error')
-                        with _round_lock: _round_fail[0] += 1
-                except Exception as e:
-                    msg = f"检查异常 {domain}:{port} ({ip}): {type(e).__name__}: {e}"
-                    db.add_log(msg, 'error')
-                    cprint(msg, 'error')
-                    with _round_lock: _round_fail[0] += 1
+                    tasks.append((domain, ip_info))
 
             with ThreadPoolExecutor(max_workers=MONITOR_WORKERS) as chk_pool:
-                futures = {chk_pool.submit(_check_one_counted, d, ipi): (d, ipi['ip'])
+                futures = {chk_pool.submit(_check_one, d, ipi): (d, ipi['ip'])
                            for d, ipi in tasks}
                 for f in as_completed(futures):
                     try: f.result()
@@ -1790,47 +1702,14 @@ def monitor_loop():
                         d, ip = futures[f]
                         cprint(f"检测线程异常 {d} ({ip}): {e}", 'error')
 
-            # ── 第三步：网络健康判断（探针 + 失败率双重保障）────────────
-            total_checked = _round_ok[0] + _round_fail[0]
-            net_ok = True
-            net_reason = ''
-
-            # 方案A：探针状态（由 _probe_loop 后台维护）
-            with _probe_lock:
-                probe_reachable = _probe_ok
-            if not probe_reachable:
-                net_ok = False
-                net_reason = '探针不可达(8.8.8.8:53)'
-
-            # 方案B：本轮失败率 ≥ 90%（仅在探针正常时才额外判断，避免重复告警）
-            if net_ok and total_checked >= 5:
-                fail_rate = _round_fail[0] / total_checked
-                if fail_rate >= 0.90:
-                    net_ok = False
-                    net_reason = f'失败率{fail_rate*100:.0f}%({_round_fail[0]}/{total_checked})'
-
-            if not net_ok:
-                if not _net_warn_printed:
-                    warn_msg = (f"[网络异常] 疑似本地网络故障（{net_reason}），"
-                                f"本轮历史数据不计入统计")
-                    db.add_log(warn_msg, 'error')
-                    cprint(warn_msg, 'error')
-                    _net_warn_printed = True
-            else:
-                if _net_warn_printed:
-                    recover_msg = "[网络恢复] 探针与检测均正常，恢复历史数据统计"
-                    db.add_log(recover_msg, 'info')
-                    cprint(recover_msg, 'info')
-                _net_warn_printed = False
-
             s = db.get_stats()
             summary = (f"轮检完成 | "
                        f"总:{s['total']} [v4:{s['ipv4']} v6:{s['ipv6']}] | "
-                       f"在线:{s['alive']} [v4:{s['alive_v4']} v6:{s['alive_v6']}]"
-                       + (" | ⚠ 网络异常轮次，历史跳过" if not net_ok else ""))
+                       f"在线:{s['alive']} [v4:{s['alive_v4']} v6:{s['alive_v6']}]")
             db.add_log(summary, 'info')
-            if net_ok and CONFIG.get('cache_history', True):
-                db._save()
+            # 轮检完成只写网页端日志，不输出控制台（避免刷屏）
+            if CONFIG.get('cache_history', True):
+                db._save()  # 每轮检测完持久化历史数据
 
         except Exception as e:
             msg = f"监控线程错误: {type(e).__name__}: {e}"
@@ -2141,58 +2020,6 @@ def api_delete():
             return jsonify({'success':True})
     return jsonify({'error':'不存在'}), 404
 
-@app.route('/api/tracker/pause', methods=['POST'])
-@_require_role('admin', 'operator')
-def api_pause():
-    """暂停/恢复监控。支持：整个域名、域名下单个IP、全部域名。
-    body: { action: 'pause'|'resume', domain?: str, ip?: str, all?: bool }
-    """
-    data   = request.json or {}
-    action = data.get('action', 'pause')   # 'pause' | 'resume'
-    paused = (action == 'pause')
-    domain = data.get('domain', '').strip()
-    ip     = data.get('ip', '').strip()
-    all_   = data.get('all', False)
-
-    changed = []
-    with db.lock:
-        if all_:
-            # 全部域名暂停/恢复
-            for d, td in db.trackers.items():
-                td['paused'] = paused
-                for ip_obj in td.get('ips', []):
-                    ip_obj['paused'] = paused
-                changed.append(d)
-        elif domain and ip:
-            # 单个 IP
-            td = db.trackers.get(domain)
-            if not td:
-                return jsonify({'error': '域名不存在'}), 404
-            for ip_obj in td.get('ips', []):
-                if ip_obj['ip'] == ip:
-                    ip_obj['paused'] = paused
-                    changed.append(f"{domain}/{ip}")
-                    break
-        elif domain:
-            # 整个域名
-            td = db.trackers.get(domain)
-            if not td:
-                return jsonify({'error': '域名不存在'}), 404
-            td['paused'] = paused
-            for ip_obj in td.get('ips', []):
-                ip_obj['paused'] = paused
-            changed.append(domain)
-        else:
-            return jsonify({'error': '参数错误'}), 400
-
-        db._save()
-
-    label = '暂停' if paused else '恢复'
-    target = 'ALL' if all_ else (f"{domain}/{ip}" if ip else domain)
-    g.access_note = f"{label} {target}"
-    db.add_log(f"[{_client_ip()}] 监控{label}: {target}", 'info')
-    return jsonify({'success': True, 'paused': paused, 'changed': changed})
-
 @app.route('/api/tracker/check', methods=['POST'])
 @_require_role('admin', 'operator', 'viewer')
 def api_check():
@@ -2478,9 +2305,6 @@ if __name__ == '__main__':
 
     t = threading.Thread(target=monitor_loop, daemon=True)
     t.start()
-
-    probe_t = threading.Thread(target=_probe_loop, daemon=True)
-    probe_t.start()
 
     print(f"\n{'='*58}")
     print(f"  网络监控 - Network Monitor")
