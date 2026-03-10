@@ -2269,13 +2269,13 @@ def api_stats():
         and ('离线' in l.get('message', '') or 'offline' in l.get('message', '').lower())
     )
     resp = jsonify(s)
-    resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=10, stale-if-error=86400'
+    resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate, stale-if-error=86400'
     return resp
 
 @app.route('/api/datas')
 def api_trackers():
     resp = jsonify(db.get_trackers())
-    resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=10, stale-if-error=86400'
+    resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate, stale-if-error=86400'
     return resp
 
 
@@ -2457,7 +2457,7 @@ def api_ranking(period):
     if period not in ('24h','7d','30d'): period='24h'
     min_uptime = request.args.get('min_uptime', 0, type=float)
     resp = jsonify({'period':period,'ranking':db.get_ranking(period, 200, min_uptime)})
-    resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=10, stale-if-error=86400'
+    resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate, stale-if-error=86400'
     return resp
 
 
@@ -2553,9 +2553,7 @@ def api_nav():
 @app.route('/api/logs')
 def api_logs():
     limit = min(request.args.get('limit', 300, type=int), 5000)
-    resp = jsonify(db.get_logs(limit))
-    resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=10, stale-if-error=86400'
-    return resp
+    return jsonify(db.get_logs(limit))
 
 @app.route('/api/logs/clear', methods=['POST'])
 @_require_role('admin')
@@ -2707,18 +2705,14 @@ def api_config():
     # 已登录用户额外返回运维相关字段（仍不含账户信息）
     public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'tracker_stat_period', 'rank_stat_period', 'show_removed_ips', 'default_layout_width']
     if not session.get('role'):
-        resp = jsonify({k: CONFIG.get(k) for k in public_keys})
-        resp.headers['Cache-Control'] = 'public, max-age=60, stale-while-revalidate=10, stale-if-error=86400'
-        return resp
+        return jsonify({k: CONFIG.get(k) for k in public_keys})
     # 已登录用户返回更多展示字段，但不含账户信息（users/密钥）
     all_keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'log_to_disk','log_level','http_proxy','udp_proxy','proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
                 'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh',
                 'show_removed_ips','monitor_workers','export_suffix','default_layout_width']
-    resp = jsonify({k: CONFIG.get(k) for k in all_keys})
-    resp.headers['Cache-Control'] = 'public, max-age=60, stale-while-revalidate=10, stale-if-error=86400'
-    return resp
+    return jsonify({k: CONFIG.get(k) for k in all_keys})
 
 @app.route('/api/users', methods=['GET'])
 @_require_role('admin')

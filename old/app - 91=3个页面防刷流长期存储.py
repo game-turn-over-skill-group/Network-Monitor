@@ -17,7 +17,7 @@ import re
 import hashlib
 import secrets
 from datetime import datetime
-from flask import Flask, jsonify, request, make_response, session, g, Response, redirect
+from flask import Flask, jsonify, request, make_response, session, g
 from flask_cors import CORS
 import dns.resolver
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -431,9 +431,8 @@ class TrackerDB:
                     if 'added_time' not in ip_copy:
                         ip_copy['added_time'] = t.get('added_time')
                     # 同时附加三个周期（前端可按需使用）
-                    # IP级三个周期uptime：均用IP自己的历史（各周期独立准确）
-                    for pk, key in [('24h','history_24h'),('7d','history_7d'),('30d','history_30d')]:
-                        ph = ip_obj.get(key, [])
+                    for pk in ('24h','7d','30d'):
+                        ph = ip_obj.get(f'history_{pk}', [])
                         ip_copy[f'uptime_{pk}'] = round(sum(ph)/len(ph)*100, 1) if ph else None
                     # IP 级末尾连续失败次数（告警用，每个IP独立计算）
                     ip_h24 = ip_obj.get('history_24h', [])
@@ -471,8 +470,6 @@ class TrackerDB:
         out = []
         with self.lock:
             for domain, d in self.trackers.items():
-                if d.get('paused'):          # 已暂停域名不参与排行榜
-                    continue
                 h = d.get(f'history_{period}', [])
                 uptime = (sum(h)/len(h)*100) if h else None
                 if uptime is None and min_uptime > 0: continue
@@ -554,16 +551,13 @@ class TrackerDB:
             cache_hist = CONFIG.get('cache_history', True)
             with self.lock:
                 for d, t in self.trackers.items():
+                    # IP 列表：存储时把 IP 级历史转成紧凑计数器格式
                     ips_to_save = []
                     for ip_obj in t['ips']:
                         ip_entry = {k: v for k, v in ip_obj.items()
                                     if k not in ('history_24h','history_7d','history_30d')}
                         if cache_hist:
-                            # IP级所有周期都用压缩格式 {total,ok,fail}，不存原始0/1数组
-                            h24 = ip_obj.get('history_24h', [])
-                            ip_entry['history_24h'] = {'total': len(h24), 'ok': sum(h24), 'fail': len(h24)-sum(h24)}
-                            # 7d/30d同样压缩（虽然内容与24h相同，保留以便将来区分）
-                            for key in ('history_7d','history_30d'):
+                            for key in ('history_24h','history_7d','history_30d'):
                                 h = ip_obj.get(key, [])
                                 ip_entry[key] = {'total': len(h), 'ok': sum(h), 'fail': len(h)-sum(h)}
                         ips_to_save.append(ip_entry)
@@ -571,7 +565,7 @@ class TrackerDB:
                              'protocol':t.get('protocol','tcp'),
                              'ips':ips_to_save,'added_time':t['added_time']}
                     if cache_hist:
-                        # 域名级：三个周期全部压缩为 {total,ok,fail}，大幅减小 data.json
+                        # 域名级汇总历史（排行榜用）
                         for key in ('history_24h','history_7d','history_30d'):
                             h = t.get(key, [])
                             entry[key] = {'total': len(h), 'ok': sum(h), 'fail': len(h)-sum(h)}
@@ -607,11 +601,6 @@ class TrackerDB:
                                             ('history_7d', 20160),
                                             ('history_30d', 86400)]:
                             ip_obj[key] = _restore(ip_obj.get(key, []), maxlen)
-                        # 7d/30d 为空时用 24h 数据预填充，避免重启后长周期统计从0开始
-                        if not ip_obj.get('history_7d') and ip_obj.get('history_24h'):
-                            ip_obj['history_7d'] = list(ip_obj['history_24h'])
-                        if not ip_obj.get('history_30d') and ip_obj.get('history_24h'):
-                            ip_obj['history_30d'] = list(ip_obj['history_24h'])
                     self.trackers[d] = {
                         'domain':d,'port':t.get('port',80),
                         'protocol':t.get('protocol','tcp'),'ips':clean_ips,
@@ -1560,7 +1549,7 @@ def udp_ping(ip, port):
                     cprint(f'[SOCKS5Pool] 通信异常，重建后重试: {err_str}', 'debug')
                     packet = _udp_tracker_packet()
                     continue
-                return False, -1, f"{_PROXY_UNAVAIL_PREFIX}代理通信失败: {err_str}"
+                return False, -1, f"代理通信失败: {err_str}"
 
     # ── 直连路径（getaddrinfo 自动处理 IPv4/IPv6 sockaddr 格式）──────────
     s = None
@@ -2048,27 +2037,19 @@ def _serve_html():
         return "index.html not found.", 404
     cache = _load_html(p)
     etag  = f'"{cache["etag"]}"'
-
-    # 无论客户端是否发了 Cache-Control: no-cache（即 F5 刷新），
-    # 只要 If-None-Match 匹配就返回 304，让浏览器用本地缓存。
-    # RFC 7234 §5.2：服务端可以忽略 no-cache 指令并返回 304，
-    # 这是服务端主动优化，不违反规范。
     if request.headers.get('If-None-Match') == etag:
         resp = make_response('', 304)
-        resp.headers['ETag']          = etag
-        resp.headers['Cache-Control'] = 'no-cache'
-        resp.headers['Vary']          = 'Accept-Encoding'
+        resp.headers['ETag'] = etag
         return resp
-
     accept_gz = 'gzip' in request.headers.get('Accept-Encoding', '')
     body      = cache['gz'] if accept_gz else cache['raw']
     resp = make_response(body, 200)
     resp.headers['Content-Type']  = 'text/html; charset=utf-8'
     resp.headers['ETag']          = etag
     resp.headers['Cache-Control'] = 'no-cache'
-    resp.headers['Vary']          = 'Accept-Encoding'
     if accept_gz:
         resp.headers['Content-Encoding'] = 'gzip'
+        resp.headers['Vary']             = 'Accept-Encoding'
     return resp
 
 @app.route('/')
@@ -2079,7 +2060,7 @@ def index():
 
 @app.route('/home')
 @app.route('/stats')
-@app.route('/ranking')
+@app.route('/trackers')
 @app.route('/logs')
 @app.route('/config')
 def spa_routes():
@@ -2087,81 +2068,6 @@ def spa_routes():
     if request.query_string:
         return redirect(request.path, code=301)
     return _serve_html()
-
-# ── 公开 Tracker 导出 API ──
-@app.route('/trackers')
-@app.route('/tracker.txt')
-def api_trackers_compat():
-    """Legacy-compatible shortcuts — directly serves /api/tracker, no redirect."""
-    return api_trackers_export()
-
-@app.route('/api/tracker')
-def api_trackers_export():
-    """Public tracker list — plain text, one URL per line.
-
-    GET /api/tracker
-    /trackers and /tracker.txt redirect here automatically (legacy-compatible).
-
-    Query params (all optional):
-      day    = 24h | 7d | 30d        (default: 24h)   uptime stats period
-      uptime = 0 | 50 | 80 | 90 | 100 (default: 0)   minimum uptime % (0 = no filter)
-      net    = all | tcp | udp       (default: all)   protocol filter
-      ip     = all | ipv4 | ipv6    (default: all)   IP version filter
-      url    = any string            (default: /announce) URL suffix per entry
-
-    Examples:
-      curl http://host/api/tracker
-      curl "http://host/api/tracker?day=7d&uptime=90"
-      curl "http://host/api/tracker?day=30d&uptime=90&net=tcp&ip=ipv4"
-      curl "http://host/api/tracker?day=30d&uptime=90&ip=ipv6"
-      curl "http://host/api/tracker?uptime=90&net=udp&ip=ipv4&url=/announce"
-    """
-    period     = request.args.get('day', '24h')
-    if period not in ('24h','7d','30d'): period = '24h'
-    min_uptime = request.args.get('uptime', 0, type=float)
-    proto      = request.args.get('net', 'all').lower()
-    ip_ver     = request.args.get('ip', 'all').lower()
-    suffix_raw = request.args.get('url', None)
-    if suffix_raw is None:
-        suffix = CONFIG.get('export_suffix', '/announce')
-    else:
-        # 允许传 "announce" 自动补斜杠，或传 "" 表示无后缀
-        suffix = ('/' + suffix_raw.lstrip('/')) if suffix_raw else ''
-
-    ranking = db.get_ranking(period, 9999, min_uptime)
-    with db.lock:
-        trackers_snap = {k: dict(v) for k, v in db.trackers.items()}
-
-    lines = []
-    for item in ranking:
-        domain   = item['domain']
-        td       = trackers_snap.get(domain, {})
-        protocol = td.get('protocol', 'tcp')
-        port     = td.get('port', 80)
-        ips      = td.get('ips', [])
-
-        if proto != 'all':
-            is_udp = (protocol == 'udp')
-            if proto == 'udp' and not is_udp: continue
-            if proto == 'tcp' and is_udp: continue
-
-        online_ips = [ip for ip in ips if not ip.get('removed') and ip.get('status') == 'online']
-        if ip_ver != 'all':
-            online_ips = [ip for ip in online_ips if ip.get('version','ipv4') == ip_ver]
-        if not online_ips: continue
-
-        scheme = 'udp' if protocol == 'udp' else ('https' if protocol == 'https' else 'http')
-        url = f"{scheme}://{domain}:{port}{suffix}"
-        lines.append(url)
-        lines.append('')  # 每个域名后空一行
-
-    while lines and lines[-1] == '':
-        lines.pop()
-
-    text = '\n'.join(lines)
-    resp = Response(text, mimetype='text/plain')
-    resp.headers['Cache-Control'] = 'public, max-age=60'
-    return resp
 
 # ==================== API ====================
 
@@ -2253,7 +2159,7 @@ def api_whoami():
         return jsonify({'logged_in': False, 'role': None, 'username': None})
     return jsonify({'logged_in': True, 'role': role, 'username': session.get('username')})
 
-@app.route('/api/count')
+@app.route('/api/stats')
 def api_stats():
     s = db.get_stats()
     with _probe_lock:
@@ -2269,13 +2175,13 @@ def api_stats():
         and ('离线' in l.get('message', '') or 'offline' in l.get('message', '').lower())
     )
     resp = jsonify(s)
-    resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=10, stale-if-error=86400'
+    resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate, stale-if-error=86400'
     return resp
 
-@app.route('/api/datas')
+@app.route('/api/trackers')
 def api_trackers():
     resp = jsonify(db.get_trackers())
-    resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=10, stale-if-error=86400'
+    resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate, stale-if-error=86400'
     return resp
 
 
@@ -2386,30 +2292,8 @@ def api_pause():
 
     label = '暂停' if paused else '恢复'
     target = 'ALL' if all_ else (f"{domain}/{ip}" if ip else domain)
-
-    # 操作者信息
-    raw_ip   = _client_ip()
-    op_user  = session.get('username', '?')
-
-    # IPv4: 1.*.*.256（保留第1段和最后1段，中间打星）
-    # IPv6: 保留前2组和最后一组，中间打星
-    parts = raw_ip.split('.')
-    if len(parts) == 4:
-        masked_ip = f"{parts[0]}.*.*.{parts[3]}"
-    else:
-        segs = raw_ip.split(':')
-        if len(segs) >= 3:
-            masked_ip = f"{segs[0]}:{segs[1]}:****:{segs[-1]}"
-        else:
-            masked_ip = raw_ip
-
-    # 控制台/access.log 用完整 IP；Web 日志用脱敏 IP
-    console_str = f"{raw_ip} [{op_user}] 监控{label}: {target}"
-    web_str     = f"{masked_ip} [{op_user}] 监控{label}: {target}"
-
-    g.access_note = f"{label} {target} by {raw_ip} [{op_user}]"
-    print(f"[PAUSE] {console_str}")          # 控制台完整 IP
-    db.add_log(web_str, 'info')              # Web 界面脱敏 IP
+    g.access_note = f"{label} {target}"
+    db.add_log(f"[{_client_ip()}] 监控{label}: {target}", 'info')
     return jsonify({'success': True, 'paused': paused, 'changed': changed})
 
 @app.route('/api/tracker/check', methods=['POST'])
@@ -2457,7 +2341,7 @@ def api_ranking(period):
     if period not in ('24h','7d','30d'): period='24h'
     min_uptime = request.args.get('min_uptime', 0, type=float)
     resp = jsonify({'period':period,'ranking':db.get_ranking(period, 200, min_uptime)})
-    resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=10, stale-if-error=86400'
+    resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate, stale-if-error=86400'
     return resp
 
 
@@ -2511,10 +2395,6 @@ def api_ranking_export():
 
         url = f"{scheme}://{domain}:{port}{suffix}"
         lines.append(url)
-        lines.append('')  # 每个域名后空一行
-
-    while lines and lines[-1] == '':
-        lines.pop()
 
     text = '\n'.join(lines)
     response = make_response(text)
@@ -2553,9 +2433,7 @@ def api_nav():
 @app.route('/api/logs')
 def api_logs():
     limit = min(request.args.get('limit', 300, type=int), 5000)
-    resp = jsonify(db.get_logs(limit))
-    resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=10, stale-if-error=86400'
-    return resp
+    return jsonify(db.get_logs(limit))
 
 @app.route('/api/logs/clear', methods=['POST'])
 @_require_role('admin')
@@ -2707,18 +2585,14 @@ def api_config():
     # 已登录用户额外返回运维相关字段（仍不含账户信息）
     public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'tracker_stat_period', 'rank_stat_period', 'show_removed_ips', 'default_layout_width']
     if not session.get('role'):
-        resp = jsonify({k: CONFIG.get(k) for k in public_keys})
-        resp.headers['Cache-Control'] = 'public, max-age=60, stale-while-revalidate=10, stale-if-error=86400'
-        return resp
+        return jsonify({k: CONFIG.get(k) for k in public_keys})
     # 已登录用户返回更多展示字段，但不含账户信息（users/密钥）
     all_keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'log_to_disk','log_level','http_proxy','udp_proxy','proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
                 'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh',
                 'show_removed_ips','monitor_workers','export_suffix','default_layout_width']
-    resp = jsonify({k: CONFIG.get(k) for k in all_keys})
-    resp.headers['Cache-Control'] = 'public, max-age=60, stale-while-revalidate=10, stale-if-error=86400'
-    return resp
+    return jsonify({k: CONFIG.get(k) for k in all_keys})
 
 @app.route('/api/users', methods=['GET'])
 @_require_role('admin')

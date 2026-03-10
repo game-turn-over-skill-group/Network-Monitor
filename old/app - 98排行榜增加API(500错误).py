@@ -17,7 +17,7 @@ import re
 import hashlib
 import secrets
 from datetime import datetime
-from flask import Flask, jsonify, request, make_response, session, g, Response, redirect
+from flask import Flask, jsonify, request, make_response, session, g
 from flask_cors import CORS
 import dns.resolver
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -471,8 +471,6 @@ class TrackerDB:
         out = []
         with self.lock:
             for domain, d in self.trackers.items():
-                if d.get('paused'):          # 已暂停域名不参与排行榜
-                    continue
                 h = d.get(f'history_{period}', [])
                 uptime = (sum(h)/len(h)*100) if h else None
                 if uptime is None and min_uptime > 0: continue
@@ -2048,27 +2046,19 @@ def _serve_html():
         return "index.html not found.", 404
     cache = _load_html(p)
     etag  = f'"{cache["etag"]}"'
-
-    # 无论客户端是否发了 Cache-Control: no-cache（即 F5 刷新），
-    # 只要 If-None-Match 匹配就返回 304，让浏览器用本地缓存。
-    # RFC 7234 §5.2：服务端可以忽略 no-cache 指令并返回 304，
-    # 这是服务端主动优化，不违反规范。
     if request.headers.get('If-None-Match') == etag:
         resp = make_response('', 304)
-        resp.headers['ETag']          = etag
-        resp.headers['Cache-Control'] = 'no-cache'
-        resp.headers['Vary']          = 'Accept-Encoding'
+        resp.headers['ETag'] = etag
         return resp
-
     accept_gz = 'gzip' in request.headers.get('Accept-Encoding', '')
     body      = cache['gz'] if accept_gz else cache['raw']
     resp = make_response(body, 200)
     resp.headers['Content-Type']  = 'text/html; charset=utf-8'
     resp.headers['ETag']          = etag
     resp.headers['Cache-Control'] = 'no-cache'
-    resp.headers['Vary']          = 'Accept-Encoding'
     if accept_gz:
         resp.headers['Content-Encoding'] = 'gzip'
+        resp.headers['Vary']             = 'Accept-Encoding'
     return resp
 
 @app.route('/')
@@ -2092,8 +2082,9 @@ def spa_routes():
 @app.route('/trackers')
 @app.route('/tracker.txt')
 def api_trackers_compat():
-    """Legacy-compatible shortcuts — directly serves /api/tracker, no redirect."""
-    return api_trackers_export()
+    """Legacy-compatible shortcuts — redirect to canonical API with same query string."""
+    qs = ('?' + request.query_string.decode()) if request.query_string else ''
+    return redirect('/api/tracker' + qs, code=302)
 
 @app.route('/api/tracker')
 def api_trackers_export():
@@ -2153,10 +2144,6 @@ def api_trackers_export():
         scheme = 'udp' if protocol == 'udp' else ('https' if protocol == 'https' else 'http')
         url = f"{scheme}://{domain}:{port}{suffix}"
         lines.append(url)
-        lines.append('')  # 每个域名后空一行
-
-    while lines and lines[-1] == '':
-        lines.pop()
 
     text = '\n'.join(lines)
     resp = Response(text, mimetype='text/plain')
@@ -2269,13 +2256,13 @@ def api_stats():
         and ('离线' in l.get('message', '') or 'offline' in l.get('message', '').lower())
     )
     resp = jsonify(s)
-    resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=10, stale-if-error=86400'
+    resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate, stale-if-error=86400'
     return resp
 
 @app.route('/api/datas')
 def api_trackers():
     resp = jsonify(db.get_trackers())
-    resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=10, stale-if-error=86400'
+    resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate, stale-if-error=86400'
     return resp
 
 
@@ -2386,30 +2373,8 @@ def api_pause():
 
     label = '暂停' if paused else '恢复'
     target = 'ALL' if all_ else (f"{domain}/{ip}" if ip else domain)
-
-    # 操作者信息
-    raw_ip   = _client_ip()
-    op_user  = session.get('username', '?')
-
-    # IPv4: 1.*.*.256（保留第1段和最后1段，中间打星）
-    # IPv6: 保留前2组和最后一组，中间打星
-    parts = raw_ip.split('.')
-    if len(parts) == 4:
-        masked_ip = f"{parts[0]}.*.*.{parts[3]}"
-    else:
-        segs = raw_ip.split(':')
-        if len(segs) >= 3:
-            masked_ip = f"{segs[0]}:{segs[1]}:****:{segs[-1]}"
-        else:
-            masked_ip = raw_ip
-
-    # 控制台/access.log 用完整 IP；Web 日志用脱敏 IP
-    console_str = f"{raw_ip} [{op_user}] 监控{label}: {target}"
-    web_str     = f"{masked_ip} [{op_user}] 监控{label}: {target}"
-
-    g.access_note = f"{label} {target} by {raw_ip} [{op_user}]"
-    print(f"[PAUSE] {console_str}")          # 控制台完整 IP
-    db.add_log(web_str, 'info')              # Web 界面脱敏 IP
+    g.access_note = f"{label} {target}"
+    db.add_log(f"[{_client_ip()}] 监控{label}: {target}", 'info')
     return jsonify({'success': True, 'paused': paused, 'changed': changed})
 
 @app.route('/api/tracker/check', methods=['POST'])
@@ -2457,7 +2422,7 @@ def api_ranking(period):
     if period not in ('24h','7d','30d'): period='24h'
     min_uptime = request.args.get('min_uptime', 0, type=float)
     resp = jsonify({'period':period,'ranking':db.get_ranking(period, 200, min_uptime)})
-    resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=10, stale-if-error=86400'
+    resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate, stale-if-error=86400'
     return resp
 
 
@@ -2511,10 +2476,6 @@ def api_ranking_export():
 
         url = f"{scheme}://{domain}:{port}{suffix}"
         lines.append(url)
-        lines.append('')  # 每个域名后空一行
-
-    while lines and lines[-1] == '':
-        lines.pop()
 
     text = '\n'.join(lines)
     response = make_response(text)
@@ -2553,9 +2514,7 @@ def api_nav():
 @app.route('/api/logs')
 def api_logs():
     limit = min(request.args.get('limit', 300, type=int), 5000)
-    resp = jsonify(db.get_logs(limit))
-    resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=10, stale-if-error=86400'
-    return resp
+    return jsonify(db.get_logs(limit))
 
 @app.route('/api/logs/clear', methods=['POST'])
 @_require_role('admin')
@@ -2707,18 +2666,14 @@ def api_config():
     # 已登录用户额外返回运维相关字段（仍不含账户信息）
     public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'tracker_stat_period', 'rank_stat_period', 'show_removed_ips', 'default_layout_width']
     if not session.get('role'):
-        resp = jsonify({k: CONFIG.get(k) for k in public_keys})
-        resp.headers['Cache-Control'] = 'public, max-age=60, stale-while-revalidate=10, stale-if-error=86400'
-        return resp
+        return jsonify({k: CONFIG.get(k) for k in public_keys})
     # 已登录用户返回更多展示字段，但不含账户信息（users/密钥）
     all_keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'log_to_disk','log_level','http_proxy','udp_proxy','proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
                 'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh',
                 'show_removed_ips','monitor_workers','export_suffix','default_layout_width']
-    resp = jsonify({k: CONFIG.get(k) for k in all_keys})
-    resp.headers['Cache-Control'] = 'public, max-age=60, stale-while-revalidate=10, stale-if-error=86400'
-    return resp
+    return jsonify({k: CONFIG.get(k) for k in all_keys})
 
 @app.route('/api/users', methods=['GET'])
 @_require_role('admin')
