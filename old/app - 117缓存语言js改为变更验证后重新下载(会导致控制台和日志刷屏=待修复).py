@@ -2080,10 +2080,25 @@ def find_html():
 
 @app.route('/language/<path:filename>')
 def serve_locale(filename):
+    import hashlib
     base = os.path.dirname(os.path.abspath(__file__))
     language_dir = os.path.join(base, 'language')
-    resp = send_from_directory(language_dir, filename)
-    resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    filepath = os.path.join(language_dir, filename)
+    if not os.path.isfile(filepath):
+        return 'Not found', 404
+    # 用文件内容 hash 做 ETag，内容变了浏览器自动重新下载
+    with open(filepath, 'rb') as f:
+        data = f.read()
+    etag = f'"{hashlib.md5(data).hexdigest()}"'
+    if request.headers.get('If-None-Match') == etag:
+        resp = make_response('', 304)
+        resp.headers['ETag'] = etag
+        resp.headers['Cache-Control'] = 'no-cache'
+        return resp
+    resp = make_response(data, 200)
+    resp.headers['Content-Type'] = 'application/javascript; charset=utf-8'
+    resp.headers['ETag'] = etag
+    resp.headers['Cache-Control'] = 'no-cache'  # 每次验证，内容没变返回304
     return resp
 
 import gzip as _gzip

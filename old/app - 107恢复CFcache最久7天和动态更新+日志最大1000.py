@@ -17,7 +17,7 @@ import re
 import hashlib
 import secrets
 from datetime import datetime
-from flask import Flask, jsonify, request, make_response, session, g, Response, redirect, send_from_directory
+from flask import Flask, jsonify, request, make_response, session, g, Response, redirect
 from flask_cors import CORS
 import dns.resolver
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -32,10 +32,6 @@ DEFAULT_CONFIG = {
     'retry_mode': 'polling',   # 'polling' | 固定秒数(int)
     'retry_interval': 5,       # 当 retry_mode != 'polling' 时使用
     'monitor_workers': 120,    # 并发检测线程数（可配置，建议 30~200）
-    'stagger_batch_proxy': 5,   # 代理模式：每批发包数
-    'stagger_batch_direct': 5,  # 直连模式：每批发包数
-    'stagger_delay_proxy': 150, # 代理模式：批间延迟 ms
-    'stagger_delay_direct': 100,# 直连模式：批间延迟 ms
     'log_to_disk': False,
     'log_level': 'info',  # none | info | error | debug（原 console_log_level）
     'log_file': 'error.log',
@@ -73,7 +69,7 @@ def load_config():
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 saved = json.load(f)
             for k in ['check_interval','timeout','retry_mode','retry_interval',
-                      'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
+                      'monitor_workers',
                       'log_to_disk','log_level','console_log_level',
                       'http_proxy','udp_proxy','proxy_enabled',
                       'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
@@ -90,7 +86,7 @@ def load_config():
 def persist_config(cfg):
     try:
         savable = {k: cfg[k] for k in ['check_interval','timeout','retry_mode','retry_interval',
-                                        'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
+                                        'monitor_workers',
                                         'log_to_disk','log_level',
                                         'http_proxy','udp_proxy','proxy_enabled',
                                         'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
@@ -390,19 +386,13 @@ class TrackerDB:
     def _recalc(self):
         total = alive = ipv4 = ipv6 = 0
         alive_v4 = alive_v6 = 0
-        paused_count = 0   # 已暂停的监控数量（域名级或IP级）
         # TCP（含 tcp/http/https）和 UDP 分类统计
         tcp_total = tcp_alive = udp_total = udp_alive = 0
         for d in self.trackers.values():
             proto = d.get('protocol', 'tcp')
             is_udp = (proto == 'udp')
-            domain_paused = d.get('paused', False)
             for ip in d['ips']:
                 if ip.get('removed'): continue
-                ip_paused = domain_paused or ip.get('paused', False)
-                if ip_paused:
-                    paused_count += 1
-                    continue   # 已暂停不计入在线/离线统计
                 total += 1
                 is6 = ':' in ip['ip']
                 if is6: ipv6 += 1
@@ -424,7 +414,6 @@ class TrackerDB:
             'alive_v4': alive_v4, 'alive_v6': alive_v6,
             'tcp_total': tcp_total, 'tcp_alive': tcp_alive,
             'udp_total': udp_total, 'udp_alive': udp_alive,
-            'paused_count': paused_count,
         }
 
     def get_trackers(self):
@@ -503,8 +492,7 @@ class TrackerDB:
                             'uptime': round(uptime,2) if uptime is not None else None,
                             'ip_count': len(active_ips),
                             'online_count': online_count,
-                            'has_v4': has_v4, 'has_v6': has_v6,
-                            'all_paused': all(ip.get('paused') for ip in active_ips) if active_ips else False})
+                            'has_v4': has_v4, 'has_v6': has_v6})
         # 主排序：可用率高→低；同可用率：在线数多→少；再同：名称字母序
         out.sort(key=lambda x: (-(x['uptime'] if x['uptime'] is not None else -1), -x['online_count'], x['domain']))
         return out[:limit]
@@ -601,8 +589,7 @@ class TrackerDB:
                         ips_to_save.append(ip_entry)
                     entry = {'domain':d,'port':t.get('port',80),
                              'protocol':t.get('protocol','tcp'),
-                             'ips':ips_to_save,'added_time':t['added_time'],
-                             'paused':t.get('paused',False)}
+                             'ips':ips_to_save,'added_time':t['added_time']}
                     if cache_hist:
                         # 域名级：三个周期全部压缩为 {total,ok,fail}，大幅减小 data.json
                         for key in ('history_24h','history_7d','history_30d'):
@@ -653,8 +640,7 @@ class TrackerDB:
                         'history_7d':  _restore(t.get('history_7d',[]),  20160),
                         'history_30d': _restore(t.get('history_30d',[]), 86400),
                         'added_time':t.get('added_time',datetime.now().isoformat()),
-                        'dns_error': t.get('dns_error', False),
-                        'paused': t.get('paused', False)
+                        'dns_error': t.get('dns_error', False)
                     }
                 self._recalc()
             # 预热 geo 缓存：把 data.json 中已有的有效 country 数据加载到内存缓存
@@ -1896,28 +1882,9 @@ def monitor_loop():
                     cprint(msg, 'error')
                     with _round_lock: _round_fail[0] += 1
 
-            # ── 发包错峰：分批提交避免瞬间高并发冲击本地网络/代理 ──────────
-            use_proxy_stagger = bool(CONFIG.get('proxy_enabled') and CONFIG.get('udp_proxy','').strip())
-            if use_proxy_stagger:
-                STAGGER_BATCH = int(CONFIG.get('stagger_batch_proxy', 5))
-                STAGGER_DELAY = int(CONFIG.get('stagger_delay_proxy', 150)) / 1000.0
-            else:
-                STAGGER_BATCH = int(CONFIG.get('stagger_batch_direct', 5))
-                STAGGER_DELAY = int(CONFIG.get('stagger_delay_direct', 100)) / 1000.0
-
             with ThreadPoolExecutor(max_workers=max(8, CONFIG.get('monitor_workers', 120))) as chk_pool:
-                futures = {}
-                if len(tasks) > STAGGER_BATCH:
-                    for i in range(0, len(tasks), STAGGER_BATCH):
-                        batch = tasks[i:i + STAGGER_BATCH]
-                        for d, ipi in batch:
-                            f = chk_pool.submit(_check_one_counted, d, ipi)
-                            futures[f] = (d, ipi['ip'])
-                        if i + STAGGER_BATCH < len(tasks):
-                            time.sleep(STAGGER_DELAY)
-                else:
-                    futures = {chk_pool.submit(_check_one_counted, d, ipi): (d, ipi['ip'])
-                               for d, ipi in tasks}
+                futures = {chk_pool.submit(_check_one_counted, d, ipi): (d, ipi['ip'])
+                           for d, ipi in tasks}
                 for f in as_completed(futures):
                     try: f.result()
                     except Exception as e:
@@ -2077,14 +2044,6 @@ def find_html():
     for p in [os.path.join(base,'templates','index.html'), os.path.join(base,'index.html')]:
         if os.path.exists(p): return p
     return None
-
-@app.route('/language/<path:filename>')
-def serve_locale(filename):
-    base = os.path.dirname(os.path.abspath(__file__))
-    language_dir = os.path.join(base, 'language')
-    resp = send_from_directory(language_dir, filename)
-    resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
-    return resp
 
 import gzip as _gzip
 
@@ -2627,22 +2586,21 @@ def api_nav():
 
 
 # ── /api/query 对外查询接口 ──────────────────────────────────────────────────
-# 速率限制：同IP每分钟最多66次
-import threading as _threading
-_query_rate: dict = {}
-_query_rate_lock = _threading.Lock()
+# 速率限制：同IP每分钟最多30次
+_query_rate: dict = {}   # { ip: [timestamp, ...] }
+_query_rate_lock = __import__('threading').Lock()
 
-def _query_rate_limit(ip_key: str, limit: int = 66, window: int = 60) -> bool:
-    import time as _time
-    now = _time.time()
+def _query_rate_limit(ip: str, limit: int = 30, window: int = 60) -> bool:
+    """返回True表示允许，False表示超限。"""
+    now = time.time()
     with _query_rate_lock:
-        ts = _query_rate.get(ip_key, [])
-        ts = [t for t in ts if now - t < window]
-        if len(ts) >= limit:
-            _query_rate[ip_key] = ts
+        ts_list = _query_rate.get(ip, [])
+        ts_list = [t for t in ts_list if now - t < window]
+        if len(ts_list) >= limit:
+            _query_rate[ip] = ts_list
             return False
-        ts.append(now)
-        _query_rate[ip_key] = ts
+        ts_list.append(now)
+        _query_rate[ip] = ts_list
         return True
 
 @app.route('/api/query')
@@ -2650,71 +2608,70 @@ def api_query():
     """
     对外开放的单域名/IP查询接口。
     参数:
-        ?host=<域名或IP>
-        &list=status,uptime,delay,location,checked   (可选，默认 status,uptime,delay,checked)
-        &type=json|txt  (可选；只带host时默认txt，带list时默认json，显式指定优先)
-    速率限制: 同IP每分钟66次
+        host    必填，域名或IP，如 tracker.srv00.com 或 8.8.8.8
+        fields  可选，逗号分隔，默认只返回 status
+                可选值: status, uptime, latency, location, checked
+        format  可选，json（默认）或 txt
+    速率限制: 同IP每分钟30次
     """
     client_ip = request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()
     if not _query_rate_limit(client_ip):
-
-        type_arg = request.args.get('type', '').lower()
-        if type_arg == 'json':
-            return jsonify({'error': 'Rate limit exceeded. Max 66/min per IP.', 'code': 429}), 429
-        from flask import Response as _R
-        return _R('Rate limit exceeded (max 66/min per IP)\n', status=429, mimetype='text/plain')
+        err = {'error': 'Rate limit exceeded. Max 30 requests per minute per IP.', 'code': 429}
+        fmt = request.args.get('format', 'json').lower()
+        if fmt == 'txt':
+            from flask import Response as _R
+            return _R('Rate limit exceeded\n', status=429, mimetype='text/plain')
+        return jsonify(err), 429
 
     host = request.args.get('host', '').strip()
     if not host:
-        return jsonify({'error': 'Missing required parameter: host',
-                        'usage': '/api/query?host=example.com',
-                        'optional': 'list=status,uptime,delay,location,checked  type=json|txt'}), 400
+        err = {'error': 'Missing required parameter: host', 'usage': '/api/query?host=tracker.example.com&fields=status,uptime,latency,location,checked&format=json'}
+        return jsonify(err), 400
 
-    list_raw  = request.args.get('list', '').lower()
-    type_raw  = request.args.get('type', '').lower()
-    has_extra = bool(list_raw or type_raw)
+    fields_raw = request.args.get('fields', 'status').lower()
+    fields = set(f.strip() for f in fields_raw.split(',') if f.strip())
+    valid_fields = {'status', 'uptime', 'latency', 'location', 'checked'}
+    fields = fields & valid_fields
+    if not fields: fields = {'status'}
+    fields.add('status')   # status 始终包含
 
-    # 字段集合
-    VALID = {'status', 'uptime', 'delay', 'location', 'checked'}
-    if list_raw:
-        fields = {f.strip() for f in list_raw.split(',') if f.strip()} & VALID
-        if not fields: fields = {'status', 'uptime', 'delay', 'checked'}
-    else:
-        fields = {'status', 'uptime', 'delay', 'checked'}
-    fields.add('status')
-
-    # 格式：仅带host→txt；有list/type时→json；显式type优先
-    if   type_raw == 'txt':  fmt = 'txt'
-    elif type_raw == 'json': fmt = 'json'
-    elif not has_extra:      fmt = 'txt'
-    else:                    fmt = 'json'
+    fmt = request.args.get('format', 'json').lower()
+    if fmt not in ('json', 'txt'): fmt = 'json'
 
     # 查找匹配的 tracker
-    matched_ip = None; matched_tr = None
+    matched_ip = None
+    matched_domain = None
+    matched_tr = None
 
     with db.lock:
-        all_tr = dict(db.trackers)
+        all_trackers = dict(db.trackers)
 
     # 优先精确匹配域名
-    if host in all_tr:
-        matched_tr = all_tr[host]
+    if host in all_trackers:
+        matched_domain = host
+        matched_tr = all_trackers[host]
         # 选代表IP（优先online，否则第一个非removed）
         active = [ip for ip in matched_tr.get('ips', []) if not ip.get('removed')]
-        online = [ip for ip in active if ip.get('status') == 'online']
-        matched_ip = online[0] if online else (active[0] if active else None)
+        if active:
+            online = [ip for ip in active if ip.get('status') == 'online']
+            matched_ip = (online[0] if online else active[0])
     else:
         # 按IP地址匹配
-        for _dom, _tr in all_tr.items():
-            for _ip in _tr.get('ips', []):
-                if _ip.get('ip') == host and not _ip.get('removed'):
-                    matched_tr = _tr; matched_ip = _ip; break
-            if matched_tr: break
+        for domain, tr in all_trackers.items():
+            for ip_obj in tr.get('ips', []):
+                if ip_obj.get('ip') == host and not ip_obj.get('removed'):
+                    matched_domain = domain
+                    matched_tr = tr
+                    matched_ip = ip_obj
+                    break
+            if matched_ip: break
 
     if not matched_tr:
+        err = {'error': f'Host not found: {host}', 'host': host}
         if fmt == 'txt':
             from flask import Response as _R
             return _R(f'{host}  Not Found\n', status=404, mimetype='text/plain')
-        return jsonify({'error': f'Host not found: {host}', 'host': host}), 404
+        return jsonify(err), 404
 
     # 构建状态
     period = CONFIG.get('tracker_stat_period', '24h')
@@ -2739,9 +2696,9 @@ def api_query():
         h = matched_tr.get(f'history_{period}', [])
         uptime = round(sum(h)/len(h)*100, 1) if h else None
         result['uptime'] = f'{uptime}%' if uptime is not None else None
-    if 'delay' in fields:
+    if 'latency' in fields:
         lat = matched_ip.get('latency', -1) if matched_ip else -1
-        result['delay'] = f'{lat}ms' if isinstance(lat, (int, float)) and lat >= 0 else None
+        result['latency'] = f'{lat}ms' if lat >= 0 else None
     if 'location' in fields:
         co = (matched_ip.get('country') or {}) if matched_ip else {}
         parts = [p for p in [co.get('country'), co.get('isp')] if p]
@@ -2751,9 +2708,11 @@ def api_query():
 
     if fmt == 'txt':
         from flask import Response as _R
-        col_order = ['status', 'uptime', 'delay', 'location', 'checked']
-        parts = [host] + [str(result[k]) if result.get(k) is not None else '-'
-                          for k in col_order if k in result]
+        parts = [host, result.get('status', '')]
+        if 'uptime' in fields: parts.append(result.get('uptime') or '-')
+        if 'latency' in fields: parts.append(result.get('latency') or '-')
+        if 'location' in fields: parts.append(result.get('location') or '-')
+        if 'checked' in fields: parts.append(result.get('checked') or '-')
         return _R('  '.join(parts) + '\n', mimetype='text/plain',
                   headers={'Cache-Control': 'no-store'})
 
@@ -2781,7 +2740,6 @@ def api_clear_logs():
     level = request.json.get('level', 'all') if request.json else 'all'
     if level not in ('all', 'info', 'success', 'error'): level = 'all'
     db.clear_logs(level=level)
-
     g.access_note = f"clear logs level={level}"
     return jsonify({'success':True})
 
@@ -2859,7 +2817,7 @@ def api_config():
             return jsonify({'error': '权限不足'}), 403
         data = request.json or {}
         keys = ['check_interval','timeout','retry_mode','retry_interval',
-                'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','show_removed_ips','default_layout_width',
+                'monitor_workers','export_suffix','show_removed_ips','default_layout_width',
                 'log_to_disk','log_level','console_log_level','http_proxy','udp_proxy','proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh']
@@ -2870,11 +2828,7 @@ def api_config():
             'timeout':             '连接超时',
             'retry_mode':          '重试模式',
             'retry_interval':      '重试间隔',
-            'monitor_workers':        '并发检测数',
-            'stagger_batch_proxy':    '代理每批发包数',
-            'stagger_batch_direct':   '直连每批发包数',
-            'stagger_delay_proxy':    '代理批间延迟',
-            'stagger_delay_direct':   '直连批间延迟',
+            'monitor_workers':     '并发检测数',
             'export_suffix':       '导出后缀',
             'log_to_disk':         '日志存盘',
             'log_level':           '日志级别',
@@ -2896,7 +2850,7 @@ def api_config():
         }
         suffixes = {
             'check_interval': 's', 'timeout': 's', 'retry_interval': 's',
-            'page_refresh_ms': 'ms', 'stagger_delay_proxy': 'ms', 'stagger_delay_direct': 'ms',
+            'page_refresh_ms': 'ms',
         }
         bool_fmt = {True: '开', False: '关'}
 
@@ -2941,7 +2895,7 @@ def api_config():
                 'log_to_disk','log_level','http_proxy','udp_proxy','proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh',
-                'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width']
+                'show_removed_ips','monitor_workers','export_suffix','default_layout_width']
     return jsonify({k: CONFIG.get(k) for k in all_keys})
 
 @app.route('/api/users', methods=['GET'])

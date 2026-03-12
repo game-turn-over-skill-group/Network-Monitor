@@ -17,7 +17,7 @@ import re
 import hashlib
 import secrets
 from datetime import datetime
-from flask import Flask, jsonify, request, make_response, session, g, Response, redirect
+from flask import Flask, jsonify, request, make_response, session, g, Response, redirect, send_from_directory
 from flask_cors import CORS
 import dns.resolver
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -42,10 +42,10 @@ DEFAULT_CONFIG = {
     'proxy_enabled': False,
     'dns_mode': 'system',      # system | dnspython | custom
     'dns_custom': '8.8.8.8',   # 自定义DNS时使用，支持多个用逗号分隔
-    'max_log_entries': 1000,    # 保留兼容旧配置（废弃，用下面三个字段）
-    'max_log_info': 1000,       # Info 日志最大条目数
-    'max_log_success': 1000,    # Success 日志最大条目数
-    'max_log_error': 1000,      # Error 日志最大条目数
+    'max_log_entries': 1000,    # 日志最大条目数（兼容旧版，以下三项优先）
+    'max_log_info': 1000,       # Info 级日志最大条目数
+    'max_log_success': 1000,    # Success 级日志最大条目数
+    'max_log_error': 1000,      # Error 级日志最大条目数
     'page_refresh_ms': 30000,   # 前端页面自动刷新间隔(ms)，0=禁用
     'cache_history': True,      # 是否缓存历史可用率到JSON（重启不丢失）
     'tracker_stat_period': '24h', # 监控列表可用率统计周期：24h | 7d | 30d
@@ -312,9 +312,7 @@ class TrackerDB:
     def __init__(self):
         self.lock  = threading.RLock()
         self.trackers = {}
-        self.logs_info    = []   # Info 独立队列
-        self.logs_success = []   # Success 独立队列
-        self.logs_error   = []   # Error 独立队列
+        self.logs  = []
         self.stats = {'total': 0, 'alive': 0, 'ipv4': 0, 'ipv6': 0}
 
     # ---------- tracker 管理 ----------
@@ -490,7 +488,7 @@ class TrackerDB:
                 if uptime is None and min_uptime > 0: continue
                 if uptime is not None and uptime < min_uptime: continue
                 active_ips = [ip for ip in d['ips'] if not ip.get('removed') and not ip.get('paused')]
-                if not active_ips: continue   # 全部IP已暂停，不参与排行
+                if not active_ips: continue   # 所有IP均已暂停，不参与排行
                 online_count = sum(1 for ip in active_ips if ip.get('status') == 'online')
                 # 收集 IP 版本集合
                 versions = list({ip.get('version','ipv4') for ip in active_ips})
@@ -510,51 +508,38 @@ class TrackerDB:
     # ---------- 日志 ----------
     def add_log(self, message, level='info'):
         entry = {'time': datetime.now().isoformat(), 'level': level, 'message': message}
+        # 按级别选对应最大条目数（info/success/error 独立，其余fallback到max_log_entries）
+        _level_key = {'info': 'max_log_info', 'success': 'max_log_success', 'error': 'max_log_error'}
+        max_key = _level_key.get(level, 'max_log_entries')
         with self.lock:
-            if level == 'success':
-                self.logs_success.append(entry)
-                max_e = CONFIG.get('max_log_success', 1000)
-                if len(self.logs_success) > max_e: self.logs_success.pop(0)
-            elif level == 'error':
-                self.logs_error.append(entry)
-                max_e = CONFIG.get('max_log_error', 1000)
-                if len(self.logs_error) > max_e: self.logs_error.pop(0)
-            else:
-                self.logs_info.append(entry)
-                max_e = CONFIG.get('max_log_info', 1000)
-                if len(self.logs_info) > max_e: self.logs_info.pop(0)
-            # 磁盘日志只写 error 级别
+            self.logs.append(entry)
+            # 全局总条目裁剪（保持向后兼容：按各级别独立上限裁剪）
+            max_e = CONFIG.get(max_key, CONFIG.get('max_log_entries', 1000))
+            # 只裁剪同级别的日志，其他级别不受影响
+            level_logs_idx = [i for i, e in enumerate(self.logs) if e['level'] == level]
+            while len(level_logs_idx) > max_e:
+                self.logs.pop(level_logs_idx[0])
+                level_logs_idx = [i for i, e in enumerate(self.logs) if e['level'] == level]
+            # 磁盘日志只写 error 级别，避免成功结果和轮检摘要塞满日志文件
             if CONFIG.get('log_to_disk') and level == 'error':
                 try:
                     with open(CONFIG['log_file'], 'a', encoding='utf-8') as f:
                         f.write(f"[{entry['time']}][{level.upper()}] {message}\n")
                 except Exception: pass
 
-    def get_logs(self, limit=300, level='all'):
+    def get_logs(self, limit=1000, level=None):
         with self.lock:
-            if level == 'info':
-                return list(self.logs_info[-limit:])
-            elif level == 'success':
-                return list(self.logs_success[-limit:])
-            elif level == 'error':
-                return list(self.logs_error[-limit:])
-            else:  # all: 合并三个队列按时间排序
-                merged = self.logs_info + self.logs_success + self.logs_error
-                merged.sort(key=lambda x: x.get('time', ''))
-                return merged[-limit:]
+            if level and level != 'all':
+                filtered = [e for e in self.logs if e['level'] == level]
+                return list(filtered[-limit:])
+            return list(self.logs[-limit:])
 
-    def clear_logs(self, level='all'):
+    def clear_logs(self, level=None):
         with self.lock:
-            if level == 'info':
-                self.logs_info = []
-            elif level == 'success':
-                self.logs_success = []
-            elif level == 'error':
-                self.logs_error = []
+            if level and level != 'all':
+                self.logs = [e for e in self.logs if e['level'] != level]
             else:
-                self.logs_info = []
-                self.logs_success = []
-                self.logs_error = []
+                self.logs = []
 
     # ---------- 持久化 ----------
     def update_ips(self, domain, new_ip_list, dns_error=False):
@@ -1906,12 +1891,8 @@ def monitor_loop():
                     with _round_lock: _round_fail[0] += 1
 
             with ThreadPoolExecutor(max_workers=max(8, CONFIG.get('monitor_workers', 120))) as chk_pool:
-                futures = {}
-                for idx, (d, ipi) in enumerate(tasks):
-                    # 启动错峰：每提交10个任务微延迟，避免代理被瞬间高并发打爆
-                    if idx > 0 and idx % 10 == 0:
-                        import time as _t; _t.sleep(0.05)
-                    futures[chk_pool.submit(_check_one_counted, d, ipi)] = (d, ipi['ip'])
+                futures = {chk_pool.submit(_check_one_counted, d, ipi): (d, ipi['ip'])
+                           for d, ipi in tasks}
                 for f in as_completed(futures):
                     try: f.result()
                     except Exception as e:
@@ -2071,6 +2052,12 @@ def find_html():
     for p in [os.path.join(base,'templates','index.html'), os.path.join(base,'index.html')]:
         if os.path.exists(p): return p
     return None
+
+@app.route('/language/<path:filename>')
+def serve_locale(filename):
+    base = os.path.dirname(os.path.abspath(__file__))
+    language_dir = os.path.join(base, 'language')
+    return send_from_directory(language_dir, filename)
 
 import gzip as _gzip
 
@@ -2308,7 +2295,7 @@ def api_stats():
     s['net_probe_ok'] = probe_ok
     s['net_healthy']  = probe_ok and not getattr(_check_now, '_net_bad', False)
     today = datetime.now().strftime('%Y-%m-%d')
-    logs = db.get_logs(limit=5000, level='error')
+    logs = db.get_logs(limit=5000)
     s['today_alerts'] = sum(
         1 for l in logs
         if l.get('level') == 'error'
@@ -2316,15 +2303,24 @@ def api_stats():
         and ('离线' in l.get('message', '') or 'offline' in l.get('message', '').lower())
     )
     resp = jsonify(s)
-    resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate, stale-if-error=86400'
+    # stale-if-error=604800: 源站出错/离线时，可使用过期缓存7天（604800秒）
+    resp.headers['Cache-Control'] = 'public, max-age=0, no-cache, stale-if-error=604800'
+    # Vary: Cookie 按 Cookie 区分缓存版本
+    resp.headers['Vary'] = 'Cookie'
+    # 告诉 CF 按 Cookie 缓存，且源站错误时使用 stale-if-error 策略
+    resp.headers['CF-Cache-Status'] = 'DYNAMIC'  # 标记为动态内容，CF 不会强制缓存
     return resp
 
 @app.route('/api/datas')
 def api_trackers():
     resp = jsonify(db.get_trackers())
-    resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate, stale-if-error=86400'
+    # stale-if-error=604800: 源站出错/离线时，可使用过期缓存7天（604800秒）
+    resp.headers['Cache-Control'] = 'public, max-age=0, no-cache, stale-if-error=604800'
+    # Vary: Cookie 按 Cookie 区分缓存版本
+    resp.headers['Vary'] = 'Cookie'
+    # 告诉 CF 按 Cookie 缓存，且源站错误时使用 stale-if-error 策略
+    resp.headers['CF-Cache-Status'] = 'DYNAMIC'  # 标记为动态内容，CF 不会强制缓存
     return resp
-
 
 
 @app.route('/api/tracker/add', methods=['POST'])
@@ -2504,7 +2500,12 @@ def api_ranking(period):
     if period not in ('24h','7d','30d'): period='24h'
     min_uptime = request.args.get('min_uptime', 0, type=float)
     resp = jsonify({'period':period,'ranking':db.get_ranking(period, 200, min_uptime)})
-    resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate, stale-if-error=86400'
+    # stale-if-error=604800: 源站出错/离线时，可使用过期缓存7天（604800秒）
+    resp.headers['Cache-Control'] = 'public, max-age=0, no-cache, stale-if-error=604800'
+    # Vary: Cookie 按 Cookie 区分缓存版本
+    resp.headers['Vary'] = 'Cookie'
+    # 告诉 CF 按 Cookie 缓存，且源站错误时使用 stale-if-error 策略
+    resp.headers['CF-Cache-Status'] = 'DYNAMIC'  # 标记为动态内容，CF 不会强制缓存
     return resp
 
 
@@ -2598,12 +2599,13 @@ def api_nav():
     return jsonify({'ok': True})
 
 
-# ── /api/query 单域名/IP 查询接口 ─────────────────────────────────────────
+# ── /api/query 对外查询接口 ──────────────────────────────────────────────────
+# 速率限制：同IP每分钟最多66次
 import threading as _threading
 _query_rate: dict = {}
 _query_rate_lock = _threading.Lock()
 
-def _query_rate_limit(ip_key: str, limit: int = 60, window: int = 60) -> bool:
+def _query_rate_limit(ip_key: str, limit: int = 66, window: int = 60) -> bool:
     import time as _time
     now = _time.time()
     with _query_rate_lock:
@@ -2619,19 +2621,21 @@ def _query_rate_limit(ip_key: str, limit: int = 60, window: int = 60) -> bool:
 @app.route('/api/query')
 def api_query():
     """
-    对外查询接口。
-      ?host=<域名或IP>
-      &list=status,uptime,delay,location,checked   (可选，默认 status,uptime,delay,checked)
-      &type=json|txt  (可选；只带host时默认txt，带list时默认json，显式指定优先)
-    速率：同IP每分钟30次
+    对外开放的单域名/IP查询接口。
+    参数:
+        ?host=<域名或IP>
+        &list=status,uptime,delay,location,checked   (可选，默认 status,uptime,delay,checked)
+        &type=json|txt  (可选；只带host时默认txt，带list时默认json，显式指定优先)
+    速率限制: 同IP每分钟66次
     """
     client_ip = request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()
     if not _query_rate_limit(client_ip):
+
         type_arg = request.args.get('type', '').lower()
         if type_arg == 'json':
-            return jsonify({'error': 'Rate limit exceeded. Max 60/min per IP.', 'code': 429}), 429
+            return jsonify({'error': 'Rate limit exceeded. Max 66/min per IP.', 'code': 429}), 429
         from flask import Response as _R
-        return _R('Rate limit exceeded (max 60/min per IP)\n', status=429, mimetype='text/plain')
+        return _R('Rate limit exceeded (max 66/min per IP)\n', status=429, mimetype='text/plain')
 
     host = request.args.get('host', '').strip()
     if not host:
@@ -2658,17 +2662,21 @@ def api_query():
     elif not has_extra:      fmt = 'txt'
     else:                    fmt = 'json'
 
-    # 查找 tracker
+    # 查找匹配的 tracker
     matched_ip = None; matched_tr = None
+
     with db.lock:
         all_tr = dict(db.trackers)
 
+    # 优先精确匹配域名
     if host in all_tr:
         matched_tr = all_tr[host]
+        # 选代表IP（优先online，否则第一个非removed）
         active = [ip for ip in matched_tr.get('ips', []) if not ip.get('removed')]
         online = [ip for ip in active if ip.get('status') == 'online']
         matched_ip = online[0] if online else (active[0] if active else None)
     else:
+        # 按IP地址匹配
         for _dom, _tr in all_tr.items():
             for _ip in _tr.get('ips', []):
                 if _ip.get('ip') == host and not _ip.get('removed'):
@@ -2681,13 +2689,21 @@ def api_query():
             return _R(f'{host}  Not Found\n', status=404, mimetype='text/plain')
         return jsonify({'error': f'Host not found: {host}', 'host': host}), 404
 
-    period    = CONFIG.get('tracker_stat_period', '24h')
+    # 构建状态
+    period = CONFIG.get('tracker_stat_period', '24h')
+    pkmap = {'24h': 'uptime_24h', '7d': 'uptime_7d', '30d': 'uptime_30d'}
+
+    # 域名/IP 级暂停状态
     is_paused = matched_tr.get('paused') or (matched_ip and matched_ip.get('paused'))
-    raw_status= matched_ip.get('status', 'unknown') if matched_ip else 'unknown'
-    if is_paused:              status_val = 'Paused'
-    elif raw_status == 'online':  status_val = 'Online'
-    elif raw_status == 'offline': status_val = 'Offline'
-    else:                      status_val = 'Unknown'
+    raw_status = matched_ip.get('status', 'unknown') if matched_ip else 'unknown'
+    if is_paused:
+        status_val = 'Paused'
+    elif raw_status == 'online':
+        status_val = 'Online'
+    elif raw_status == 'offline':
+        status_val = 'Offline'
+    else:
+        status_val = 'Unknown'
 
     result = {'host': host}
     if 'status' in fields:
@@ -2721,20 +2737,24 @@ def api_query():
 @app.route('/api/logs')
 def api_logs():
     limit = min(request.args.get('limit', 300, type=int), 5000)
-    level = request.args.get('level', 'all').lower()
+    level = request.args.get('level', 'all').lower()  # all | info | success | error
     if level not in ('all', 'info', 'success', 'error'): level = 'all'
-    logs = db.get_logs(limit, level=level)
-    resp = jsonify(logs)
-    resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=10, stale-if-error=86400'
+    resp = jsonify(db.get_logs(limit, level=level))
+    # stale-if-error=604800: 源站出错/离线时，可使用过期缓存7天（604800秒）
+    resp.headers['Cache-Control'] = 'public, max-age=0, no-cache, stale-if-error=604800'
+    # Vary: Cookie 按 Cookie 区分缓存版本
     resp.headers['Vary'] = 'Cookie'
+    # 告诉 CF 按 Cookie 缓存，且源站错误时使用 stale-if-error 策略
+    resp.headers['CF-Cache-Status'] = 'DYNAMIC'  # 标记为动态内容，CF 不会强制缓存
     return resp
 
 @app.route('/api/logs/clear', methods=['POST'])
 @_require_role('admin')
 def api_clear_logs():
-    level = (request.json or {}).get('level', 'all')
+    level = request.json.get('level', 'all') if request.json else 'all'
     if level not in ('all', 'info', 'success', 'error'): level = 'all'
     db.clear_logs(level=level)
+
     g.access_note = f"clear logs level={level}"
     return jsonify({'success':True})
 
@@ -2833,10 +2853,10 @@ def api_config():
             'proxy_enabled':       '代理开关',
             'dns_mode':            'DNS模式',
             'dns_custom':          '自定义DNS',
-            'max_log_entries':     '最大日志条数(旧)',
-            'max_log_info':        'Info日志条数',
-            'max_log_success':     'Success日志条数',
-            'max_log_error':       'Error日志条数',
+            'max_log_entries':     '最大日志条数',
+            'max_log_info':        'Info日志最大条数',
+            'max_log_success':     'Success日志最大条数',
+            'max_log_error':       'Error日志最大条数',
             'page_refresh_ms':     '页面刷新间隔',
             'tracker_stat_period': '监控统计周期',
             'rank_stat_period':    '排行统计周期',
@@ -2987,7 +3007,7 @@ if __name__ == '__main__':
     print(f"  超时时间       : {CONFIG['timeout']}秒")
     dns_desc = {'system':'系统DNS','dnspython':'dnspython','custom':f"自定义({CONFIG.get('dns_custom','8.8.8.8')})"}.get(CONFIG.get('dns_mode','system'),'系统DNS')
     print(f"  DNS解析模式    : {dns_desc}")
-    print(f"  日志最大条目   : {CONFIG.get('max_log_entries',2000)}条")
+    print(f"  日志最大条目   : Info={CONFIG.get('max_log_info',1000)} / Success={CONFIG.get('max_log_success',1000)} / Error={CONFIG.get('max_log_error',1000)}条")
     print(f"  重试模式       : {CONFIG['retry_mode']}")
     print(f"  日志级别       : {CONFIG.get('log_level', 'info')}")
     print(f"  磁盘日志       : {'开启' if CONFIG['log_to_disk'] else '关闭'}")

@@ -2177,7 +2177,7 @@
 <script src="static/bootstrap.bundle.min.js"></script>
 <script>
 const { createApp, ref, computed, onMounted, watch, nextTick } = Vue;
-const { createI18n } = VueI18n;
+const { createI18n, useI18n } = VueI18n;
 
 const msgs = {
     zh: window.__i18n_zh,
@@ -2192,8 +2192,8 @@ const i18n = createI18n({ legacy:false, locale:'zh', fallbackLocale:'zh', messag
 
 createApp({
     setup() {
+        const { t, locale } = useI18n();  // 响应式 t 和 locale，切换语言时自动重渲染
         const currentTab = ref('dashboard');
-        const locale = i18n.global.locale;  // 直接引用 i18n 内部 locale ref，v-model 改它即切换语言
         const isDark = ref(true); // 默认夜间模式
         const layoutWidth = ref('1700'); // 默认70%，优先级：cookie > 配置 > 此默认值
 
@@ -2872,7 +2872,7 @@ createApp({
 
         const changeLocale = () => {
             document.cookie=`locale=${locale.value};path=/;max-age=31536000`;
-            // locale 已是 i18n.global.locale 本身，赋值即切换，无需额外操作
+            // locale 已是 useI18n() 返回的响应式 ref，直接赋值即可触发重渲染
         };
 
         const toggleTheme = () => {
@@ -2938,7 +2938,7 @@ createApp({
             _toastTimer = setTimeout(() => { toast.value = {...toast.value, show:false}; }, ms);
         };
         // setup 内部翻译快捷方法（避免依赖 return 中的 t）
-        const _t = (key) => i18n.global.t(key);
+        const _t = (key) => t(key);  // 复用 useI18n 的响应式 t
 
         const clearHistory = async () => {
             // 前置检查1：缓存开关必须关闭
@@ -3458,7 +3458,7 @@ createApp({
             for (const c of document.cookie.split(';')) {
                 const parts = c.trim().split('=');
                 const k = parts[0], v = parts[1];
-                if (k==='locale'&&v) { locale.value=v; }  // 同一 ref，赋值即切换 i18n
+                if (k==='locale'&&v) { locale.value=v; }  // useI18n locale，赋值即切换
                 if (k==='theme') {
                     isDark.value = v !== 'light';
                     if (v === 'light') document.body.classList.add('light-mode');
@@ -3527,7 +3527,7 @@ createApp({
             qsSortKey, qsSortDir, qsProtoFilter, cycleQsSort, qsSortIcon,
             exportErrorLog, startResize,
             chartPie, chartUptime, chartLatency,
-            t: (key, ...args) => { locale.value; return i18n.global.t(key, ...args); }  // 显式读 locale 建立响应式依赖
+            t  // useI18n() 响应式 t，locale 切换时模板自动更新
         };
     }
 }).use(i18n).mount('#app');

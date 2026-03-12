@@ -32,10 +32,6 @@ DEFAULT_CONFIG = {
     'retry_mode': 'polling',   # 'polling' | 固定秒数(int)
     'retry_interval': 5,       # 当 retry_mode != 'polling' 时使用
     'monitor_workers': 120,    # 并发检测线程数（可配置，建议 30~200）
-    'stagger_batch_proxy': 5,   # 代理模式：每批发包数
-    'stagger_batch_direct': 5,  # 直连模式：每批发包数
-    'stagger_delay_proxy': 150, # 代理模式：批间延迟 ms
-    'stagger_delay_direct': 100,# 直连模式：批间延迟 ms
     'log_to_disk': False,
     'log_level': 'info',  # none | info | error | debug（原 console_log_level）
     'log_file': 'error.log',
@@ -73,7 +69,7 @@ def load_config():
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 saved = json.load(f)
             for k in ['check_interval','timeout','retry_mode','retry_interval',
-                      'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
+                      'monitor_workers',
                       'log_to_disk','log_level','console_log_level',
                       'http_proxy','udp_proxy','proxy_enabled',
                       'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
@@ -90,7 +86,7 @@ def load_config():
 def persist_config(cfg):
     try:
         savable = {k: cfg[k] for k in ['check_interval','timeout','retry_mode','retry_interval',
-                                        'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
+                                        'monitor_workers',
                                         'log_to_disk','log_level',
                                         'http_proxy','udp_proxy','proxy_enabled',
                                         'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
@@ -1897,6 +1893,7 @@ def monitor_loop():
                     with _round_lock: _round_fail[0] += 1
 
             # ── 发包错峰：分批提交避免瞬间高并发冲击本地网络/代理 ──────────
+            # 参数从 CONFIG 读取，可在 Web 控制台配置页面调整
             use_proxy_stagger = bool(CONFIG.get('proxy_enabled') and CONFIG.get('udp_proxy','').strip())
             if use_proxy_stagger:
                 STAGGER_BATCH = int(CONFIG.get('stagger_batch_proxy', 5))
@@ -2859,7 +2856,7 @@ def api_config():
             return jsonify({'error': '权限不足'}), 403
         data = request.json or {}
         keys = ['check_interval','timeout','retry_mode','retry_interval',
-                'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','show_removed_ips','default_layout_width',
+                'monitor_workers','export_suffix','show_removed_ips','default_layout_width',
                 'log_to_disk','log_level','console_log_level','http_proxy','udp_proxy','proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh']
@@ -2870,11 +2867,7 @@ def api_config():
             'timeout':             '连接超时',
             'retry_mode':          '重试模式',
             'retry_interval':      '重试间隔',
-            'monitor_workers':        '并发检测数',
-            'stagger_batch_proxy':    '代理每批发包数',
-            'stagger_batch_direct':   '直连每批发包数',
-            'stagger_delay_proxy':    '代理批间延迟',
-            'stagger_delay_direct':   '直连批间延迟',
+            'monitor_workers':     '并发检测数',
             'export_suffix':       '导出后缀',
             'log_to_disk':         '日志存盘',
             'log_level':           '日志级别',
@@ -2896,7 +2889,7 @@ def api_config():
         }
         suffixes = {
             'check_interval': 's', 'timeout': 's', 'retry_interval': 's',
-            'page_refresh_ms': 'ms', 'stagger_delay_proxy': 'ms', 'stagger_delay_direct': 'ms',
+            'page_refresh_ms': 'ms',
         }
         bool_fmt = {True: '开', False: '关'}
 
@@ -2941,7 +2934,7 @@ def api_config():
                 'log_to_disk','log_level','http_proxy','udp_proxy','proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh',
-                'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width']
+                'show_removed_ips','monitor_workers','export_suffix','default_layout_width']
     return jsonify({k: CONFIG.get(k) for k in all_keys})
 
 @app.route('/api/users', methods=['GET'])

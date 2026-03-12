@@ -1833,44 +1833,6 @@
                             </div>
                         </div>
                     </div>
-                    <!-- 错峰发包配置 -->
-                    <div class="row g-3 mt-1">
-                        <div class="col-12">
-                            <div style="font-size:.8rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">
-                                {{ t('config.staggerTitle') }}
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">{{ t('config.staggerBatchProxy') }}</label>
-                            <input type="number" class="form-control" min="1" max="50"
-                                v-model.number="cfg.stagger_batch_proxy" @change="saveCfg">
-                            <div class="form-text">{{ t('config.staggerBatchProxyDesc') }}</div>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">{{ t('config.staggerDelayProxy') }}</label>
-                            <div class="input-group">
-                                <input type="number" class="form-control" min="10" max="2000"
-                                    v-model.number="cfg.stagger_delay_proxy" @change="saveCfg">
-                                <span class="input-group-text">ms</span>
-                            </div>
-                            <div class="form-text">{{ t('config.staggerDelayProxyDesc') }}</div>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">{{ t('config.staggerBatchDirect') }}</label>
-                            <input type="number" class="form-control" min="1" max="100"
-                                v-model.number="cfg.stagger_batch_direct" @change="saveCfg">
-                            <div class="form-text">{{ t('config.staggerBatchDirectDesc') }}</div>
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label">{{ t('config.staggerDelayDirect') }}</label>
-                            <div class="input-group">
-                                <input type="number" class="form-control" min="0" max="1000"
-                                    v-model.number="cfg.stagger_delay_direct" @change="saveCfg">
-                                <span class="input-group-text">ms</span>
-                            </div>
-                            <div class="form-text">{{ t('config.staggerDelayDirectDesc') }}</div>
-                        </div>
-                    </div>
                 </div>
             </div>
 
@@ -2193,7 +2155,7 @@ const i18n = createI18n({ legacy:false, locale:'zh', fallbackLocale:'zh', messag
 createApp({
     setup() {
         const currentTab = ref('dashboard');
-        const locale = i18n.global.locale;  // 直接引用 i18n 内部 locale ref，v-model 改它即切换语言
+        const locale = ref('zh');
         const isDark = ref(true); // 默认夜间模式
         const layoutWidth = ref('1700'); // 默认70%，优先级：cookie > 配置 > 此默认值
 
@@ -2303,7 +2265,7 @@ createApp({
         const logs = ref([]);
         const logLvl = ref('');
         const logSearch = ref('');
-        const cfg = ref({log_to_disk:false,check_interval:30,timeout:5,retry_mode:'polling',retry_interval:5,console_log_level:'info',http_proxy:'',udp_proxy:'',proxy_enabled:false,dns_mode:'system',dns_custom:'8.8.8.8',max_log_entries:1000,max_log_info:1000,max_log_success:1000,max_log_error:1000,page_refresh_ms:30000,tracker_stat_period:'24h',rank_stat_period:'24h',cache_history:true,tab_switch_refresh:true,monitor_workers:120,stagger_batch_proxy:5,stagger_batch_direct:5,stagger_delay_proxy:150,stagger_delay_direct:100,export_suffix:'/announce',show_removed_ips:true,default_layout_width:'1700'});
+        const cfg = ref({log_to_disk:false,check_interval:30,timeout:5,retry_mode:'polling',retry_interval:5,console_log_level:'info',http_proxy:'',udp_proxy:'',proxy_enabled:false,dns_mode:'system',dns_custom:'8.8.8.8',max_log_entries:1000,max_log_info:1000,max_log_success:1000,max_log_error:1000,page_refresh_ms:30000,tracker_stat_period:'24h',rank_stat_period:'24h',cache_history:true,tab_switch_refresh:true,monitor_workers:120,export_suffix:'/announce',show_removed_ips:true,default_layout_width:'1700'});
         // 仪表盘 rank 切换 / 快速搜索
         const dashRankMode = ref('worst'); // 'worst' | 'best'
         const qsSearch = ref('');
@@ -2839,7 +2801,7 @@ createApp({
 
         const saveCfg = async () => {
             try {
-                const res = await axios.post('/api/config',{
+                await axios.post('/api/config',{
                     log_to_disk:cfg.value.log_to_disk,
                     check_interval:cfg.value.check_interval,
                     timeout:cfg.value.timeout,
@@ -2858,21 +2820,16 @@ createApp({
                     cache_history:cfg.value.cache_history,
                     tab_switch_refresh:cfg.value.tab_switch_refresh,
                     monitor_workers:cfg.value.monitor_workers||120,
-                    stagger_batch_proxy:cfg.value.stagger_batch_proxy||5,
-                    stagger_batch_direct:cfg.value.stagger_batch_direct||5,
-                    stagger_delay_proxy:cfg.value.stagger_delay_proxy||150,
-                    stagger_delay_direct:cfg.value.stagger_delay_direct||100,
                     export_suffix:cfg.value.export_suffix||'/announce',
                     show_removed_ips:cfg.value.show_removed_ips !== false,
                     default_layout_width:cfg.value.default_layout_width||'1700',
                 });
-                if (res.data?.success) showToast(_t('config.savedOk'), 'ok', 2000);
-            } catch(e){ showToast(_t('config.savedFail'), 'error', 3000); }
+            } catch(e){}
         };
 
         const changeLocale = () => {
             document.cookie=`locale=${locale.value};path=/;max-age=31536000`;
-            // locale 已是 i18n.global.locale 本身，赋值即切换，无需额外操作
+            i18n.global.locale.value = locale.value;
         };
 
         const toggleTheme = () => {
@@ -3458,7 +3415,7 @@ createApp({
             for (const c of document.cookie.split(';')) {
                 const parts = c.trim().split('=');
                 const k = parts[0], v = parts[1];
-                if (k==='locale'&&v) { locale.value=v; }  // 同一 ref，赋值即切换 i18n
+                if (k==='locale'&&v) { locale.value=v; i18n.global.locale.value=v; }
                 if (k==='theme') {
                     isDark.value = v !== 'light';
                     if (v === 'light') document.body.classList.add('light-mode');
@@ -3527,7 +3484,7 @@ createApp({
             qsSortKey, qsSortDir, qsProtoFilter, cycleQsSort, qsSortIcon,
             exportErrorLog, startResize,
             chartPie, chartUptime, chartLatency,
-            t: (key, ...args) => { locale.value; return i18n.global.t(key, ...args); }  // 显式读 locale 建立响应式依赖
+            t: (key) => i18n.global.t(key)
         };
     }
 }).use(i18n).mount('#app');
