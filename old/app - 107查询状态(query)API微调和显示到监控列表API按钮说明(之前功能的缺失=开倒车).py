@@ -42,10 +42,7 @@ DEFAULT_CONFIG = {
     'proxy_enabled': False,
     'dns_mode': 'system',      # system | dnspython | custom
     'dns_custom': '8.8.8.8',   # 自定义DNS时使用，支持多个用逗号分隔
-    'max_log_entries': 1000,    # 保留兼容旧配置（废弃，用下面三个字段）
-    'max_log_info': 1000,       # Info 日志最大条目数
-    'max_log_success': 1000,    # Success 日志最大条目数
-    'max_log_error': 1000,      # Error 日志最大条目数
+    'max_log_entries': 2000,    # 日志最大条目数
     'page_refresh_ms': 30000,   # 前端页面自动刷新间隔(ms)，0=禁用
     'cache_history': True,      # 是否缓存历史可用率到JSON（重启不丢失）
     'tracker_stat_period': '24h', # 监控列表可用率统计周期：24h | 7d | 30d
@@ -72,7 +69,7 @@ def load_config():
                       'monitor_workers',
                       'log_to_disk','log_level','console_log_level',
                       'http_proxy','udp_proxy','proxy_enabled',
-                      'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                      'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
                       'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','users']:
                 if k in saved:
                     cfg[k] = saved[k]
@@ -89,7 +86,7 @@ def persist_config(cfg):
                                         'monitor_workers',
                                         'log_to_disk','log_level',
                                         'http_proxy','udp_proxy','proxy_enabled',
-                                        'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                                        'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
                                         'tracker_stat_period','rank_stat_period','cache_history',
                                         'tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','users']
                    if k in cfg}
@@ -312,9 +309,7 @@ class TrackerDB:
     def __init__(self):
         self.lock  = threading.RLock()
         self.trackers = {}
-        self.logs_info    = []   # Info 独立队列
-        self.logs_success = []   # Success 独立队列
-        self.logs_error   = []   # Error 独立队列
+        self.logs  = []
         self.stats = {'total': 0, 'alive': 0, 'ipv4': 0, 'ipv6': 0}
 
     # ---------- tracker 管理 ----------
@@ -388,19 +383,13 @@ class TrackerDB:
     def _recalc(self):
         total = alive = ipv4 = ipv6 = 0
         alive_v4 = alive_v6 = 0
-        paused_count = 0   # 已暂停的监控数量（域名级或IP级）
         # TCP（含 tcp/http/https）和 UDP 分类统计
         tcp_total = tcp_alive = udp_total = udp_alive = 0
         for d in self.trackers.values():
             proto = d.get('protocol', 'tcp')
             is_udp = (proto == 'udp')
-            domain_paused = d.get('paused', False)
             for ip in d['ips']:
                 if ip.get('removed'): continue
-                ip_paused = domain_paused or ip.get('paused', False)
-                if ip_paused:
-                    paused_count += 1
-                    continue   # 已暂停不计入在线/离线统计
                 total += 1
                 is6 = ':' in ip['ip']
                 if is6: ipv6 += 1
@@ -422,7 +411,6 @@ class TrackerDB:
             'alive_v4': alive_v4, 'alive_v6': alive_v6,
             'tcp_total': tcp_total, 'tcp_alive': tcp_alive,
             'udp_total': udp_total, 'udp_alive': udp_alive,
-            'paused_count': paused_count,
         }
 
     def get_trackers(self):
@@ -511,50 +499,21 @@ class TrackerDB:
     def add_log(self, message, level='info'):
         entry = {'time': datetime.now().isoformat(), 'level': level, 'message': message}
         with self.lock:
-            if level == 'success':
-                self.logs_success.append(entry)
-                max_e = CONFIG.get('max_log_success', 1000)
-                if len(self.logs_success) > max_e: self.logs_success.pop(0)
-            elif level == 'error':
-                self.logs_error.append(entry)
-                max_e = CONFIG.get('max_log_error', 1000)
-                if len(self.logs_error) > max_e: self.logs_error.pop(0)
-            else:
-                self.logs_info.append(entry)
-                max_e = CONFIG.get('max_log_info', 1000)
-                if len(self.logs_info) > max_e: self.logs_info.pop(0)
-            # 磁盘日志只写 error 级别
+            self.logs.append(entry)
+            max_e = CONFIG.get('max_log_entries', 2000)
+            if len(self.logs) > max_e: self.logs.pop(0)
+            # 磁盘日志只写 error 级别，避免成功结果和轮检摘要塞满日志文件
             if CONFIG.get('log_to_disk') and level == 'error':
                 try:
                     with open(CONFIG['log_file'], 'a', encoding='utf-8') as f:
                         f.write(f"[{entry['time']}][{level.upper()}] {message}\n")
                 except Exception: pass
 
-    def get_logs(self, limit=300, level='all'):
-        with self.lock:
-            if level == 'info':
-                return list(self.logs_info[-limit:])
-            elif level == 'success':
-                return list(self.logs_success[-limit:])
-            elif level == 'error':
-                return list(self.logs_error[-limit:])
-            else:  # all: 合并三个队列按时间排序
-                merged = self.logs_info + self.logs_success + self.logs_error
-                merged.sort(key=lambda x: x.get('time', ''))
-                return merged[-limit:]
+    def get_logs(self, limit=2000):
+        with self.lock: return list(self.logs[-limit:])
 
-    def clear_logs(self, level='all'):
-        with self.lock:
-            if level == 'info':
-                self.logs_info = []
-            elif level == 'success':
-                self.logs_success = []
-            elif level == 'error':
-                self.logs_error = []
-            else:
-                self.logs_info = []
-                self.logs_success = []
-                self.logs_error = []
+    def clear_logs(self):
+        with self.lock: self.logs = []
 
     # ---------- 持久化 ----------
     def update_ips(self, domain, new_ip_list, dns_error=False):
@@ -1906,12 +1865,8 @@ def monitor_loop():
                     with _round_lock: _round_fail[0] += 1
 
             with ThreadPoolExecutor(max_workers=max(8, CONFIG.get('monitor_workers', 120))) as chk_pool:
-                futures = {}
-                for idx, (d, ipi) in enumerate(tasks):
-                    # 启动错峰：每提交10个任务微延迟，避免代理被瞬间高并发打爆
-                    if idx > 0 and idx % 10 == 0:
-                        import time as _t; _t.sleep(0.05)
-                    futures[chk_pool.submit(_check_one_counted, d, ipi)] = (d, ipi['ip'])
+                futures = {chk_pool.submit(_check_one_counted, d, ipi): (d, ipi['ip'])
+                           for d, ipi in tasks}
                 for f in as_completed(futures):
                     try: f.result()
                     except Exception as e:
@@ -2308,7 +2263,7 @@ def api_stats():
     s['net_probe_ok'] = probe_ok
     s['net_healthy']  = probe_ok and not getattr(_check_now, '_net_bad', False)
     today = datetime.now().strftime('%Y-%m-%d')
-    logs = db.get_logs(limit=5000, level='error')
+    logs = db.get_logs(limit=5000)
     s['today_alerts'] = sum(
         1 for l in logs
         if l.get('level') == 'error'
@@ -2603,7 +2558,7 @@ import threading as _threading
 _query_rate: dict = {}
 _query_rate_lock = _threading.Lock()
 
-def _query_rate_limit(ip_key: str, limit: int = 60, window: int = 60) -> bool:
+def _query_rate_limit(ip_key: str, limit: int = 30, window: int = 60) -> bool:
     import time as _time
     now = _time.time()
     with _query_rate_lock:
@@ -2629,9 +2584,9 @@ def api_query():
     if not _query_rate_limit(client_ip):
         type_arg = request.args.get('type', '').lower()
         if type_arg == 'json':
-            return jsonify({'error': 'Rate limit exceeded. Max 60/min per IP.', 'code': 429}), 429
+            return jsonify({'error': 'Rate limit exceeded. Max 30/min per IP.', 'code': 429}), 429
         from flask import Response as _R
-        return _R('Rate limit exceeded (max 60/min per IP)\n', status=429, mimetype='text/plain')
+        return _R('Rate limit exceeded (max 30/min per IP)\n', status=429, mimetype='text/plain')
 
     host = request.args.get('host', '').strip()
     if not host:
@@ -2723,7 +2678,7 @@ def api_logs():
     limit = min(request.args.get('limit', 300, type=int), 5000)
     level = request.args.get('level', 'all').lower()
     if level not in ('all', 'info', 'success', 'error'): level = 'all'
-    logs = db.get_logs(limit, level=level)
+    logs = db.get_logs(limit) if level == 'all' else [e for e in db.get_logs(limit) if e.get('level') == level]
     resp = jsonify(logs)
     resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=10, stale-if-error=86400'
     resp.headers['Vary'] = 'Cookie'
@@ -2734,7 +2689,10 @@ def api_logs():
 def api_clear_logs():
     level = (request.json or {}).get('level', 'all')
     if level not in ('all', 'info', 'success', 'error'): level = 'all'
-    db.clear_logs(level=level)
+    if level == 'all':
+        db.clear_logs()
+    else:
+        with db.lock: db.logs = [e for e in db.logs if e.get('level') != level]
     g.access_note = f"clear logs level={level}"
     return jsonify({'success':True})
 
@@ -2814,7 +2772,7 @@ def api_config():
         keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'monitor_workers','export_suffix','show_removed_ips','default_layout_width',
                 'log_to_disk','log_level','console_log_level','http_proxy','udp_proxy','proxy_enabled',
-                'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
                 'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh']
 
         # 字段的人可读标签
@@ -2833,10 +2791,7 @@ def api_config():
             'proxy_enabled':       '代理开关',
             'dns_mode':            'DNS模式',
             'dns_custom':          '自定义DNS',
-            'max_log_entries':     '最大日志条数(旧)',
-            'max_log_info':        'Info日志条数',
-            'max_log_success':     'Success日志条数',
-            'max_log_error':       'Error日志条数',
+            'max_log_entries':     '最大日志条数',
             'page_refresh_ms':     '页面刷新间隔',
             'tracker_stat_period': '监控统计周期',
             'rank_stat_period':    '排行统计周期',
@@ -2888,7 +2843,7 @@ def api_config():
     # 已登录用户返回更多展示字段，但不含账户信息（users/密钥）
     all_keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'log_to_disk','log_level','http_proxy','udp_proxy','proxy_enabled',
-                'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                'dns_mode','dns_custom','max_log_entries','page_refresh_ms',
                 'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh',
                 'show_removed_ips','monitor_workers','export_suffix','default_layout_width']
     return jsonify({k: CONFIG.get(k) for k in all_keys})

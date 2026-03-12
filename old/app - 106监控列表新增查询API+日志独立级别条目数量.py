@@ -42,10 +42,10 @@ DEFAULT_CONFIG = {
     'proxy_enabled': False,
     'dns_mode': 'system',      # system | dnspython | custom
     'dns_custom': '8.8.8.8',   # 自定义DNS时使用，支持多个用逗号分隔
-    'max_log_entries': 1000,    # 保留兼容旧配置（废弃，用下面三个字段）
-    'max_log_info': 1000,       # Info 日志最大条目数
-    'max_log_success': 1000,    # Success 日志最大条目数
-    'max_log_error': 1000,      # Error 日志最大条目数
+    'max_log_entries': 2000,    # 日志最大条目数（兼容旧版，以下三项优先）
+    'max_log_info': 2000,       # Info 级日志最大条目数
+    'max_log_success': 2000,    # Success 级日志最大条目数
+    'max_log_error': 2000,      # Error 级日志最大条目数
     'page_refresh_ms': 30000,   # 前端页面自动刷新间隔(ms)，0=禁用
     'cache_history': True,      # 是否缓存历史可用率到JSON（重启不丢失）
     'tracker_stat_period': '24h', # 监控列表可用率统计周期：24h | 7d | 30d
@@ -312,9 +312,7 @@ class TrackerDB:
     def __init__(self):
         self.lock  = threading.RLock()
         self.trackers = {}
-        self.logs_info    = []   # Info 独立队列
-        self.logs_success = []   # Success 独立队列
-        self.logs_error   = []   # Error 独立队列
+        self.logs  = []
         self.stats = {'total': 0, 'alive': 0, 'ipv4': 0, 'ipv6': 0}
 
     # ---------- tracker 管理 ----------
@@ -388,19 +386,13 @@ class TrackerDB:
     def _recalc(self):
         total = alive = ipv4 = ipv6 = 0
         alive_v4 = alive_v6 = 0
-        paused_count = 0   # 已暂停的监控数量（域名级或IP级）
         # TCP（含 tcp/http/https）和 UDP 分类统计
         tcp_total = tcp_alive = udp_total = udp_alive = 0
         for d in self.trackers.values():
             proto = d.get('protocol', 'tcp')
             is_udp = (proto == 'udp')
-            domain_paused = d.get('paused', False)
             for ip in d['ips']:
                 if ip.get('removed'): continue
-                ip_paused = domain_paused or ip.get('paused', False)
-                if ip_paused:
-                    paused_count += 1
-                    continue   # 已暂停不计入在线/离线统计
                 total += 1
                 is6 = ':' in ip['ip']
                 if is6: ipv6 += 1
@@ -422,7 +414,6 @@ class TrackerDB:
             'alive_v4': alive_v4, 'alive_v6': alive_v6,
             'tcp_total': tcp_total, 'tcp_alive': tcp_alive,
             'udp_total': udp_total, 'udp_alive': udp_alive,
-            'paused_count': paused_count,
         }
 
     def get_trackers(self):
@@ -490,7 +481,7 @@ class TrackerDB:
                 if uptime is None and min_uptime > 0: continue
                 if uptime is not None and uptime < min_uptime: continue
                 active_ips = [ip for ip in d['ips'] if not ip.get('removed') and not ip.get('paused')]
-                if not active_ips: continue   # 全部IP已暂停，不参与排行
+                if not active_ips: continue   # 所有IP均已暂停，不参与排行
                 online_count = sum(1 for ip in active_ips if ip.get('status') == 'online')
                 # 收集 IP 版本集合
                 versions = list({ip.get('version','ipv4') for ip in active_ips})
@@ -501,8 +492,7 @@ class TrackerDB:
                             'uptime': round(uptime,2) if uptime is not None else None,
                             'ip_count': len(active_ips),
                             'online_count': online_count,
-                            'has_v4': has_v4, 'has_v6': has_v6,
-                            'all_paused': all(ip.get('paused') for ip in active_ips) if active_ips else False})
+                            'has_v4': has_v4, 'has_v6': has_v6})
         # 主排序：可用率高→低；同可用率：在线数多→少；再同：名称字母序
         out.sort(key=lambda x: (-(x['uptime'] if x['uptime'] is not None else -1), -x['online_count'], x['domain']))
         return out[:limit]
@@ -510,51 +500,38 @@ class TrackerDB:
     # ---------- 日志 ----------
     def add_log(self, message, level='info'):
         entry = {'time': datetime.now().isoformat(), 'level': level, 'message': message}
+        # 按级别选对应最大条目数（info/success/error 独立，其余fallback到max_log_entries）
+        _level_key = {'info': 'max_log_info', 'success': 'max_log_success', 'error': 'max_log_error'}
+        max_key = _level_key.get(level, 'max_log_entries')
         with self.lock:
-            if level == 'success':
-                self.logs_success.append(entry)
-                max_e = CONFIG.get('max_log_success', 1000)
-                if len(self.logs_success) > max_e: self.logs_success.pop(0)
-            elif level == 'error':
-                self.logs_error.append(entry)
-                max_e = CONFIG.get('max_log_error', 1000)
-                if len(self.logs_error) > max_e: self.logs_error.pop(0)
-            else:
-                self.logs_info.append(entry)
-                max_e = CONFIG.get('max_log_info', 1000)
-                if len(self.logs_info) > max_e: self.logs_info.pop(0)
-            # 磁盘日志只写 error 级别
+            self.logs.append(entry)
+            # 全局总条目裁剪（保持向后兼容：按各级别独立上限裁剪）
+            max_e = CONFIG.get(max_key, CONFIG.get('max_log_entries', 2000))
+            # 只裁剪同级别的日志，其他级别不受影响
+            level_logs_idx = [i for i, e in enumerate(self.logs) if e['level'] == level]
+            while len(level_logs_idx) > max_e:
+                self.logs.pop(level_logs_idx[0])
+                level_logs_idx = [i for i, e in enumerate(self.logs) if e['level'] == level]
+            # 磁盘日志只写 error 级别，避免成功结果和轮检摘要塞满日志文件
             if CONFIG.get('log_to_disk') and level == 'error':
                 try:
                     with open(CONFIG['log_file'], 'a', encoding='utf-8') as f:
                         f.write(f"[{entry['time']}][{level.upper()}] {message}\n")
                 except Exception: pass
 
-    def get_logs(self, limit=300, level='all'):
+    def get_logs(self, limit=2000, level=None):
         with self.lock:
-            if level == 'info':
-                return list(self.logs_info[-limit:])
-            elif level == 'success':
-                return list(self.logs_success[-limit:])
-            elif level == 'error':
-                return list(self.logs_error[-limit:])
-            else:  # all: 合并三个队列按时间排序
-                merged = self.logs_info + self.logs_success + self.logs_error
-                merged.sort(key=lambda x: x.get('time', ''))
-                return merged[-limit:]
+            if level and level != 'all':
+                filtered = [e for e in self.logs if e['level'] == level]
+                return list(filtered[-limit:])
+            return list(self.logs[-limit:])
 
-    def clear_logs(self, level='all'):
+    def clear_logs(self, level=None):
         with self.lock:
-            if level == 'info':
-                self.logs_info = []
-            elif level == 'success':
-                self.logs_success = []
-            elif level == 'error':
-                self.logs_error = []
+            if level and level != 'all':
+                self.logs = [e for e in self.logs if e['level'] != level]
             else:
-                self.logs_info = []
-                self.logs_success = []
-                self.logs_error = []
+                self.logs = []
 
     # ---------- 持久化 ----------
     def update_ips(self, domain, new_ip_list, dns_error=False):
@@ -1906,12 +1883,8 @@ def monitor_loop():
                     with _round_lock: _round_fail[0] += 1
 
             with ThreadPoolExecutor(max_workers=max(8, CONFIG.get('monitor_workers', 120))) as chk_pool:
-                futures = {}
-                for idx, (d, ipi) in enumerate(tasks):
-                    # 启动错峰：每提交10个任务微延迟，避免代理被瞬间高并发打爆
-                    if idx > 0 and idx % 10 == 0:
-                        import time as _t; _t.sleep(0.05)
-                    futures[chk_pool.submit(_check_one_counted, d, ipi)] = (d, ipi['ip'])
+                futures = {chk_pool.submit(_check_one_counted, d, ipi): (d, ipi['ip'])
+                           for d, ipi in tasks}
                 for f in as_completed(futures):
                     try: f.result()
                     except Exception as e:
@@ -2308,7 +2281,7 @@ def api_stats():
     s['net_probe_ok'] = probe_ok
     s['net_healthy']  = probe_ok and not getattr(_check_now, '_net_bad', False)
     today = datetime.now().strftime('%Y-%m-%d')
-    logs = db.get_logs(limit=5000, level='error')
+    logs = db.get_logs(limit=5000)
     s['today_alerts'] = sum(
         1 for l in logs
         if l.get('level') == 'error'
@@ -2598,96 +2571,109 @@ def api_nav():
     return jsonify({'ok': True})
 
 
-# ── /api/query 单域名/IP 查询接口 ─────────────────────────────────────────
-import threading as _threading
-_query_rate: dict = {}
-_query_rate_lock = _threading.Lock()
+# ── /api/query 对外查询接口 ──────────────────────────────────────────────────
+# 速率限制：同IP每分钟最多30次
+_query_rate: dict = {}   # { ip: [timestamp, ...] }
+_query_rate_lock = __import__('threading').Lock()
 
-def _query_rate_limit(ip_key: str, limit: int = 60, window: int = 60) -> bool:
-    import time as _time
-    now = _time.time()
+def _query_rate_limit(ip: str, limit: int = 30, window: int = 60) -> bool:
+    """返回True表示允许，False表示超限。"""
+    now = time.time()
     with _query_rate_lock:
-        ts = _query_rate.get(ip_key, [])
-        ts = [t for t in ts if now - t < window]
-        if len(ts) >= limit:
-            _query_rate[ip_key] = ts
+        ts_list = _query_rate.get(ip, [])
+        ts_list = [t for t in ts_list if now - t < window]
+        if len(ts_list) >= limit:
+            _query_rate[ip] = ts_list
             return False
-        ts.append(now)
-        _query_rate[ip_key] = ts
+        ts_list.append(now)
+        _query_rate[ip] = ts_list
         return True
 
 @app.route('/api/query')
 def api_query():
     """
-    对外查询接口。
-      ?host=<域名或IP>
-      &list=status,uptime,delay,location,checked   (可选，默认 status,uptime,delay,checked)
-      &type=json|txt  (可选；只带host时默认txt，带list时默认json，显式指定优先)
-    速率：同IP每分钟30次
+    对外开放的单域名/IP查询接口。
+    参数:
+        host    必填，域名或IP，如 tracker.srv00.com 或 8.8.8.8
+        fields  可选，逗号分隔，默认只返回 status
+                可选值: status, uptime, latency, location, checked
+        format  可选，json（默认）或 txt
+    速率限制: 同IP每分钟30次
     """
     client_ip = request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()
     if not _query_rate_limit(client_ip):
-        type_arg = request.args.get('type', '').lower()
-        if type_arg == 'json':
-            return jsonify({'error': 'Rate limit exceeded. Max 60/min per IP.', 'code': 429}), 429
-        from flask import Response as _R
-        return _R('Rate limit exceeded (max 60/min per IP)\n', status=429, mimetype='text/plain')
+        err = {'error': 'Rate limit exceeded. Max 30 requests per minute per IP.', 'code': 429}
+        fmt = request.args.get('format', 'json').lower()
+        if fmt == 'txt':
+            from flask import Response as _R
+            return _R('Rate limit exceeded\n', status=429, mimetype='text/plain')
+        return jsonify(err), 429
 
     host = request.args.get('host', '').strip()
     if not host:
-        return jsonify({'error': 'Missing required parameter: host',
-                        'usage': '/api/query?host=example.com',
-                        'optional': 'list=status,uptime,delay,location,checked  type=json|txt'}), 400
+        err = {'error': 'Missing required parameter: host', 'usage': '/api/query?host=tracker.example.com&fields=status,uptime,latency,location,checked&format=json'}
+        return jsonify(err), 400
 
-    list_raw  = request.args.get('list', '').lower()
-    type_raw  = request.args.get('type', '').lower()
-    has_extra = bool(list_raw or type_raw)
+    fields_raw = request.args.get('fields', 'status').lower()
+    fields = set(f.strip() for f in fields_raw.split(',') if f.strip())
+    valid_fields = {'status', 'uptime', 'latency', 'location', 'checked'}
+    fields = fields & valid_fields
+    if not fields: fields = {'status'}
+    fields.add('status')   # status 始终包含
 
-    # 字段集合
-    VALID = {'status', 'uptime', 'delay', 'location', 'checked'}
-    if list_raw:
-        fields = {f.strip() for f in list_raw.split(',') if f.strip()} & VALID
-        if not fields: fields = {'status', 'uptime', 'delay', 'checked'}
-    else:
-        fields = {'status', 'uptime', 'delay', 'checked'}
-    fields.add('status')
+    fmt = request.args.get('format', 'json').lower()
+    if fmt not in ('json', 'txt'): fmt = 'json'
 
-    # 格式：仅带host→txt；有list/type时→json；显式type优先
-    if   type_raw == 'txt':  fmt = 'txt'
-    elif type_raw == 'json': fmt = 'json'
-    elif not has_extra:      fmt = 'txt'
-    else:                    fmt = 'json'
+    # 查找匹配的 tracker
+    matched_ip = None
+    matched_domain = None
+    matched_tr = None
 
-    # 查找 tracker
-    matched_ip = None; matched_tr = None
     with db.lock:
-        all_tr = dict(db.trackers)
+        all_trackers = dict(db.trackers)
 
-    if host in all_tr:
-        matched_tr = all_tr[host]
+    # 优先精确匹配域名
+    if host in all_trackers:
+        matched_domain = host
+        matched_tr = all_trackers[host]
+        # 选代表IP（优先online，否则第一个非removed）
         active = [ip for ip in matched_tr.get('ips', []) if not ip.get('removed')]
-        online = [ip for ip in active if ip.get('status') == 'online']
-        matched_ip = online[0] if online else (active[0] if active else None)
+        if active:
+            online = [ip for ip in active if ip.get('status') == 'online']
+            matched_ip = (online[0] if online else active[0])
     else:
-        for _dom, _tr in all_tr.items():
-            for _ip in _tr.get('ips', []):
-                if _ip.get('ip') == host and not _ip.get('removed'):
-                    matched_tr = _tr; matched_ip = _ip; break
-            if matched_tr: break
+        # 按IP地址匹配
+        for domain, tr in all_trackers.items():
+            for ip_obj in tr.get('ips', []):
+                if ip_obj.get('ip') == host and not ip_obj.get('removed'):
+                    matched_domain = domain
+                    matched_tr = tr
+                    matched_ip = ip_obj
+                    break
+            if matched_ip: break
 
     if not matched_tr:
+        err = {'error': f'Host not found: {host}', 'host': host}
         if fmt == 'txt':
             from flask import Response as _R
             return _R(f'{host}  Not Found\n', status=404, mimetype='text/plain')
-        return jsonify({'error': f'Host not found: {host}', 'host': host}), 404
+        return jsonify(err), 404
 
-    period    = CONFIG.get('tracker_stat_period', '24h')
+    # 构建状态
+    period = CONFIG.get('tracker_stat_period', '24h')
+    pkmap = {'24h': 'uptime_24h', '7d': 'uptime_7d', '30d': 'uptime_30d'}
+
+    # 域名/IP 级暂停状态
     is_paused = matched_tr.get('paused') or (matched_ip and matched_ip.get('paused'))
-    raw_status= matched_ip.get('status', 'unknown') if matched_ip else 'unknown'
-    if is_paused:              status_val = 'Paused'
-    elif raw_status == 'online':  status_val = 'Online'
-    elif raw_status == 'offline': status_val = 'Offline'
-    else:                      status_val = 'Unknown'
+    raw_status = matched_ip.get('status', 'unknown') if matched_ip else 'unknown'
+    if is_paused:
+        status_val = 'Paused'
+    elif raw_status == 'online':
+        status_val = 'Online'
+    elif raw_status == 'offline':
+        status_val = 'Offline'
+    else:
+        status_val = 'Unknown'
 
     result = {'host': host}
     if 'status' in fields:
@@ -2696,9 +2682,9 @@ def api_query():
         h = matched_tr.get(f'history_{period}', [])
         uptime = round(sum(h)/len(h)*100, 1) if h else None
         result['uptime'] = f'{uptime}%' if uptime is not None else None
-    if 'delay' in fields:
+    if 'latency' in fields:
         lat = matched_ip.get('latency', -1) if matched_ip else -1
-        result['delay'] = f'{lat}ms' if isinstance(lat, (int, float)) and lat >= 0 else None
+        result['latency'] = f'{lat}ms' if lat >= 0 else None
     if 'location' in fields:
         co = (matched_ip.get('country') or {}) if matched_ip else {}
         parts = [p for p in [co.get('country'), co.get('isp')] if p]
@@ -2708,9 +2694,11 @@ def api_query():
 
     if fmt == 'txt':
         from flask import Response as _R
-        col_order = ['status', 'uptime', 'delay', 'location', 'checked']
-        parts = [host] + [str(result[k]) if result.get(k) is not None else '-'
-                          for k in col_order if k in result]
+        parts = [host, result.get('status', '')]
+        if 'uptime' in fields: parts.append(result.get('uptime') or '-')
+        if 'latency' in fields: parts.append(result.get('latency') or '-')
+        if 'location' in fields: parts.append(result.get('location') or '-')
+        if 'checked' in fields: parts.append(result.get('checked') or '-')
         return _R('  '.join(parts) + '\n', mimetype='text/plain',
                   headers={'Cache-Control': 'no-store'})
 
@@ -2721,10 +2709,9 @@ def api_query():
 @app.route('/api/logs')
 def api_logs():
     limit = min(request.args.get('limit', 300, type=int), 5000)
-    level = request.args.get('level', 'all').lower()
+    level = request.args.get('level', 'all').lower()  # all | info | success | error
     if level not in ('all', 'info', 'success', 'error'): level = 'all'
-    logs = db.get_logs(limit, level=level)
-    resp = jsonify(logs)
+    resp = jsonify(db.get_logs(limit, level=level))
     resp.headers['Cache-Control'] = 'public, max-age=30, stale-while-revalidate=10, stale-if-error=86400'
     resp.headers['Vary'] = 'Cookie'
     return resp
@@ -2732,7 +2719,7 @@ def api_logs():
 @app.route('/api/logs/clear', methods=['POST'])
 @_require_role('admin')
 def api_clear_logs():
-    level = (request.json or {}).get('level', 'all')
+    level = request.json.get('level', 'all') if request.json else 'all'
     if level not in ('all', 'info', 'success', 'error'): level = 'all'
     db.clear_logs(level=level)
     g.access_note = f"clear logs level={level}"
@@ -2833,10 +2820,10 @@ def api_config():
             'proxy_enabled':       '代理开关',
             'dns_mode':            'DNS模式',
             'dns_custom':          '自定义DNS',
-            'max_log_entries':     '最大日志条数(旧)',
-            'max_log_info':        'Info日志条数',
-            'max_log_success':     'Success日志条数',
-            'max_log_error':       'Error日志条数',
+            'max_log_entries':     '最大日志条数',
+            'max_log_info':        'Info日志最大条数',
+            'max_log_success':     'Success日志最大条数',
+            'max_log_error':       'Error日志最大条数',
             'page_refresh_ms':     '页面刷新间隔',
             'tracker_stat_period': '监控统计周期',
             'rank_stat_period':    '排行统计周期',
@@ -2987,7 +2974,7 @@ if __name__ == '__main__':
     print(f"  超时时间       : {CONFIG['timeout']}秒")
     dns_desc = {'system':'系统DNS','dnspython':'dnspython','custom':f"自定义({CONFIG.get('dns_custom','8.8.8.8')})"}.get(CONFIG.get('dns_mode','system'),'系统DNS')
     print(f"  DNS解析模式    : {dns_desc}")
-    print(f"  日志最大条目   : {CONFIG.get('max_log_entries',2000)}条")
+    print(f"  日志最大条目   : Info={CONFIG.get('max_log_info',2000)} / Success={CONFIG.get('max_log_success',2000)} / Error={CONFIG.get('max_log_error',2000)}条")
     print(f"  重试模式       : {CONFIG['retry_mode']}")
     print(f"  日志级别       : {CONFIG.get('log_level', 'info')}")
     print(f"  磁盘日志       : {'开启' if CONFIG['log_to_disk'] else '关闭'}")

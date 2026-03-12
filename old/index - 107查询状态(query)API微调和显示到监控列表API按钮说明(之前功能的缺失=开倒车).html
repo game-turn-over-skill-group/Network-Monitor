@@ -918,7 +918,7 @@
             <!-- 顶部6格统计卡 -->
             <div class="row mb-2 g-2" style="align-items:stretch;">
 
-                <!-- 卡1：在线IP / 监控IP（排除已暂停） -->
+                <!-- 卡1：在线IP / 监控IP（合并） -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
                     <div class="stat-card-new card">
                         <div class="scn-label">在线 / 监控</div>
@@ -943,7 +943,7 @@
                     </div>
                 </div>
 
-                <!-- 卡2：故障 / 暂停 / 监控 -->
+                <!-- 卡2：故障IP / 监控IP -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
                     <div class="stat-card-new card">
                         <div class="scn-label">故障 / 监控</div>
@@ -952,12 +952,8 @@
                             <span style="color:var(--muted);font-size:1.2rem;font-weight:400;">/</span>
                             <span style="font-size:2rem;">{{ stats.total||0 }}</span>
                         </div>
-                        <div class="scn-sub" style="flex-direction:column;align-items:flex-start;gap:3px;">
+                        <div class="scn-sub">
                             <span class="scn-desc">当前离线</span>
-                            <!-- 暂停数：有暂停时显示黄色 -->
-                            <span v-if="stats.paused_count>0" style="font-size:.78rem;font-weight:600;color:#eab308;">
-                                ⏸ 已暂停 {{ stats.paused_count }}
-                            </span>
                         </div>
                     </div>
                 </div>
@@ -1273,16 +1269,10 @@
                                     <td style="font-size:.75rem;color:#94a3b8;white-space:nowrap;">{{ fmtFullTime(row.last_check) }}</td>
                                     <!-- 状态：✔/✖ + 浅色Online/Offline小字（无百分比）-->
                                     <td style="white-space:nowrap;">
-                                        <template v-if="row.paused">
-                                            <span style="font-size:.88rem;color:#eab308;"><i class="bi bi-pause-circle-fill"></i></span>
-                                            <span style="font-size:.72rem;color:#eab308;margin-left:3px;">{{ t('tracker.statusPaused') }}</span>
-                                        </template>
-                                        <template v-else>
-                                            <span :class="stCls(row.status)" style="font-size:.88rem;"><i class="bi" :class="stIcon(row.status)"></i></span>
-                                            <span v-if="row.status==='online'" style="font-size:.72rem;color:#4ade80;margin-left:3px;opacity:.85;">Online</span>
-                                            <span v-else-if="row.status==='offline'" style="font-size:.72rem;color:#f87171;margin-left:3px;opacity:.85;">Offline</span>
-                                            <span v-else style="font-size:.72rem;color:#64748b;margin-left:3px;">-</span>
-                                        </template>
+                                        <span :class="stCls(row.status)" style="font-size:.88rem;"><i class="bi" :class="stIcon(row.status)"></i></span>
+                                        <span v-if="row.status==='online'" style="font-size:.72rem;color:#4ade80;margin-left:3px;opacity:.85;">Online</span>
+                                        <span v-else-if="row.status==='offline'" style="font-size:.72rem;color:#f87171;margin-left:3px;opacity:.85;">Offline</span>
+                                        <span v-else style="font-size:.72rem;color:#64748b;margin-left:3px;">-</span>
                                     </td>
                                     <!-- 延迟 -->
                                     <td style="text-align:right;white-space:nowrap;">
@@ -1360,7 +1350,7 @@
                         <button class="btn btn-sm btn-outline-secondary" @click="showQueryApiPanel=!showQueryApiPanel"
                                 :style="showQueryApiPanel?'border-color:#3b82f6;color:#60a5fa;':''"
                                 style="padding:2px 10px;font-size:.78rem;border-color:#334155;color:#94a3b8;">
-                            <i class="bi bi-code-slash me-1"></i></> API
+                            <i class="bi bi-code-slash me-1"></i>{{ t('tracker.showApi') }}
                         </button>
                         <select v-model="sortKey" class="form-select form-select-sm tl-sel" style="width:115px;">
                             <option value=""></option>
@@ -1414,7 +1404,7 @@
                         <tbody>
                             <tr><td><code>host</code></td><td><i style="color:#64748b;">domain / IP</i></td><td>—</td><td>{{ t('tracker.apiParamHost') }} <span style="color:#f87171;">*</span></td></tr>
                             <tr><td><code>list</code></td><td><code>status</code> <code>uptime</code> <code>delay</code> <code>location</code> <code>checked</code></td><td><code>status,uptime,delay,checked</code></td><td>{{ t('tracker.apiParamList') }}</td></tr>
-                            <tr><td><code>type</code></td><td><code>txt</code> <code>json</code></td><td><code>json</code> <span style="color:#64748b;font-size:.75rem;">(host only→txt)</span></td><td>{{ t('tracker.apiParamType') }}</td></tr>
+                            <tr><td><code>type</code></td><td><code>txt</code> <code>json</code></td><td>{{ t('tracker.apiParamTypeDefault') }}</td><td>{{ t('tracker.apiParamType') }}</td></tr>
                         </tbody>
                     </table>
                     <!-- Examples -->
@@ -1516,20 +1506,8 @@
                                     </div>
                                     <!-- 状态 + 可用率 -->
                                     <div class="tl-ip-status">
-                                        <template v-if="tr.paused && !ip.paused">
-                                            <!-- 域名级暂停：显示最后可用率（黄色） -->
-                                            <span class="ip-status-dot dot-unk">⏸</span>
-                                            <span v-if="ip.ip_uptime !== null && ip.ip_uptime !== undefined"
-                                                  class="badge-up up-yellow"
-                                                  style="font-size:.72rem;">{{ ip.ip_uptime.toFixed(1) }}%</span>
-                                            <span v-else class="badge-up up-yellow" style="font-size:.72rem;">?</span>
-                                        </template>
-                                        <template v-else-if="ip.paused">
-                                            <!-- IP级暂停：显示最后可用率+多语言文字 -->
-                                            <span v-if="ip.ip_uptime !== null && ip.ip_uptime !== undefined"
-                                                  class="badge-up up-yellow"
-                                                  style="font-size:.72rem;margin-right:3px;">{{ ip.ip_uptime.toFixed(1) }}%</span>
-                                            <span class="badge-up" style="background:rgba(251,191,36,.15);color:#fbbf24;border:1px solid rgba(251,191,36,.3);font-size:.7rem;"><i class="bi bi-pause-fill"></i> {{ t('tracker.statusPaused') }}</span>
+                                        <template v-if="ip.paused">
+                                            <span class="badge-up" style="background:rgba(251,191,36,.15);color:#fbbf24;border:1px solid rgba(251,191,36,.3);font-size:.7rem;"><i class="bi bi-pause-fill"></i> 已暂停</span>
                                         </template>
                                         <template v-else>
                                             <!-- ● / ✗ 状态标 -->
@@ -2944,14 +2922,12 @@ createApp({
             }
         });
 
-        // 告警中心：IP维度，每个IP自己的末尾连续失败次数 ≥5 次触发（已暂停的不显示）
+        // 告警中心：IP维度，每个IP自己的末尾连续失败次数 ≥5 次触发
         const dashAlerts = computed(() => {
             const alerts = [];
             for (const [domain, tr] of Object.entries(trackers.value)) {
-                if (tr.paused) continue;   // 域名级暂停，跳过
                 for (const ip of (tr.ips||[])) {
-                    if (ip.removed || ip.paused) continue;   // IP级暂停，跳过
-                    if (ip.status !== 'offline') continue;
+                    if (ip.removed || ip.status !== 'offline') continue;
                     const consec = ip.consec_fail || 0;
                     if (consec >= 5) {
                         alerts.push({
@@ -3058,9 +3034,6 @@ createApp({
                         country: co.country||'', country_code: co.country_code||'',
                         isp: co.isp||'', latency: ip.latency,
                         status: ip.status||'unknown',
-                        paused: !!(tr.paused || ip.paused),
-                        domain_paused: !!tr.paused,
-                        ip_paused: !!ip.paused,
                         uptime: u!==null ? Math.round(u*10)/10 : null, upcls,
                         ip_uptime: ip.ip_uptime !== undefined ? ip.ip_uptime : null,
                         last_check: ip.last_check || null
