@@ -2611,10 +2611,12 @@ createApp({
             const uptimeFn = (data) => {
                 const p = cfg.value.tracker_stat_period || '24h';
                 const pkMap = {'24h':'uptime_24h','7d':'uptime_7d','30d':'uptime_30d'};
-                const pk = pkMap[p] || 'ip_uptime';
+                const pk = pkMap[p] || 'uptime_24h';
+                // 优先用域名级
+                if (data[pk] !== null && data[pk] !== undefined) return data[pk];
                 const activeIps = (data.ips || []).filter(ip => !ip.removed);
                 if (!activeIps.length) return null;
-                const vals = activeIps.map(ip => ip[pk] ?? ip.ip_uptime ?? null).filter(v => v !== null);
+                const vals = activeIps.map(ip => ip[pk] ?? null).filter(v => v !== null);
                 return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : null;
             };
             const uv = (v) => v === null ? -1 : v; // null 排末
@@ -2885,16 +2887,17 @@ createApp({
             document.cookie = `theme=${isDark.value?'dark':'light'};path=/;max-age=31536000`;
         };
 
-        // 根据 tracker_stat_period 选取对应历史数组计算可用率
+        // 根据 tracker_stat_period 选取域名级可用率（后端 hdb 按时间窗口计算，准确反映域名历史）
         const uptime = (tr) => {
-            // 修正：用各活跃IP的 ip_uptime 均值，而非域名级汇总history
-            // 域名级history用 any(online) 会导致任意一个IP在线就显示100%，不准确
             const p = cfg.value.tracker_stat_period || '24h';
             const pkMap = {'24h':'uptime_24h','7d':'uptime_7d','30d':'uptime_30d'};
-            const pk = pkMap[p] || 'ip_uptime';
+            const pk = pkMap[p] || 'uptime_24h';
+            // 优先用域名级（hdb域名级 = 有任意活跃IP在线就算成功，不因IP切换丢数据）
+            if (tr[pk] !== null && tr[pk] !== undefined) return tr[pk];
+            // fallback：域名级无数据时用活跃IP均值
             const activeIps = (tr.ips || []).filter(ip => !ip.removed);
             if (!activeIps.length) return null;
-            const vals = activeIps.map(ip => ip[pk] !== null && ip[pk] !== undefined ? ip[pk] : (ip.ip_uptime !== null && ip.ip_uptime !== undefined ? ip.ip_uptime : null)).filter(v => v !== null);
+            const vals = activeIps.map(ip => ip[pk] !== null && ip[pk] !== undefined ? ip[pk] : null).filter(v => v !== null);
             if (!vals.length) return null;
             return vals.reduce((a,b)=>a+b,0) / vals.length;
         };
