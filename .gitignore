@@ -4,3 +4,6 @@ config.json
 data.json
 error.log
 access.log
+
+# 忽略 old 目录（包括目录下所有文件和子目录）
+old/
