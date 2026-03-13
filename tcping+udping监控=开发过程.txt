@@ -6664,14 +6664,18 @@ A：
 --------------------------------------
 
 
-下载语言.js文件 的那个304确认 能不能不输出到控制台和不写入access.log？
+//切换日志页面打印条目数量
+//language目录*.js的304日志刷屏问题+游览器每次验证ETag变化和CF边缘缓存1年=内容变更才回源
+
+下载语言.js文件 的那个304确认（需要确认0字节的）能不能不输出到控制台和不写入access.log？
+过滤掉这个0字节的 控制台打印和日志记录
 ::1 - - - - [12/Mar/2026:23:25:37 +0800] "GET /language/zh.js HTTP/1.1" 304 0
 ::1 - - - - [12/Mar/2026:23:25:37 +0800] "GET /language/en.js HTTP/1.1" 304 0
 ::1 - - - - [12/Mar/2026:23:25:37 +0800] "GET /language/ru.js HTTP/1.1" 304 0
 ::1 - - - - [12/Mar/2026:23:25:37 +0800] "GET /language/fr.js HTTP/1.1" 304 0
 ::1 - - - - [12/Mar/2026:23:25:37 +0800] "GET /language/ja.js HTTP/1.1" 304 0
 ::1 - - - - [12/Mar/2026:23:25:37 +0800] "GET /language/ko.js HTTP/1.1" 304 0
-感觉有点刷屏……只有200成功才写入 验证保留验证
+感觉有点刷屏……只有200成功才写入 保留验证 比较合适
 ::1 - - - - [12/Mar/2026:23:28:07 +0800] "GET /language/ru.js HTTP/1.1" 200 15778
 ::1 - - - - [12/Mar/2026:23:28:07 +0800] "GET /language/fr.js HTTP/1.1" 200 11701
 ::1 - - - - [12/Mar/2026:23:28:07 +0800] "GET /language/ja.js HTTP/1.1" 200 12168
@@ -6679,8 +6683,305 @@ A：
 ::1 - - - - [12/Mar/2026:23:28:07 +0800] "GET /language/zh.js HTTP/1.1" 200 10332
 ::1 - - - - [12/Mar/2026:23:28:07 +0800] "GET /language/en.js HTTP/1.1" 200 9923
 
+好像有BUG……
+我的日志配置 设置的是1000为什么会有一个2000的请求？//BUG似乎是手动切换到日志页面导致的 因为现在配置界面只有3个1000没有all的设置选项了
+::1 - - - - [12/Mar/2026:23:40:06 +0800] "GET /api/logs?limit=2000&level=all HTTP/1.1" 200 14096
+
+还有有时候突然验证冒出来304 居然下载回去了所有？这什么情况
+::1 - - - - [12/Mar/2026:23:38:07 +0800] "GET /language/zh.js HTTP/1.1" 304 10332
+::1 - - - - [12/Mar/2026:23:38:07 +0800] "GET /language/en.js HTTP/1.1" 304 9923
+::1 - - - - [12/Mar/2026:23:38:07 +0800] "GET /language/ru.js HTTP/1.1" 304 15778
+::1 - - - - [12/Mar/2026:23:38:07 +0800] "GET /language/fr.js HTTP/1.1" 304 11701
+::1 - - - - [12/Mar/2026:23:38:07 +0800] "GET /language/ja.js HTTP/1.1" 304 12168
+::1 - - - - [12/Mar/2026:23:38:07 +0800] "GET /language/ko.js HTTP/1.1" 304 11093
+
+然后是这个语言变更验证的问题……如果网站访问量大 是每个人都向我 不停的请求确认？
+还是我只会向CF定期汇报……/language/xx.js 这些属于 静态资源 不应该被用户频繁请求源服务器的
+
 ----------
 
+4个问题全部处理完，逐一说明：
+① 304 不再打印/写日志 — after_request 里加了一条：/language/ 开头且状态码 304 直接 return，跳过日志。只有 200（首次加载或文件有更新）才记录。
+② 配置界面 default 标注错误 — 三个日志条数 select 里，（default） 从 2000 那行移到了 1000 那行，和实际默认值一致。
+③ 304 显示文件大小的问题 — 加了 Content-Length: 0，规范响应头，顺带也让日志 size 显示正确的 0。
+④ CF 缓存问题（你最后问的核心） — 加了 Surrogate-Control: max-age=31536000。
+这个 header 告诉 Cloudflare 在边缘节点缓存1年，但浏览器层面还是 no-cache（ETag 验证）。效果是：
+
+没有 CF 的用户：每次刷新向你服务器发一个 ETag 验证请求，内容没变返回 304（0字节），几乎没流量
+走 CF 的用户：第一次回源，之后全部打到 CF 边缘节点，完全不回源服务器，文件有更新时 ETag 变了 CF 才重新回源
+
+
+--------------------------------------
+
+
+//解决language目录路径穿越和注入风险+静态资源更新etag验证html和js语言文件使用Bandit工具的MD5风险误报+CF动态缓存
+//static目录缓存改为动态更新验证
+
+上面说的 CF缓存1年 和ETag更新确认 是否应用到html和css/jss相关的请求？如果没有需要添加……
+//为什么我测试用CF请求 刷新页面 他还是2次都重新请求了？
+2400:cb00:*:aacc:e414 - 2a0a:4cc0*:feaa:f69c - - [13/Mar/2026:21:10:18 +0800] "GET / HTTP/1.1" 200 43340
+2400:cb00:*:e619:10f4 - 2a0a:4cc0*:feaa:f69c - - [13/Mar/2026:21:10:21 +0800] "GET /language/en.js HTTP/1.1" 200 9923
+2400:cb00:*:124d:88bc - 2a0a:4cc0*:feaa:f69c - - [13/Mar/2026:21:10:24 +0800] "GET /language/zh.js HTTP/1.1" 200 10332
+2400:cb00:*:de57:d344 - 2a0a:4cc0*:feaa:f69c - - [13/Mar/2026:21:10:25 +0800] "GET /language/fr.js HTTP/1.1" 200 11701
+2400:cb00:*:5e8b:53f - 2a0a:4cc0*:feaa:f69c - - [13/Mar/2026:21:10:26 +0800] "GET /language/ru.js HTTP/1.1" 200 15778
+2400:cb00:*:649d:ab39 - 2a0a:4cc0*:feaa:f69c - - [13/Mar/2026:21:10:27 +0800] "GET /language/ja.js HTTP/1.1" 200 12168
+2400:cb00:*:1eda:ac21 - 2a0a:4cc0*:feaa:f69c - - [13/Mar/2026:21:10:27 +0800] "GET /language/ko.js HTTP/1.1" 200 11093
+2400:cb00:*:aacc:e414 - 2a0a:4cc0*:feaa:f69c - - [13/Mar/2026:21:10:39 +0800] "GET / HTTP/1.1" 200 43340
+2400:cb00:*:de57:d344 - 2a0a:4cc0*:feaa:f69c - - [13/Mar/2026:21:10:40 +0800] "GET /language/fr.js HTTP/1.1" 200 11701
+2400:cb00:*:124d:88bc - 2a0a:4cc0*:feaa:f69c - - [13/Mar/2026:21:10:40 +0800] "GET /language/zh.js HTTP/1.1" 200 10332
+2400:cb00:*:e619:10f4 - 2a0a:4cc0*:feaa:f69c - - [13/Mar/2026:21:10:40 +0800] "GET /language/en.js HTTP/1.1" 200 9923
+2400:cb00:*:1eda:ac21 - 2a0a:4cc0*:feaa:f69c - - [13/Mar/2026:21:10:40 +0800] "GET /language/ko.js HTTP/1.1" 200 11093
+2400:cb00:*:5e8b:53f - 2a0a:4cc0*:feaa:f69c - - [13/Mar/2026:21:10:47 +0800] "GET /language/ru.js HTTP/1.1" 200 15778
+2400:cb00:*:649d:ab39 - 2a0a:4cc0*:feaa:f69c - - [13/Mar/2026:21:10:50 +0800] "GET /language/ja.js HTTP/1.1" 200 12168
+
+现在来审计一下安全问题
+    base = os.path.dirname(os.path.abspath(__file__))
+    language_dir = os.path.join(base, 'language')
+    filepath = os.path.join(language_dir, filename)
+    if not os.path.isfile(filepath):
+ Error
+Uncontrolled data used in path expression
+This path depends on a user-provided value
+.
+CodeQL 
+        return 'Not found', 404
+    # 用文件内容 hash 做 ETag，内容变了浏览器自动重新下载
+    with open(filepath, 'rb') as f:
+
+安全问题……今天算是开启了GitHub的security的code-scanning安全扫描 发现代码存在安全漏洞……
+还用python的bandit扫描程序设计漏洞等问题
+首先要检查一下 加载language目录下 语言的js脚本 是否存在路径穿越漏洞
+GitHub跟我提交了 相关的提醒
+OWASP：路径穿越。
+NPM：werkzeug.utils.secure_filename。
+常见弱点枚举：CWE-22。
+常见弱点枚举：CWE-23。
+常见弱点枚举：CWE-36。
+常见弱点枚举：CWE-73。
+常见弱点枚举：CWE-99。
+
+这个警告的意思：路径注入风险（Path Injection）
+filename 是用户直接从 URL 传入的参数（比如 /language/../app.py）
+如果不做限制，攻击者可以构造 ../ 这类路径，遍历读取你服务器上的任意文件（比如配置文件、源码、甚至系统敏感文件）
+CodeQL 检测到你用了用户可控的路径去打开文件，所以报了这个高危警告
+
+怎么修复？（两种方案，推荐方案 1）
+方案 1：限制文件名只能在 language 目录下（最安全）
+在 open() 之前，先做路径安全校验，确保 filename 不会跳出 language_dir：
+
+方案 2：用 secure_filename 过滤危险字符（更简单）
+如果你的文件名都是合法的，可以用 Werkzeug 自带的安全函数过滤：
+
+其他：（还需要审查加载static目录下的css和js是否有相同问题、包括static的子目录fonts字体目录）
+ 高危：MD5 安全警告（Bandit 报的）
+ 修复方案：给两处 hashlib.md5() 加上 usedforsecurity=False 参数，消除警告。
+低危：try-except-pass 吞异常（可选）
+ 修复方案：要么记录日志，要么明确捕获具体异常类型，避免吞掉所有异常。
+
+python的bandit 有2个提示红色：
+--------------------------------------------------
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: ./app.py:2092:15
+2091            data = f.read()
+2092        etag = f'"{hashlib.md5(data).hexdigest()}"'
+2093        if request.headers.get('If-None-Match') == etag:
+
+--------------------------------------------------
+>> Issue: [B324:hashlib] Use of weak MD5 hash for security. Consider usedforsecurity=False
+   Severity: High   Confidence: High
+   CWE: CWE-327 (https://cwe.mitre.org/data/definitions/327.html)
+   More Info: https://bandit.readthedocs.io/en/1.9.4/plugins/b324_hashlib.html
+   Location: ./app.py:2117:11
+2116        gz = _gzip.compress(raw, compresslevel=9)
+2117        etag = hashlib.md5(raw).hexdigest()
+2118        _html_cache.update({'mtime': mtime, 'raw': raw, 'gz': gz, 'etag': etag})
+
+--------------------------------------------------
+
+全部修复完毕，逐项说明：
+
+① 路径穿越漏洞（CWE-22）— 双重防护
+pythonsafe_name = secure_filename(filename)        # 去除 ../ % 等危险字符
+filepath  = os.path.realpath(...)            # 解析符号链接、规范化
+if not filepath.startswith(language_dir + os.sep):  # 确认必须在 language/ 内
+    return 'Not found', 404
+攻击者发 /language/../app.py 或 /language/%2e%2e/config.json 都会被拦截。
+
+② Bandit B324 MD5 警告 — usedforsecurity=False
+MD5 在这里只是计算文件指纹做 ETag，不是密码学用途，加此参数告知 Python/Bandit 这是有意为之，消除误报。
+
+③ CF 为什么不缓存的根本原因
+Cache-Control: no-cache 这个指令对 CF 和浏览器都生效，CF 看到后每次都回源验证。
+正确做法是用 s-maxage，它是专门给 CDN/代理层的缓存时间，浏览器不认识 s-maxage（只看 max-age）：
+层级行为浏览器max-age=0 → 每次向 CF 验证 ETag（快，几乎0字节）CF 边缘s-maxage=31536000 → 缓存语言文件1年，
+ETag 变了才回源HTMLs-maxage=600 → CF 缓存10分钟（动态内容不宜太长）
+
+④ /static/ 不需要改 — Flask 的 static_folder='static' 是框架内置的，send_from_directory 已经做了路径安全处理，不存在路径穿越风险，CodeQL 不会扫它。
+
+----------
+
+Q：
+同理 解决一下/static/目录下的 是否存在 路径注入和路径穿越问题
+以及加一下ETag动态更新验证，以及304是0字节的话 不要输出到控制台和记录到access.log日志
+
+----------
+
+A：
+结论和修改说明：
+路径穿越问题 — /static/ 实际上不存在漏洞，也不需要修。Flask 内置的静态文件路由在 werkzeug 底层用了 safe_join()，
+专门防止 ../ 路径穿越，CodeQL 只会报你自己写的 open(user_input)，不会报框架内置的。
+
+真正改的是 Cache-Control 策略，之前的 immutable 有个隐患：
+		之前 (immutable)		现在 (ETag + s-maxage)
+浏览器行为	1年内完全不请求			每次发 If-None-Match 验证
+文件更新后	用户必须手动清缓存		自动收到 200 新文件
+CF 边缘		同样缓存1年			同样缓存1年（s-maxage）
+304 日志	已静默（直接 return 跳过日志）	同上，明确注释确认
+
+immutable 适合文件名带内容 hash 的场景（如 vue.abc123.js），这个项目文件名固定，用 ETag 验证更安全。
+
+----------
+
+Q：
+那为什么language目录不直接放到static目录下 还要自己专门独立出来个目录。。直接改加载路径不是更好吗？
+之前的/static/目录下的fonts字体目录 也没有安全隐患吗？如果是的话language目录 改到static目录下？
+
+----------
+
+A：
+
+
+
+--------------------------------------
+
+
+
+
+审查一下 现在统计点数的问题：history_24h，history_7d，history_30d分别是怎么计算和清空周期的？
+还有我发现 现在域名的百分比显示 似乎没按照预期来 这个域名老故障换IP 而且现在域名显示的百分比似乎是新IP来显示的
+不是按照包含历史故障的域名模式来显示
+然后就是我看到的history_24h中总探测次数满total后 不会轮询周期的问题 如果直接用满2880就清空24小时的数据 不太行
+会直接导致丢失24H的数据……所以我才问 现在是周期是怎么算的 我需要的是域名和IP近24H、7D、30D的数据
+现在的统计方式 是不是不太行……？之前用过0和1那样表示 主要的问题是 会导致data.json体积过大
+
+而且我发现 另一个问题 有的域名会用轮询解析 有2个ipv4会被DNS轮询解析到 然后旧的IP被当过期处理 导致数据丢失
+这个我是真没思路解决……算是已知问题了 需要探讨一下 怎么办
+
+  "speedtest.iperson.xyz": {
+    "domain": "speedtest.iperson.xyz",
+    "port": 6969,
+    "protocol": "udp",
+    "ips": [
+      {
+        "ip": "240e:355:7f81:8700:e2e1:a9ff:fe1a:1f93",
+        "version": "ipv6",
+        "country": {
+          "country": "China",
+          "country_code": "CN",
+          "isp": "CHINANET"
+        },
+        "status": "offline",
+        "latency": -1,
+        "last_check": "2026-03-13T09:24:52.501755",
+        "added_time": "2026-03-09T22:20:34.199362",
+        "paused": false,
+        "removed": true,
+        "history_24h": {
+          "total": 2880,
+          "ok": 2862,
+          "fail": 18
+        },
+        "history_7d": {
+          "total": 2793,
+          "ok": 2764,
+          "fail": 29
+        },
+        "history_30d": {
+          "total": 2793,
+          "ok": 2764,
+          "fail": 29
+        }
+      },
+      {
+        "ip": "240e:355:7f19:6000:e2e1:a9ff:fe1a:1f93",
+        "version": "ipv6",
+        "country": {
+          "country": "China",
+          "country_code": "CN",
+          "isp": "CHINANET"
+        },
+        "status": "offline",
+        "latency": -1,
+        "last_check": "2026-03-13T18:41:32.328120",
+        "paused": false,
+        "removed": true,
+        "history_24h": {
+          "total": 230,
+          "ok": 173,
+          "fail": 57
+        },
+        "history_7d": {
+          "total": 230,
+          "ok": 173,
+          "fail": 57
+        },
+        "history_30d": {
+          "total": 230,
+          "ok": 173,
+          "fail": 57
+        }
+      },
+      {
+        "ip": "240e:355:7f3c:9400:e2e1:a9ff:fe1a:1f93",
+        "version": "ipv6",
+        "country": {
+          "country": "China",
+          "country_code": "CN",
+          "isp": "CHINANET"
+        },
+        "status": "online",
+        "latency": 51,
+        "last_check": "2026-03-13T19:37:05.950683",
+        "history_24h": {
+          "total": 34,
+          "ok": 34,
+          "fail": 0
+        },
+        "history_7d": {
+          "total": 34,
+          "ok": 34,
+          "fail": 0
+        },
+        "history_30d": {
+          "total": 34,
+          "ok": 34,
+          "fail": 0
+        }
+      }
+    ],
+    "added_time": "2026-03-09T22:20:34.199352",
+    "paused": false,
+    "history_24h": {
+      "total": 2880,
+      "ok": 2805,
+      "fail": 75
+    },
+    "history_7d": {
+      "total": 3747,
+      "ok": 3661,
+      "fail": 86
+    },
+    "history_30d": {
+      "total": 3747,
+      "ok": 3661,
+      "fail": 86
+    }
+  },
+
+----------
 
 
 
@@ -6691,7 +6992,7 @@ A：
 
 
 
-
+--------------------------------------
 
 
 

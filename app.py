@@ -2015,10 +2015,19 @@ def security_headers(response):
     path   = request.path
     method = request.method
 
-    # ── 静态资源长缓存（JS/CSS/字体）：1年，CF 会缓存，极少回源 ──
+    # ── 静态资源（/static/）缓存策略 ──
+    # 路径安全：Flask send_from_directory 内部用 werkzeug.security.safe_join，
+    # 已防止路径穿越（CWE-22），无需额外处理。
+    # ETag：Flask/Werkzeug 对静态文件自动生成 ETag（基于 mtime+size），浏览器可验证。
+    # Cache-Control：
+    #   max-age=0 + must-revalidate → 浏览器每次向 CF 验证 ETag（304=0字节，极快）
+    #   s-maxage=31536000           → CF 边缘节点缓存1年，ETag变则CF重新回源
+    # 304 静默：直接 return 跳过日志代码，304 不会输出到控制台或 access.log。
     if path.startswith('/static/'):
-        response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
-        return response
+        if response.status_code != 304:
+            # 200：设置 CF 缓存策略（304 时不覆盖，保留 Flask 原始头）
+            response.headers['Cache-Control'] = 'public, max-age=0, must-revalidate, s-maxage=31536000'
+        return response  # 304/200 均静默（跳过日志）
 
     # ── JSON API gzip 压缩（浏览器支持时，响应 >1KB 才压缩）──
     # 文件下载（Content-Disposition）跳过，避免对已压缩内容二次压缩
@@ -2040,6 +2049,10 @@ def security_headers(response):
 
     # 静默路径（前端内部轮询/导航）：不打印日志
     if path.split('?')[0].rstrip('/') in _NOISY_PATHS:
+        return response
+
+    # /language/*.js 的 304（未修改）静默：只有 200（首次/更新）才记录
+    if path.startswith('/language/') and response.status_code == 304:
         return response
 
     # ── Nginx 风格访问日志 ──
@@ -2080,10 +2093,34 @@ def find_html():
 
 @app.route('/language/<path:filename>')
 def serve_locale(filename):
+    import hashlib
+    from werkzeug.utils import secure_filename
     base = os.path.dirname(os.path.abspath(__file__))
-    language_dir = os.path.join(base, 'language')
-    resp = send_from_directory(language_dir, filename)
-    resp.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+    language_dir = os.path.realpath(os.path.join(base, 'language'))
+    # secure_filename 去除 ../ 等危险字符，再用 realpath 规范化后确认在 language_dir 内
+    safe_name = secure_filename(filename)
+    if not safe_name:
+        return 'Not found', 404
+    filepath = os.path.realpath(os.path.join(language_dir, safe_name))
+    # 路径必须在 language_dir 内，否则拒绝（防止路径穿越）
+    if not filepath.startswith(language_dir + os.sep) and filepath != language_dir:
+        return 'Not found', 404
+    if not os.path.isfile(filepath):
+        return 'Not found', 404
+    # 用文件内容 hash 做 ETag，内容变了浏览器自动重新下载
+    with open(filepath, 'rb') as f:
+        data = f.read()
+    etag = f'"{hashlib.md5(data, usedforsecurity=False).hexdigest()}"'
+    if request.headers.get('If-None-Match') == etag:
+        resp = make_response('', 304)
+        resp.headers['ETag'] = etag
+        resp.headers['Cache-Control'] = 'no-cache'
+        resp.headers['Content-Length'] = '0'
+        return resp
+    resp = make_response(data, 200)
+    resp.headers['Content-Type'] = 'application/javascript; charset=utf-8'
+    resp.headers['ETag'] = etag
+    resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate, s-maxage=31536000'
     return resp
 
 import gzip as _gzip
@@ -2099,7 +2136,7 @@ def _load_html(path: str) -> dict:
     with open(path, 'rb') as f:
         raw = f.read()
     gz = _gzip.compress(raw, compresslevel=9)
-    etag = hashlib.md5(raw).hexdigest()
+    etag = hashlib.md5(raw, usedforsecurity=False).hexdigest()
     _html_cache.update({'mtime': mtime, 'raw': raw, 'gz': gz, 'etag': etag})
     return _html_cache
 
@@ -2126,7 +2163,9 @@ def _serve_html():
     resp = make_response(body, 200)
     resp.headers['Content-Type']  = 'text/html; charset=utf-8'
     resp.headers['ETag']          = etag
-    resp.headers['Cache-Control'] = 'no-cache'
+    # 浏览器每次验证（no-store不合适，用max-age=0+must-revalidate）
+    # CF 边缘缓存10分钟（HTML是动态内容，不宜太长，但可省回源带宽）
+    resp.headers['Cache-Control'] = 'public, max-age=0, must-revalidate, s-maxage=600'
     resp.headers['Vary']          = 'Accept-Encoding'
     if accept_gz:
         resp.headers['Content-Encoding'] = 'gzip'
