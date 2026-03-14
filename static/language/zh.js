@@ -146,6 +146,7 @@ window.__i18n_zh = {
     consoleInfo: '基础 - 仅访问请求日志（推荐）',
     consoleError: '错误 - 基础+所有失败/超时/错误（磁盘仅存错误）',
     consoleDebug: '调试 - 全部（含每IP成功结果，不含轮询刷新）',
+    dashboardStatPeriod: '仪盘表统计周期',
     trackerStatPeriod: '监控列表统计周期',
     trackerStatPeriodDesc: '监控列表中可用率%的计算窗口',
     rankStatPeriod: '排行榜统计周期',

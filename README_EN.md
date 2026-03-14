@@ -16,11 +16,14 @@ A full-featured BitTorrent Tracker monitoring tool with TCP/UDP ping, multi-IP m
 - ✅ Direct `IP:port` format support
 - ✅ Configurable concurrent check threads (default 120, recommended 30–200)
 - ✅ Auto-retry on failure (polling mode: 5s → 15s → 30s → 60s increasing intervals)
+- ✅ Staggered batched dispatch: checks are submitted in batches with configurable delays to prevent burst load on local network or proxy (separate batch size and delay settings for proxy vs. direct modes)
 
 ### Uptime Statistics
-- ✅ 24-hour / 7-day / 30-day uptime rankings
+- ✅ 24-hour / 7-day / 30-day uptime calculated against real time windows (not fixed round counts)
 - ✅ Separate stat period config for monitor list and ranking
-- ✅ Persistent uptime history cache (survives restarts)
+- ✅ History persisted to `history.json` (timestamp format, survives restarts, auto-GC clears records older than 30 days)
+- ✅ Domain-level uptime = total successes ÷ total checks across **all historical IPs** under that domain (including IPs removed by DNS rotation) — full historical accuracy regardless of IP changes
+- ✅ Per-IP uptime tracked independently for each IP
 - ✅ Health color coding:
   - 🟢 Green: uptime >80%, or all IPs online
   - 🟡 Yellow: uptime 50–80%, or mixed online/offline (takes priority display)
@@ -108,6 +111,39 @@ curl "http://host/api/tracker?day=30d&uptime=90&net=tcp&ip=ipv4"
 curl http://host/tracker.txt
 ```
 
+### Single Host Query API (New)
+
+A lightweight public query endpoint — no login required — for checking the current status, uptime, latency, and more for a single domain or IP.
+
+- ✅ Query by domain name or IP address
+- ✅ Response formats: plain text (default) or JSON
+- ✅ Configurable return fields: `status` / `uptime` / `delay` / `location` / `checked`
+- ✅ Rate limit: 66 requests per minute per IP
+
+| Parameter | Values | Default | Description |
+|-----------|--------|---------|-------------|
+| `host` | domain or IP | required | Query target |
+| `list` | `status,uptime,delay,location,checked` | `status,uptime,delay,checked` | Fields to return (comma-separated) |
+| `type` | `txt` `json` | `txt` when only `host` given; `json` when `list` or `type` given | Response format |
+
+```bash
+# Simplest query (plain text)
+curl "http://host/api/query?host=bt.rer.lol"
+# → bt.rer.lol  Online  100.0%  1ms  2026-03-11T21:18:41.812562
+
+# Query an IPv6 address
+curl "http://host/api/query?host=2a06:1280:f115::2"
+# → 2a06:1280:f115::2  Online  100.0%  310ms  2026-03-11T21:20:17.505961
+
+# Specify fields + text format
+curl "http://host/api/query?host=bt.rer.lol&list=status,uptime,delay,location,checked&type=txt"
+# → bt.rer.lol  Online  100.0%  0ms  China · China Unicom Network  2026-03-11T20:46:18.974702
+
+# JSON format
+curl "http://host/api/query?host=bt.rer.lol&type=json"
+# → {"host":"bt.rer.lol","status":"Online","uptime":"100.0%","delay":"1ms","checked":"..."}
+```
+
 ### Network Health Detection
 - ✅ Multi-target probes (8.8.8.8 / 1.1.1.1 / 114.114.114.114 :53) — any reachable = network OK
 - ✅ Dual safeguard: probe status + per-round failure rate (≥90% failures = local network issue)
@@ -133,8 +169,9 @@ curl http://host/tracker.txt
   - `admin`: full access including config, user management, log clearing; no retry rate limit
   - `operator`: add/delete Trackers, retry (500ms cooldown)
   - `viewer`: read-only, retry (1s cooldown)
+- ✅ Password storage upgraded to PBKDF2-HMAC-SHA256 with random salt (200,000 rounds); backward-compatible with legacy SHA256 format (auto-migrated on next login)
 - ✅ Config auto-refreshes on login — no manual F5 needed
-- ✅ Login failure rate limiting to prevent brute-force attacks
+- ✅ Login failure rate limiting (10 failures → 10-minute lockout) to prevent brute-force attacks
 - ✅ Signed Session Cookie (`session_secret.key`), persists across restarts
 - ✅ Unauthenticated users only receive the minimal public config fields — no operational details exposed
 - ✅ Admin audit log: pause/resume operations record operator username + masked IP (Web shows `1.*.*.4`, console retains full IP)
@@ -144,8 +181,10 @@ curl http://host/tracker.txt
 - ✅ Local static assets (`static/` directory) — fully offline deployment, no CDN required
 - ✅ All config persisted to `config.json`, loaded on restart
 - ✅ Log levels: `none` / `info` / `error` / `debug`
+- ✅ Per-level log limits: Info / Success / Error each have independent caps — trimming one level does not affect others
 - ✅ Config change logs only show actually-changed fields (with human-readable labels and units)
-- ✅ Optional disk logging to `error.log`, filterable by level
+- ✅ Optional disk logging: `error.log` (error entries) + `access.log` (nginx-format access log)
+- ✅ nginx reverse proxy friendly: reads `X-Real-IP` / `X-Forwarded-For` for real client IP
 
 ---
 
@@ -175,8 +214,10 @@ Network Monitor/
 │       ├── bootstrap-icons.woff2
 │       └── inter-*.woff2
 ├── config.json           # auto-generated, config persistence
-├── data.json             # auto-generated, monitoring data
+├── data.json             # auto-generated, current state + summaries
+├── history.json          # auto-generated, timestamp-based uptime history (primary data source)
 ├── error.log             # auto-generated (when disk logging is enabled)
+├── access.log            # auto-generated (when disk logging is enabled, nginx format)
 └── session_secret.key    # auto-generated, ⚠️ DO NOT commit to public repos
 ```
 
@@ -186,9 +227,9 @@ Network Monitor/
 python app.py
 ```
 
-Open: `http://localhost:443`
+Access at: `http://localhost:443`
 
-### 4. Create a start.bat shortcut (Windows)
+### 4. Windows quick-launch batch file
 
 ```batch
 @echo off
@@ -203,7 +244,7 @@ pause
 
 ### `session_secret.key`
 
-This file is the signing key for Flask Session Cookies. **Never commit it to a public repository.** If leaked, anyone can forge a Cookie and gain admin access without a password.
+This file signs Flask Session Cookies. **Never commit it to a public repository.** If leaked, anyone can forge cookies and gain admin access.
 
 **Add to `.gitignore`:**
 
@@ -211,13 +252,15 @@ This file is the signing key for Flask Session Cookies. **Never commit it to a p
 session_secret.key
 config.json
 data.json
+history.json
 error.log
+access.log
 ```
 
 **How to reset the key:**
 
 ```bash
-# Option 1: delete the file — a new one is auto-generated on next start
+# Option 1: delete the file, a new one is generated on next startup
 del session_secret.key        # Windows
 rm session_secret.key         # Linux/macOS
 
@@ -251,17 +294,23 @@ All settings are changed through the web config page and **automatically saved**
 | `retry_mode` | `polling` | Retry mode: `polling` (5→15→30→60s) or fixed seconds |
 | `retry_interval` | `5` | Fixed retry interval (when `retry_mode` ≠ `polling`) |
 | `monitor_workers` | `120` | Concurrent check threads (recommended 30–200) |
+| `stagger_batch_proxy` | `5` | Batch size per dispatch in proxy mode (burst control) |
+| `stagger_delay_proxy` | `150` | Delay between batches in proxy mode (ms) |
+| `stagger_batch_direct` | `5` | Batch size per dispatch in direct mode |
+| `stagger_delay_direct` | `100` | Delay between batches in direct mode (ms) |
 | `dns_mode` | `system` | DNS mode: `system` / `dnspython` / `custom` |
 | `dns_custom` | empty | Custom DNS server(s), comma-separated |
 | `tracker_stat_period` | `24h` | Uptime window for monitor list: `24h` / `7d` / `30d` |
 | `rank_stat_period` | `24h` | Default tab when opening ranking page (can be switched manually) |
-| `cache_history` | `true` | Persist uptime history across restarts |
+| `cache_history` | `true` | Persist uptime history to `history.json` across restarts |
 | `show_removed_ips` | `true` | Show removed historical IPs (translucent gray) |
 | `default_layout_width` | `1700` | Default page zoom width (px); Cookie takes priority |
 | `export_suffix` | `/announce` | Path suffix appended when exporting tracker lists |
 | `log_level` | `info` | Log verbosity: `none` / `info` / `error` / `debug` |
-| `log_to_disk` | `false` | Write logs to `error.log` |
-| `max_log_entries` | `2000` | Max log entries before auto-trimming |
+| `log_to_disk` | `false` | Write logs to `error.log` + `access.log` |
+| `max_log_info` | `1000` | Max Info-level log entries |
+| `max_log_success` | `1000` | Max Success-level log entries |
+| `max_log_error` | `1000` | Max Error-level log entries |
 | `page_refresh_ms` | `30000` | Frontend data refresh interval (ms), 0 = disabled |
 | `tab_switch_refresh` | `true` | Auto-refresh data when switching to dashboard/monitor tab |
 | `http_proxy` | empty | HTTP/TCP proxy address |
@@ -377,6 +426,12 @@ Paused domains are excluded from all export results. Check whether the target do
 **12. `/trackers` or `/tracker.txt` returns a redirect?**
 The current version serves content directly — no `-L` flag needed. If you still see a redirect, make sure you are running the latest `app.py`.
 
+**13. Is domain uptime accurate after a restart?**
+Yes. History is stored as timestamped records in `history.json` and recalculated against real time windows on each request. 24H/7D/30D windows are all preserved across restarts. IPs removed by DNS rotation also retain their history and are included in domain-level uptime calculations — historical failures are never lost due to IP changes.
+
+**14. Will `history.json` grow indefinitely?**
+No. The app runs an automatic GC every hour, removing records older than 30 days. When a domain is manually deleted, all its history is immediately purged as well.
+
 ---
 
 ## 🛠️ Tech Stack
@@ -388,9 +443,10 @@ The current version serves content directly — no `-L` flag needed. If you stil
 | DNS | dnspython (IPv4+IPv6 dual-stack) |
 | IP Geolocation | ip-api.com free API (local cache, background repair on startup) |
 | Proxy | Manual SOCKS5 UDP Associate (RFC 1928), fixed source port + tid multiplexing |
-| Persistence | JSON files (`config.json` + `data.json`) |
-| Auth | Flask Session (signed Cookie, `session_secret.key` persisted locally) |
+| Persistence | `config.json` (settings) + `data.json` (current state summaries) + `history.json` (timestamp uptime history) |
+| Auth | Flask Session (signed Cookie, PBKDF2+salt password storage, `session_secret.key` persisted locally) |
 | Compression | gzip response + ETag negotiation cache (304 Not Modified) |
+| Access Logging | nginx-format `access.log` (when disk logging enabled) + leveled console output |
 
 ---
 

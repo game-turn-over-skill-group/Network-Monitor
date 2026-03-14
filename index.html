@@ -1046,7 +1046,7 @@
                 <div class="col-xl-4 col-lg-5 mb-3">
                     <div class="card h-100">
                         <div class="card-header d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-trophy me-1" style="color:var(--warn);"></i>{{ t('dash.rankTitle') }}</span>
+                            <span><i class="bi bi-trophy me-1" style="color:var(--warn);"></i>{{ t('dash.rankTitle') }} <span style="font-size:.72rem;opacity:.6;font-weight:400;margin-left:3px;">[{{ cfg.dashboard_stat_period||'24h' }}]</span></span>
                             <div class="d-flex align-items-center gap-2">
                                 <div class="tab-pill">
                                     <button :class="{active:dashRankMode==='worst'}" @click="dashRankMode='worst'">{{ t('dash.worst') }}</button>
@@ -1907,6 +1907,15 @@
                 <div class="card-body">
                     <div class="row g-3">
                         <div class="col-md-4">
+                            <label class="form-label">{{ t('config.dashboardStatPeriod') }}</label>
+                            <select class="form-select" v-model="cfg.dashboard_stat_period" @change="saveCfg">
+                                <option value="24h">{{ t('ranking.24h') }}</option>
+                                <option value="7d">{{ t('ranking.7d') }}</option>
+                                <option value="30d">{{ t('ranking.30d') }}</option>
+                            </select>
+                            <div class="form-text">{{ t('config.dashboardStatPeriodDesc') }}</div>
+                        </div>
+                        <div class="col-md-4">
                             <label class="form-label">{{ t('config.trackerStatPeriod') }}</label>
                             <select class="form-select" v-model="cfg.tracker_stat_period" @change="saveCfg">
                                 <option value="24h">{{ t('ranking.24h') }}</option>
@@ -2303,7 +2312,7 @@ createApp({
         const logs = ref([]);
         const logLvl = ref('');
         const logSearch = ref('');
-        const cfg = ref({log_to_disk:false,check_interval:30,timeout:5,retry_mode:'polling',retry_interval:5,console_log_level:'info',http_proxy:'',udp_proxy:'',proxy_enabled:false,dns_mode:'system',dns_custom:'8.8.8.8',max_log_entries:1000,max_log_info:1000,max_log_success:1000,max_log_error:1000,page_refresh_ms:30000,tracker_stat_period:'24h',rank_stat_period:'24h',cache_history:true,tab_switch_refresh:true,monitor_workers:120,stagger_batch_proxy:5,stagger_batch_direct:5,stagger_delay_proxy:150,stagger_delay_direct:100,export_suffix:'/announce',show_removed_ips:true,default_layout_width:'1700'});
+        const cfg = ref({log_to_disk:false,check_interval:30,timeout:5,retry_mode:'polling',retry_interval:5,console_log_level:'info',http_proxy:'',udp_proxy:'',proxy_enabled:false,dns_mode:'system',dns_custom:'8.8.8.8',max_log_entries:1000,max_log_info:1000,max_log_success:1000,max_log_error:1000,page_refresh_ms:30000,dashboard_stat_period:'24h',tracker_stat_period:'24h',cache_history:true,tab_switch_refresh:true,monitor_workers:120,stagger_batch_proxy:5,stagger_batch_direct:5,stagger_delay_proxy:150,stagger_delay_direct:100,export_suffix:'/announce',show_removed_ips:true,default_layout_width:'1700'});
         // 仪表盘 rank 切换 / 快速搜索
         const dashRankMode = ref('worst'); // 'worst' | 'best'
         const qsSearch = ref('');
@@ -2708,7 +2717,7 @@ createApp({
                     data.console_log_level = data.log_level;
                 }
                 cfg.value = {...cfg.value, ...data}; 
-                rankPeriod.value = cfg.value.rank_stat_period || '24h';
+                rankPeriod.value = cfg.value.dashboard_stat_period || '24h';
                 // 若 cookie 里没有 layoutWidth 覆盖，则应用配置中的默认视野
                 const hasCookieLW = document.cookie.split(';').some(c => c.trim().startsWith('layoutWidth='));
                 if (!hasCookieLW && cfg.value.default_layout_width) {
@@ -2856,7 +2865,7 @@ createApp({
                     max_log_entries:cfg.value.max_log_entries,max_log_info:cfg.value.max_log_info,max_log_success:cfg.value.max_log_success,max_log_error:cfg.value.max_log_error,
                     page_refresh_ms:cfg.value.page_refresh_ms,
                     tracker_stat_period:cfg.value.tracker_stat_period,
-                    rank_stat_period:cfg.value.rank_stat_period,
+                    dashboard_stat_period:cfg.value.dashboard_stat_period,
                     cache_history:cfg.value.cache_history,
                     tab_switch_refresh:cfg.value.tab_switch_refresh,
                     monitor_workers:cfg.value.monitor_workers||120,
@@ -2887,12 +2896,13 @@ createApp({
             document.cookie = `theme=${isDark.value?'dark':'light'};path=/;max-age=31536000`;
         };
 
-        // 根据 tracker_stat_period 选取域名级可用率（后端 hdb 按时间窗口计算，准确反映域名历史）
+        // 根据 tracker_stat_period 选取域名级可用率
+        // 后端算法：Σok(活跃IP + 历史已移除IP) / Σtotal，包含完整历史，不因IP切换丢数据
         const uptime = (tr) => {
             const p = cfg.value.tracker_stat_period || '24h';
             const pkMap = {'24h':'uptime_24h','7d':'uptime_7d','30d':'uptime_30d'};
             const pk = pkMap[p] || 'uptime_24h';
-            // 优先用域名级（hdb域名级 = 有任意活跃IP在线就算成功，不因IP切换丢数据）
+            // 直接用后端算好的域名级数值
             if (tr[pk] !== null && tr[pk] !== undefined) return tr[pk];
             // fallback：域名级无数据时用活跃IP均值
             const activeIps = (tr.ips || []).filter(ip => !ip.removed);
@@ -3002,12 +3012,14 @@ createApp({
 
         // ── 仪表盘 computed ──────────────────────────────────────────────────────
 
-        // 通用域名指标计算（复用多处）
+        // 通用域名指标计算（仪表盘排行榜+快速搜索用，使用 dashboard_stat_period）
         const _domainMetric = (domain, tr) => {
-            // 与监控列表 uptime(tr) 使用完全相同的算法：各活跃IP可用率的均值
-            const u = uptime(tr);
-            const activeIps = (tr.ips||[]).filter(ip=>!ip.removed);
-            const onlineIps = activeIps.filter(ip=>ip.status==='online');
+            const p  = cfg.value.dashboard_stat_period || '24h';
+            const pk = {'24h':'uptime_24h','7d':'uptime_7d','30d':'uptime_30d'}[p] || 'uptime_24h';
+            const u  = (tr[pk] !== null && tr[pk] !== undefined) ? tr[pk] : null;
+            // 活跃IP：非removed、非paused
+            const activeIps  = (tr.ips||[]).filter(ip=>!ip.removed && !ip.paused && !tr.paused);
+            const onlineIps  = activeIps.filter(ip=>ip.status==='online');
             const offlineIps = activeIps.filter(ip=>ip.status==='offline');
             const offline_count = offlineIps.length;
             const all_offline = activeIps.length > 0 && onlineIps.length === 0 && offlineIps.length > 0;
@@ -3018,7 +3030,7 @@ createApp({
             let cls = 'up-unknown';
             if (u !== null) {
                 if (all_offline) cls = 'up-red';
-                else if (mixed) cls = 'up-yellow';
+                else if (mixed)  cls = 'up-yellow';
                 else if (u < 50) cls = 'up-red';
                 else if (u <= 80) cls = 'up-yellow';
                 else cls = 'up-green';
@@ -3120,7 +3132,7 @@ createApp({
             for (const [domain, tr] of Object.entries(trackers.value)) {
                 // 域名过滤（来自TOP10点击）
                 if (domainF && domain !== domainF) continue;
-                const p = cfg.value.tracker_stat_period || '24h';
+                const p = cfg.value.dashboard_stat_period || '24h';
                 const pkMap = {'24h':'uptime_24h','7d':'uptime_7d','30d':'uptime_30d'};
                 const u = tr[pkMap[p] || 'uptime_24h'] ?? null;
                 const activeIps = (tr.ips||[]).filter(ip=>!ip.removed);

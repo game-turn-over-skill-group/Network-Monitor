@@ -146,6 +146,7 @@ window.__i18n_en = {
     consoleInfo: 'Info - access/request log only (recommended)',
     consoleError: 'Error - info + failures/timeouts (disk: errors only)',
     consoleDebug: 'Debug - all results (no polling noise)',
+    dashboardStatPeriod: 'Dashboard Stat Period',
     trackerStatPeriod: 'Tracker Stat Period',
     trackerStatPeriodDesc: 'Time window for uptime% in tracker list',
     rankStatPeriod: 'Ranking Stat Period',

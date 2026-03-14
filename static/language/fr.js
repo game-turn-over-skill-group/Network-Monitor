@@ -146,6 +146,7 @@ window.__i18n_fr = {
     consoleInfo: 'Info - uniquement journaux d\'accès/requêtes (recommandé)',
     consoleError: 'Erreur - info + échecs/délais (disque : erreurs uniquement)',
     consoleDebug: 'Debug - tous les résultats (sans bruit de polling)',
+    dashboardStatPeriod: 'Période de statistiques Tableau de Bord',
     trackerStatPeriod: 'Période de statistiques Tracker',
     trackerStatPeriodDesc: 'Fenêtre temporelle pour le % de disponibilité dans la liste des trackers',
     rankStatPeriod: 'Période de statistiques du classement',

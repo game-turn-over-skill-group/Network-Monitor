@@ -146,6 +146,7 @@ window.__i18n_ko = {
     consoleInfo: '정보 - 액세스/요청 로그만 (권장)',
     consoleError: '오류 - 정보 + 실패/시간 초과 (디스크: 오류만)',
     consoleDebug: '디버그 - 모든 결과 (폴링 노이즈 없음)',
+    dashboardStatPeriod: '계기판 통계 기간',
     trackerStatPeriod: 'Tracker 통계 기간',
     trackerStatPeriodDesc: 'Tracker 목록의 가동률% 시간 창',
     rankStatPeriod: '랭킹 통계 기간',

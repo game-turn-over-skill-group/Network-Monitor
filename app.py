@@ -52,8 +52,8 @@ DEFAULT_CONFIG = {
     'max_log_error': 1000,      # Error 级日志最大条目数
     'page_refresh_ms': 30000,   # 前端页面自动刷新间隔(ms)，0=禁用
     'cache_history': True,      # 是否缓存历史可用率到JSON（重启不丢失）
+    'dashboard_stat_period': '24h', # 仪表盘可用率统计周期：24h | 7d | 30d（排行TOP10+快速搜索）
     'tracker_stat_period': '24h', # 监控列表可用率统计周期：24h | 7d | 30d
-    'rank_stat_period': '24h',    # 可用率排行统计周期：24h | 7d | 30d
     'tab_switch_refresh': True,   # 切换仪表盘/监控列表时是否刷新数据
     'export_suffix': '/announce',   # 导出 tracker 列表时追加的路径后缀
     'show_removed_ips': True,       # 是否显示已移除的历史IP（前端控制）
@@ -77,9 +77,12 @@ def load_config():
                       'log_to_disk','log_level','console_log_level',
                       'http_proxy','udp_proxy','proxy_enabled',
                       'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
-                      'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','users']:
+                      'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','users']:
                 if k in saved:
                     cfg[k] = saved[k]
+            # 向后兼容：旧配置文件用 rank_stat_period，迁移到 dashboard_stat_period
+            if 'dashboard_stat_period' not in saved and 'rank_stat_period' in saved:
+                cfg['dashboard_stat_period'] = saved['rank_stat_period']
             # 向后兼容：旧配置文件用 console_log_level，迁移到 log_level
             if 'log_level' not in cfg and 'console_log_level' in cfg:
                 cfg['log_level'] = cfg['console_log_level']
@@ -94,7 +97,7 @@ def persist_config(cfg):
                                         'log_to_disk','log_level',
                                         'http_proxy','udp_proxy','proxy_enabled',
                                         'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
-                                        'tracker_stat_period','rank_stat_period','cache_history',
+                                        'dashboard_stat_period','tracker_stat_period','cache_history',
                                         'tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','users']
                    if k in cfg}
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
@@ -360,22 +363,15 @@ class TrackerDB:
         """把探测结果写入 hdb（时间戳历史库）。
         跳过 removed IP，避免污染统计。"""
         t = self.trackers[domain]
-        ip_obj = None
         for info in t['ips']:
             if info['ip'] == ip:
                 if info.get('removed', False):
                     return
-                ip_obj = info
                 break
-        if ip_obj is None:
+        else:
             return
-        # ── IP 级：写入 hdb ──────────────────────────────────────
-        hdb.push_ip(ip, status)
-        # ── 域名级：有任意活跃IP在线 → 1，否则 → 0 ─────────────
-        active = [i for i in t['ips'] if not i.get('removed')]
-        if active:
-            agg = 1 if any(i.get('status') == 'online' for i in active) else 0
-            hdb.push_domain(domain, agg)
+        # 写入 hdb，domain 作为父级，IP 归属关系自包含在 history.json
+        hdb.push_ip(domain, ip, status)
 
     def _recalc(self):
         total = alive = ipv4 = ipv6 = 0
@@ -430,18 +426,14 @@ class TrackerDB:
                     if 'added_time' not in ip_copy:
                         ip_copy['added_time'] = t.get('added_time')
                     ip = ip_obj.get('ip', '')
-                    ik  = hdb._key_ip(ip)
-                    # IP 级三个周期可用率（从 hdb 按时间窗口计算，重启不丢失）
+                    # IP 级三个周期可用率
                     for pk, secs in HISTORY_WINDOWS.items():
-                        ip_copy[f'uptime_{pk}'] = hdb.get_uptime(ik, secs)
+                        ip_copy[f'uptime_{pk}'] = hdb.get_ip_uptime(domain, ip, secs)
                     # ip_uptime 用当前配置周期
                     period = CONFIG.get('tracker_stat_period', '24h')
                     ip_copy['ip_uptime'] = ip_copy.get(f'uptime_{period}')
-                    # IP 级末尾连续失败次数（从 hdb 近24h数据计算）
-                    cutoff = int(time.time()) - 86400
-                    with hdb.lock:
-                        pts = hdb._data.get(ik, [])
-                        recent = [v for ts, v in pts if ts >= cutoff]
+                    # IP 级末尾连续失败次数（近24h）
+                    recent = hdb.get_ip_recent(domain, ip, 86400)
                     ip_consec = 0
                     for v in reversed(recent):
                         if v == 0: ip_consec += 1
@@ -449,18 +441,20 @@ class TrackerDB:
                     ip_copy['consec_fail'] = ip_consec
                     ips_copy.append(ip_copy)
                 t_copy['ips'] = ips_copy
-                # 域名级：从 hdb 按时间窗口计算
-                dk = hdb._key_domain(domain)
+                # 域名级：hdb 内该域名下所有IP（含历史已移除）汇总，但排除已暂停IP
+                # 已暂停IP不参与域名可用率计算，实时生效
+                domain_paused = t.get('paused', False)
+                paused_ip_set = set()
+                if not domain_paused:
+                    for ip_obj in t.get('ips', []):
+                        if ip_obj.get('paused') and not ip_obj.get('removed'):
+                            paused_ip_set.add(ip_obj.get('ip', ''))
                 for pk, secs in HISTORY_WINDOWS.items():
-                    summary = hdb.get_summary(dk, secs)
-                    t_copy[f'uptime_{pk}'] = (
-                        round(summary['ok'] / summary['total'] * 100, 1)
-                        if summary['total'] > 0 else None
-                    )
-                    t_copy[f'ok_{pk}']    = summary['ok']
-                    t_copy[f'total_{pk}'] = summary['total']
-                    t_copy[f'fail_{pk}']  = summary['fail']
-                # 不传原始0/1数组
+                    s = hdb.get_domain_summary(domain, secs, excluded_ips=paused_ip_set if paused_ip_set else None)
+                    t_copy[f'uptime_{pk}'] = round(s['ok'] / s['total'] * 100, 1) if s['total'] > 0 else None
+                    t_copy[f'ok_{pk}']     = s['ok']
+                    t_copy[f'total_{pk}']  = s['total']
+                    t_copy[f'fail_{pk}']   = s['fail']
                 for k in ('history_24h', 'history_7d', 'history_30d'):
                     t_copy.pop(k, None)
                 result[domain] = t_copy
@@ -476,22 +470,27 @@ class TrackerDB:
             for domain, d in self.trackers.items():
                 if d.get('paused'):
                     continue
-                dk     = hdb._key_domain(domain)
-                uptime = hdb.get_uptime(dk, secs)
-                if uptime is None and min_uptime > 0: continue
-                if uptime is not None and uptime < min_uptime: continue
                 active_ips = [ip for ip in d['ips'] if not ip.get('removed') and not ip.get('paused')]
                 if not active_ips: continue
-                online_count = sum(1 for ip in active_ips if ip.get('status') == 'online')
+                # 已暂停IP不参与域名可用率计算
+                paused_ip_set = {ip.get('ip','') for ip in d['ips']
+                                 if ip.get('paused') and not ip.get('removed')}
+                s      = hdb.get_domain_summary(domain, secs, excluded_ips=paused_ip_set if paused_ip_set else None)
+                uptime = round(s['ok'] / s['total'] * 100, 2) if s['total'] > 0 else None
+                if uptime is None and min_uptime > 0: continue
+                if uptime is not None and uptime < min_uptime: continue
+                online_count  = sum(1 for ip in active_ips if ip.get('status') == 'online')
+                # 故障IP数：仅计活跃（非暂停）且offline的IP
+                offline_count = sum(1 for ip in active_ips if ip.get('status') == 'offline')
                 versions = list({ip.get('version','ipv4') for ip in active_ips})
-                has_v4 = 'ipv4' in versions
-                has_v6 = 'ipv6' in versions
                 out.append({'domain': domain, 'port': d.get('port',80),
                             'protocol': d.get('protocol','tcp'),
-                            'uptime': round(uptime,2) if uptime is not None else None,
+                            'uptime': uptime,
                             'ip_count': len(active_ips),
                             'online_count': online_count,
-                            'has_v4': has_v4, 'has_v6': has_v6,
+                            'offline_count': offline_count,
+                            'has_v4': 'ipv4' in versions,
+                            'has_v6': 'ipv6' in versions,
                             'all_paused': all(ip.get('paused') for ip in active_ips) if active_ips else False})
         out.sort(key=lambda x: (-(x['uptime'] if x['uptime'] is not None else -1), -x['online_count'], x['domain']))
         return out[:limit]
@@ -554,7 +553,7 @@ class TrackerDB:
                 if ip_info['ip'] not in existing:
                     ip_info.update({'status': 'unknown', 'latency': -1, 'last_check': None})
                     td['ips'].append(ip_info)
-            # 标记消失的旧 IP（不删除，仅 removed 标记；重启时会清除）
+            # 标记消失的旧 IP（不删除，仅 removed 标记；重启时从 ips 移出，历史保留在 history.json）
             changed = False
             for ip_obj in td['ips']:
                 if ip_obj['ip'] not in new_ips:
@@ -565,7 +564,7 @@ class TrackerDB:
                     if ip_obj.pop('removed', None):
                         changed = True
             if changed:
-                self._save()  # 把 removed 标记持久化到 JSON
+                self._save()
 
     def _save(self):
         try:
@@ -577,20 +576,22 @@ class TrackerDB:
                         ip_entry = {k: v for k, v in ip_obj.items()
                                     if k not in ('history_24h','history_7d','history_30d')}
                         if CONFIG.get('cache_history', True):
-                            # 保存 hdb 摘要（供人工查看，不用于重启恢复）
-                            ik = hdb._key_ip(ip_obj.get('ip',''))
+                            # IP级摘要（供人工查看，不用于重启恢复）
+                            ip = ip_obj.get('ip', '')
                             for pk, secs in HISTORY_WINDOWS.items():
-                                ip_entry[f'history_{pk}'] = hdb.get_summary(ik, secs)
+                                ip_entry[f'history_{pk}'] = hdb.get_ip_summary(d, ip, secs)
                         ips_to_save.append(ip_entry)
                     entry = {'domain':d,'port':t.get('port',80),
                              'protocol':t.get('protocol','tcp'),
                              'ips':ips_to_save,'added_time':t['added_time'],
                              'paused':t.get('paused',False)}
                     if CONFIG.get('cache_history', True):
-                        # 域名级摘要（供人工查看）
-                        dk = hdb._key_domain(d)
+                        # 域名级摘要：排除已暂停IP（与前端算法一致，供人工查看）
+                        paused_set = {ip.get('ip','') for ip in t['ips']
+                                      if ip.get('paused') and not ip.get('removed') and not t.get('paused')}
                         for pk, secs in HISTORY_WINDOWS.items():
-                            entry[f'history_{pk}'] = hdb.get_summary(dk, secs)
+                            s = hdb.get_domain_summary(d, secs, excluded_ips=paused_set if paused_set else None)
+                            entry[f'history_{pk}'] = {'total': s['total'], 'ok': s['ok'], 'fail': s['fail']}
                     data[d] = entry
             with open(CONFIG['data_file'], 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -605,12 +606,11 @@ class TrackerDB:
                 data = json.load(f)
             with self.lock:
                 for d, t in data.items():
-                    clean_ips = [ip for ip in t.get('ips', [])
-                                 if not ip.get('removed', False)]
-                    removed_count = len(t.get('ips', [])) - len(clean_ips)
-                    if removed_count:
-                        cprint(f"[load] {d}: 清除 {removed_count} 个过时IP", 'debug')
-                    # 清除 IP 对象里残留的 history 字段（旧版摘要，不再用于计算）
+                    all_ips    = t.get('ips', [])
+                    clean_ips  = [ip for ip in all_ips if not ip.get('removed', False)]
+                    removed_cnt = len(all_ips) - len(clean_ips)
+                    if removed_cnt:
+                        cprint(f"[load] {d}: 跳过探测 {removed_cnt} 个已移除IP（历史数据保留在 history.json）", 'debug')
                     for ip_obj in clean_ips:
                         for k in ('history_24h','history_7d','history_30d'):
                             ip_obj.pop(k, None)
@@ -633,21 +633,30 @@ class TrackerDB:
                             _geo_cache[ip] = geo
                             warmed += 1
             if warmed:
-                cprint(f"[geo] 预热归属地缓存 {warmed} 条（重启无需重新查询）", 'info')
+                cprint(f"[geo] 预热归属地缓存 {warmed} 条", 'info')
             return True
         except Exception: return False
+
+    def _cleanup_hdb_on_startup(self):
+        """重启后只做 GC，不清除任何 IP key。
+        history.json 自包含 domain->IP 归属，已移除IP的历史保留用于域名统计。"""
+        hdb._gc()
+        cprint("[hdb] 启动GC完成", 'debug')
 
 db = TrackerDB()
 
 # ==================== 历史数据库（时间戳方案）====================
-# history.json 格式：
+# history.json 格式：域名为父级，IP为子级，归属关系自包含
 # {
-#   "domain:example.com": [[ts, 0/1], ...],
-#   "ip:1.2.3.4":         [[ts, 0/1], ...]
+#   "example.com": {
+#     "ip:1.2.3.4": [[ts, 0/1], ...],
+#     "ip:5.6.7.8": [[ts, 0/1], ...]
+#   }
 # }
 # 每条记录 [unix_timestamp(int), result(0或1)]
 # GC：只保留30天内数据，每小时清理一次
-# 内存：hdb._data 为主要数据源，history.json 为重启缓存
+# 域名级可用率 = 该域名下所有IP（含历史已移除）的 ok/total 汇总
+# 重启后直接从 history.json 读取 domain->IP 归属，不依赖 data.json
 
 HISTORY_FILE = 'history.json'
 HISTORY_WINDOWS = {
@@ -658,65 +667,87 @@ HISTORY_WINDOWS = {
 
 class HistoryDB:
     def __init__(self):
-        self.lock  = threading.RLock()
-        self._data = {}   # key -> [[ts, v], ...]
+        self.lock     = threading.RLock()
+        self._data    = {}   # {domain: {ip_key: [[ts, v], ...]}}
         self._last_gc = 0
 
-    def _key_domain(self, domain): return f'domain:{domain}'
-    def _key_ip(self, ip):         return f'ip:{ip}'
+    def _key_ip(self, ip): return f'ip:{ip}'
 
-    def push_domain(self, domain, agg_value):
-        """单独写入域名级聚合值（由_push_history调用，已计算好any(online)）"""
-        now = int(time.time())
-        with self.lock:
-            dk = self._key_domain(domain)
-            self._data.setdefault(dk, []).append([now, agg_value])
-
-    def push_ip(self, ip, result):
-        """单独写入IP级结果"""
+    def push_ip(self, domain, ip, result):
+        """写入一条探测结果到对应域名下的IP key"""
         v   = 1 if result in (True, 'online') else 0
         now = int(time.time())
         with self.lock:
-            ik = self._key_ip(ip)
-            self._data.setdefault(ik, []).append([now, v])
+            dom = self._data.setdefault(domain, {})
+            dom.setdefault(self._key_ip(ip), []).append([now, v])
         if now - self._last_gc > 3600:
             self._gc()
 
-    def get_uptime(self, key, window_secs):
-        """计算指定key在过去window_secs秒内的可用率，返回 0~100 浮点数或 None"""
+    def get_ip_summary(self, domain, ip, window_secs):
+        """返回指定域名下指定IP在窗口内的 {total, ok, fail}"""
         cutoff = int(time.time()) - window_secs
         with self.lock:
-            pts = self._data.get(key, [])
+            pts = self._data.get(domain, {}).get(self._key_ip(ip), [])
             window = [v for ts, v in pts if ts >= cutoff]
-        if not window:
-            return None
-        return round(sum(window) / len(window) * 100, 1)
+        ok = sum(window)
+        return {'total': len(window), 'ok': ok, 'fail': len(window) - ok}
 
-    def get_summary(self, key, window_secs):
-        """返回 {total, ok, fail} 摘要"""
+    def get_ip_uptime(self, domain, ip, window_secs):
+        """返回指定域名下指定IP在窗口内的可用率（0~100）或 None"""
+        s = self.get_ip_summary(domain, ip, window_secs)
+        return round(s['ok'] / s['total'] * 100, 1) if s['total'] > 0 else None
+
+    def get_domain_summary(self, domain, window_secs, excluded_ips=None):
+        """域名级汇总：该域名下所有历史IP（含已移除）的 ok/total 之和。
+        excluded_ips: set of ip strings to exclude（已暂停IP，实时排除）"""
+        cutoff = int(time.time()) - window_secs
+        excl_keys = {self._key_ip(ip) for ip in excluded_ips} if excluded_ips else set()
+        with self.lock:
+            ip_map = self._data.get(domain, {})
+            total_ok = total_cnt = 0
+            for ik, pts in ip_map.items():
+                if ik in excl_keys:
+                    continue
+                for ts, v in pts:
+                    if ts >= cutoff:
+                        total_ok  += v
+                        total_cnt += 1
+        return {'total': total_cnt, 'ok': total_ok, 'fail': total_cnt - total_ok}
+
+    def get_ip_recent(self, domain, ip, window_secs):
+        """返回窗口内的原始 [v, ...] 列表（用于连续失败计算）"""
         cutoff = int(time.time()) - window_secs
         with self.lock:
-            pts = self._data.get(key, [])
-            window = [v for ts, v in pts if ts >= cutoff]
-        ok   = sum(window)
-        fail = len(window) - ok
-        return {'total': len(window), 'ok': ok, 'fail': fail}
+            pts = self._data.get(domain, {}).get(self._key_ip(ip), [])
+            return [v for ts, v in pts if ts >= cutoff]
+
+    def remove_domain(self, domain):
+        """手动删除域名时调用，清除该域名所有历史数据"""
+        with self.lock:
+            self._data.pop(domain, None)
 
     def _gc(self):
         """清理30天外的数据"""
         cutoff = int(time.time()) - 30 * 86400
         with self.lock:
-            for k in list(self._data.keys()):
-                self._data[k] = [[ts, v] for ts, v in self._data[k] if ts >= cutoff]
-                if not self._data[k]:
-                    del self._data[k]
+            for domain in list(self._data.keys()):
+                ip_map = self._data[domain]
+                for ik in list(ip_map.keys()):
+                    ip_map[ik] = [[ts, v] for ts, v in ip_map[ik] if ts >= cutoff]
+                    if not ip_map[ik]:
+                        del ip_map[ik]
+                if not ip_map:
+                    del self._data[domain]
             self._last_gc = int(time.time())
 
     def save(self):
-        """持久化到 history.json"""
+        """持久化到 history.json（紧凑格式）"""
         try:
             with self.lock:
-                data_copy = {k: list(v) for k, v in self._data.items()}
+                data_copy = {
+                    domain: {ik: list(pts) for ik, pts in ip_map.items()}
+                    for domain, ip_map in self._data.items()
+                }
             with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
                 json.dump(data_copy, f, separators=(',', ':'), ensure_ascii=False)
         except Exception as e:
@@ -730,20 +761,25 @@ class HistoryDB:
             with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
                 raw = json.load(f)
             cutoff = int(time.time()) - 30 * 86400
+            loaded_domains = loaded_ips = 0
             with self.lock:
-                for k, pts in raw.items():
-                    if isinstance(pts, list):
+                for domain, ip_map in raw.items():
+                    if not isinstance(ip_map, dict):
+                        continue  # 跳过旧格式残留（扁平key格式）
+                    cleaned_map = {}
+                    for ik, pts in ip_map.items():
+                        if not isinstance(pts, list):
+                            continue
                         cleaned = [[int(ts), int(v)] for ts, v in pts if ts >= cutoff]
                         if cleaned:
-                            self._data[k] = cleaned
-            cprint(f"[HistoryDB] 加载完成，共 {len(self._data)} 个key", 'info')
+                            cleaned_map[ik] = cleaned
+                            loaded_ips += 1
+                    if cleaned_map:
+                        self._data[domain] = cleaned_map
+                        loaded_domains += 1
+            cprint(f"[HistoryDB] 加载完成：{loaded_domains} 个域名，{loaded_ips} 个IP key", 'info')
         except Exception as e:
             cprint(f"[HistoryDB] 加载失败: {e}", 'error')
-
-    def remove_key(self, key):
-        """删除指定key的全部历史（域名删除时调用）"""
-        with self.lock:
-            self._data.pop(key, None)
 
 hdb = HistoryDB()
 
@@ -2531,10 +2567,8 @@ def api_delete():
     domain = (request.json or {}).get('domain','').strip()
     with db.lock:
         if domain in db.trackers:
-            # 清理该域名下所有IP的 hdb 历史
-            for ip_obj in db.trackers[domain].get('ips', []):
-                hdb.remove_key(hdb._key_ip(ip_obj.get('ip','')))
-            hdb.remove_key(hdb._key_domain(domain))
+            # 清除该域名在 hdb 中的所有历史（含活跃IP和已移除IP，因为是域名级父节点）
+            hdb.remove_domain(domain)
             del db.trackers[domain]
             db._recalc()
             db._save()
@@ -2896,10 +2930,21 @@ def api_query():
     if 'status' in fields:
         result['status'] = status_val
     if 'uptime' in fields:
-        domain_key = matched_tr.get('domain', host)
-        dk = hdb._key_domain(domain_key)
         secs = HISTORY_WINDOWS.get(period, 86400)
-        uptime = hdb.get_uptime(dk, secs)
+        if host in all_tr:
+            # 查询目标是域名：排除已暂停IP后汇总
+            tr_paused = matched_tr.get('paused', False)
+            paused_set = set() if tr_paused else {
+                ip.get('ip','') for ip in matched_tr.get('ips', [])
+                if ip.get('paused') and not ip.get('removed')
+            }
+            s = hdb.get_domain_summary(host, secs, excluded_ips=paused_set if paused_set else None)
+            uptime = round(s['ok'] / s['total'] * 100, 1) if s['total'] > 0 else None
+        else:
+            # 查询目标是 IP：返回该 IP 自己的可用率
+            domain_key = matched_tr.get('domain', '')
+            s = hdb.get_ip_summary(domain_key, host, secs)
+            uptime = round(s['ok'] / s['total'] * 100, 1) if s['total'] > 0 else None
         result['uptime'] = f'{uptime}%' if uptime is not None else None
     if 'delay' in fields:
         lat = matched_ip.get('latency', -1) if matched_ip else -1
@@ -3033,37 +3078,37 @@ def api_config():
                 'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','show_removed_ips','default_layout_width',
                 'log_to_disk','log_level','console_log_level','http_proxy','udp_proxy','proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
-                'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh']
+                'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh']
 
         # 字段的人可读标签
         labels = {
-            'check_interval':      '监控间隔',
-            'timeout':             '连接超时',
-            'retry_mode':          '重试模式',
-            'retry_interval':      '重试间隔',
-            'monitor_workers':        '并发检测数',
-            'stagger_batch_proxy':    '代理每批发包数',
-            'stagger_batch_direct':   '直连每批发包数',
-            'stagger_delay_proxy':    '代理批间延迟',
-            'stagger_delay_direct':   '直连批间延迟',
-            'export_suffix':       '导出后缀',
-            'log_to_disk':         '日志存盘',
-            'log_level':           '日志级别',
-            'console_log_level':   '日志级别',
-            'http_proxy':          'HTTP代理',
-            'udp_proxy':           'UDP代理',
-            'proxy_enabled':       '代理开关',
-            'dns_mode':            'DNS模式',
-            'dns_custom':          '自定义DNS',
-            'max_log_entries':     '最大日志条数',
-            'max_log_info':        'Info日志最大条数',
-            'max_log_success':     'Success日志最大条数',
-            'max_log_error':       'Error日志最大条数',
-            'page_refresh_ms':     '页面刷新间隔',
-            'tracker_stat_period': '监控统计周期',
-            'rank_stat_period':    '排行统计周期',
-            'cache_history':       '缓存统计可用率',
-            'tab_switch_refresh':  '切换时刷新',
+            'check_interval':        '监控间隔',
+            'timeout':               '连接超时',
+            'retry_mode':            '重试模式',
+            'retry_interval':        '重试间隔',
+            'monitor_workers':       '并发检测数',
+            'stagger_batch_proxy':   '代理每批发包数',
+            'stagger_batch_direct':  '直连每批发包数',
+            'stagger_delay_proxy':   '代理批间延迟',
+            'stagger_delay_direct':  '直连批间延迟',
+            'export_suffix':         '导出后缀',
+            'log_to_disk':           '日志存盘',
+            'log_level':             '日志级别',
+            'console_log_level':     '日志级别',
+            'http_proxy':            'HTTP代理',
+            'udp_proxy':             'UDP代理',
+            'proxy_enabled':         '代理开关',
+            'dns_mode':              'DNS模式',
+            'dns_custom':            '自定义DNS',
+            'max_log_entries':       '最大日志条数',
+            'max_log_info':          'Info日志最大条数',
+            'max_log_success':       'Success日志最大条数',
+            'max_log_error':         'Error日志最大条数',
+            'page_refresh_ms':       '页面刷新间隔',
+            'dashboard_stat_period': '仪表盘统计周期',
+            'tracker_stat_period':   '监控统计周期',
+            'cache_history':         '缓存统计可用率',
+            'tab_switch_refresh':    '切换时刷新',
         }
         suffixes = {
             'check_interval': 's', 'timeout': 's', 'retry_interval': 's',
@@ -3104,14 +3149,14 @@ def api_config():
 
     # GET 读取配置：未登录只返回前端行为控制必要字段（不含账户/代理等敏感信息）
     # 已登录用户额外返回运维相关字段（仍不含账户信息）
-    public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'tracker_stat_period', 'rank_stat_period', 'show_removed_ips', 'default_layout_width']
+    public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'dashboard_stat_period', 'tracker_stat_period', 'show_removed_ips', 'default_layout_width']
     if not session.get('role'):
         return jsonify({k: CONFIG.get(k) for k in public_keys})
     # 已登录用户返回更多展示字段，但不含账户信息（users/密钥）
     all_keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'log_to_disk','log_level','http_proxy','udp_proxy','proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
-                'tracker_stat_period','rank_stat_period','cache_history','tab_switch_refresh',
+                'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
                 'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width']
     return jsonify({k: CONFIG.get(k) for k in all_keys})
 
@@ -3163,6 +3208,7 @@ def api_users_save():
 if __name__ == '__main__':
     db.load()
     hdb.load()
+    db._cleanup_hdb_on_startup()   # 清理已移除IP和domain级的hdb key
     db.add_log("网络监控服务启动", 'info')
 
     # 启动后台 geo 补查线程：修复 data.json 中遗留的 XX/Unknown 归属地
