@@ -1046,7 +1046,7 @@
                 <div class="col-xl-4 col-lg-5 mb-3">
                     <div class="card h-100">
                         <div class="card-header d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-trophy me-1" style="color:var(--warn);"></i>{{ t('dash.rankTitle') }} <span style="font-size:.72rem;opacity:.6;font-weight:400;margin-left:3px;">[{{ cfg.dashboard_stat_period||'24h' }}]</span></span>
+                            <span><i class="bi bi-trophy me-1" style="color:var(--warn);"></i>{{ t('dash.rankTitle') }} <span style="font-size:.72rem;opacity:.6;font-weight:400;margin-left:3px;"></span></span>
                             <div class="d-flex align-items-center gap-2">
                                 <div class="tab-pill">
                                     <button :class="{active:dashRankMode==='worst'}" @click="dashRankMode='worst'">{{ t('dash.worst') }}</button>
@@ -1061,7 +1061,7 @@
                                 <thead><tr>
                                     <th style="width:24px;">#</th>
                                     <th>{{ t('monitor.domain') }}</th>
-                                    <th style="text-align:right;">{{ t('monitor.uptimeLbl') }}</th>
+                                    <th style="text-align:right;"><span style="font-size:.7rem;opacity:.6;">{{ '[' + (cfg.dashboard_stat_period||'24h') + ']' }}</span> {{ t('monitor.uptimeLbl') }}</th>
                                     <th style="text-align:right;">{{ t('stats.offline') }}</th>
                                     <th style="text-align:right;">{{ t('monitor.latency') }}</th>
                                 </tr></thead>
@@ -1247,7 +1247,7 @@
                                 </th>
                                 <!-- 可用率：可排序 -->
                                 <th @click="cycleQsSort('uptime')" :title="qsSortKey==='uptime' ? (t('monitor.uptimeLbl')+' '+(qsSortDir===1?t('dash.sortAsc'):t('dash.sortDesc'))) : (t('monitor.uptimeLbl')+': '+t('dash.sortAsc')+' / '+t('dash.sortDesc'))" style="width:72px;cursor:pointer;user-select:none;text-align:right;">
-                                    {{ t('monitor.uptimeLbl') }} <span style="font-size:.7rem;color:#64748b;">{{ qsSortIcon('uptime') }}</span>
+                                    <span style="font-size:.65rem;opacity:.6;">{{ '[' + (cfg.dashboard_stat_period||'24h') + ']' }}</span> {{ t('monitor.uptimeLbl') }} <span style="font-size:.7rem;color:#64748b;">{{ qsSortIcon('uptime') }}</span>
                                 </th>
                                 <th style="width:36px;"></th>
                             </tr></thead>
@@ -1453,7 +1453,7 @@
                         <!-- 列标题行 -->
                         <div class="tl-col-header">
                             <span>{{ t('monitor.ip') }}</span>
-                            <span>{{ t('monitor.status') }} / {{ t('monitor.uptimeLbl') }} <span style="font-size:.72rem;opacity:.6;font-weight:400;margin-left:3px;">[{{ cfg.tracker_stat_period||'24h' }}]</span></span>
+                            <span><span style="font-size:.72rem;opacity:.6;font-weight:400;margin-left:3px;">[{{ cfg.tracker_stat_period||'24h' }}]</span> {{ t('monitor.status') }} / {{ t('monitor.uptimeLbl') }}</span>
                             <span style="text-align:center;">{{ t('monitor.latency') }}</span>
                             <span style="padding-left:20px;">{{ t('monitor.country') }} / {{ t('monitor.isp') }}</span>
                             <span style="text-align:center;">{{ t('monitor.lastCheck') }}</span>
