@@ -202,6 +202,8 @@ window.__i18n_zh = {
     staggerDelayDirectDesc: '直连模式批间等待时间，建议 50~200ms',
     savedOk: '配置已保存',
     savedFail: '保存失败，请重试',
+    listenLocal: '仅本地监听',
+    listenLocalDesc: '启用后服务仅监听本地回环地址',
   },
   modal: {
     addTracker: '添加Tracker',

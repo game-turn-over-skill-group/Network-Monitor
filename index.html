@@ -1298,7 +1298,7 @@
                                     <!-- IP级可用率（badge-up框式，稍暗）-->
                                     <td style="text-align:right;white-space:nowrap;">
                                         <span v-if="row.ip_uptime !== null && row.ip_uptime !== undefined"
-                                              class="badge-up" :class="row.ip_uptime>=80?'up-green':row.ip_uptime>=50?'up-yellow':'up-red'"
+                                              class="badge-up" :class="row.paused ? 'up-yellow' : (row.rawStatus === 'offline' ? 'up-red' : (row.ip_uptime>=80 ? 'up-green' : (row.ip_uptime>=50 ? 'up-yellow' : 'up-red')))"
                                               style="font-size:.78rem;opacity:.85;">{{ row.ip_uptime.toFixed(1) }}%</span>
                                         <span v-else class="badge-up up-unknown" style="font-size:.78rem;opacity:.85;">?</span>
                                     </td>
@@ -1996,6 +1996,18 @@
                                 </div>
                             </div>
                         </div>
+                        <!-- 新增：仅本地监听开关 -->
+                        <div class="col-md-4 d-flex align-items-center">
+                            <div class="cfg-row w-100">
+                                <div>
+                                    <strong>{{ t('config.listenLocal') }}</strong>
+                                    <p class="text-secondary mb-0" style="font-size:.8rem;">{{ t('config.listenLocalDesc') }}</p>
+                                </div>
+                                <div class="form-check form-switch mb-0">
+                                    <input class="form-check-input" type="checkbox" v-model="cfg.listen_local" @change="saveCfg">
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2312,7 +2324,7 @@ createApp({
         const logs = ref([]);
         const logLvl = ref('');
         const logSearch = ref('');
-        const cfg = ref({log_to_disk:false,check_interval:30,timeout:5,retry_mode:'polling',retry_interval:5,console_log_level:'info',http_proxy:'',udp_proxy:'',proxy_enabled:false,dns_mode:'system',dns_custom:'8.8.8.8',max_log_entries:1000,max_log_info:1000,max_log_success:1000,max_log_error:1000,page_refresh_ms:30000,dashboard_stat_period:'24h',tracker_stat_period:'24h',cache_history:true,tab_switch_refresh:true,monitor_workers:120,stagger_batch_proxy:5,stagger_batch_direct:5,stagger_delay_proxy:150,stagger_delay_direct:100,export_suffix:'/announce',show_removed_ips:true,default_layout_width:'1700'});
+        const cfg = ref({log_to_disk:false,check_interval:30,timeout:5,retry_mode:'polling',retry_interval:5,console_log_level:'info',http_proxy:'',udp_proxy:'',proxy_enabled:false,dns_mode:'system',dns_custom:'8.8.8.8',max_log_entries:1000,max_log_info:1000,max_log_success:1000,max_log_error:1000,page_refresh_ms:30000,dashboard_stat_period:'24h',tracker_stat_period:'24h',cache_history:true,tab_switch_refresh:true,monitor_workers:120,stagger_batch_proxy:5,stagger_batch_direct:5,stagger_delay_proxy:150,stagger_delay_direct:100,export_suffix:'/announce',show_removed_ips:true,default_layout_width:'1700',listen_local:false});
         // 仪表盘 rank 切换 / 快速搜索
         const dashRankMode = ref('worst'); // 'worst' | 'best'
         const qsSearch = ref('');
@@ -2876,6 +2888,7 @@ createApp({
                     export_suffix:cfg.value.export_suffix||'/announce',
                     show_removed_ips:cfg.value.show_removed_ips !== false,
                     default_layout_width:cfg.value.default_layout_width||'1700',
+                    listen_local: cfg.value.listen_local,
                 });
                 if (res.data?.success) showToast(_t('config.savedOk'), 'ok', 2000);
             } catch(e){ showToast(_t('config.savedFail'), 'error', 3000); }

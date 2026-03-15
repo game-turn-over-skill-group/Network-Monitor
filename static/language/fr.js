@@ -202,6 +202,8 @@ window.__i18n_fr = {
     staggerDelayDirectDesc: 'Délai entre lots en mode direct, 50~200ms',
     savedOk: 'Configuration sauvegardée',
     savedFail: 'Échec de la sauvegarde, veuillez réessayer',
+    listenLocal: 'Écoute locale uniquement',
+    listenLocalDesc: 'Après activation, le service n'écoute que sur l'adresse de bouclage locale.',
   },
   modal: {
     addTracker: 'Ajouter un Tracker',

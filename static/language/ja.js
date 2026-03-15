@@ -202,6 +202,8 @@ window.__i18n_ja = {
     staggerDelayDirectDesc: '直接モードのバッチ間遅延、50~200ms推奨',
     savedOk: '設定を保存しました',
     savedFail: '保存に失敗しました、再試行してください',
+    listenLocal: '地域限定の視聴',
+    listenLocalDesc: '有効化後、サービスはローカルループバックアドレスでのみリッスンします。',
   },
   modal: {
     addTracker: 'Trackerを追加',

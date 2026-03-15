@@ -202,6 +202,8 @@ window.__i18n_en = {
     staggerDelayDirectDesc: 'Direct mode inter-batch delay, suggest 50~200ms',
     savedOk: 'Configuration saved',
     savedFail: 'Save failed, please retry',
+    listenLocal: 'Local listening only',
+    listenLocalDesc: 'After activation, the service only listens on the local loopback address.',
   },
   modal: {
     addTracker: 'Add Tracker',

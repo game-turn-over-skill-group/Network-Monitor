@@ -202,6 +202,8 @@ window.__i18n_ko = {
     staggerDelayDirectDesc: '직접 모드 배치 간 지연, 50~200ms 권장',
     savedOk: '설정이 저장되었습니다',
     savedFail: '저장 실패, 다시 시도해 주세요',
+    listenLocal: '로컬 청취 전용',
+    listenLocalDesc: '서비스가 활성화되면 로컬 루프백 주소에서만 수신 대기합니다.',
   },
   modal: {
     addTracker: 'Tracker 추가',
