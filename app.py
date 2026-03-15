@@ -22,6 +22,8 @@ from flask_cors import CORS
 import dns.resolver
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests as req_lib
+import functools
+from typing import Any, Dict
 
 # ==================== 配置持久化 ====================
 CONFIG_FILE  = 'config.json'
@@ -2123,18 +2125,21 @@ def security_headers(response):
     path   = request.path
     method = request.method
 
+    # ── 调试模式判断（控制 304 是否静默） ──
+    is_debug_mode = CONFIG.get('log_level') == 'debug' or getattr(app, 'debug', False)
+
     # ── 静态资源（/static/）缓存策略 ──
     # 路径安全：Flask send_from_directory 内部用 werkzeug.security.safe_join，
     # 已防止路径穿越（CWE-22），无需额外处理。
     # Cache-Control: public, max-age=31536000, immutable
     #   浏览器 + CF 均缓存1年，源站下线期间静态资源照常加载。
     #   更新文件时在 CF 控制台手动清除缓存（Purge Cache）即可。
-    # 304 静默：不输出到控制台或 access.log（0字节无意义）。
+    # 调试模式下 304 会正常 输出到控制台 + 写入 access.log
     # 200 正常记录：首次加载/CF回源时可见。
     if path.startswith('/static/'):
         response.headers['Cache-Control'] = 'public, max-age=31536000, immutable'
-        if response.status_code == 304:
-            return response  # 304 静默
+        if response.status_code == 304 and not is_debug_mode:
+            return response  # 非调试模式下 304静默
         # 200 继续往下，正常记录日志
 
     # ── JSON API gzip 压缩（浏览器支持时，响应 >1KB 才压缩）──
@@ -2155,13 +2160,15 @@ def security_headers(response):
             except Exception:
                 pass
 
-    # 静默路径（前端内部轮询/导航）：不打印日志
+    # 保留此逻辑，因为这些请求每秒几十次，完全无调试价值
+    # 静默路径（前端内部轮询/导航）：不打印日志 = 始终静默（即使 debug 模式也不输出）──
     if path.split('?')[0].rstrip('/') in _NOISY_PATHS:
         return response
 
-    # HTML 页面的 304（ETag命中/CF回源验证）静默：0字节无意义，不刷屏
+    # HTML 页面的 304（ETag命中/CF回源验证）静默：非调试模式下隐藏:0字节请求（不刷控制台、不写 access.log）
+    # 只有调试模式才放行，让正常日志流程输出
     _HTML_PATHS = {'/', '/home', '/stats', '/ranking', '/logs', '/config'}
-    if (path.rstrip('/') or '/') in _HTML_PATHS and response.status_code == 304:
+    if (path.rstrip('/') or '/') in _HTML_PATHS and response.status_code == 304 and not is_debug_mode:
         return response
 
 
@@ -2272,6 +2279,7 @@ def spa_routes():
         safe_path = request.path if request.path in _SPA_PATH_WHITELIST else '/'
         return redirect(safe_path, code=301)
     return _serve_html()
+
 
 # ── 公开 Tracker 导出 API ──
 @app.route('/trackers')
@@ -2454,67 +2462,11 @@ def api_stats():
         and ('离线' in l.get('message', '') or 'offline' in l.get('message', '').lower())
     )
     resp = jsonify(s)
-    # 1. 基础内容类型（根据你的资源调整，比如text/html）
-    resp.headers['Content-Type']      = 'application/json'
-
-    # 2. ETag（必须！用于验证内容是否更新，源站内容变则ETag变）保证ETag能随内容变化生成（需要定义否则报错,先拿掉）
-    # resp.headers['ETag']              = etag
-
-    # 3. 核心缓存规则（重点）
-    # - public：允许所有缓存（浏览器/CF）存储
-    # - max-age=0：浏览器每次都验证（可选，根据你对浏览器的需求）
-    # - must-revalidate：强制过期后验证
-    # - s-maxage=10：CF边缘缓存10秒（10秒后过期，触发回源验证）
-    # - stale-while-revalidate=31536000：CF过期后仍可用缓存，同时后台异步回源更新
-    # - stale-if-error=31536000：源站离线/错误时，CF无限期使用最后一次缓存
-    resp.headers['Cache-Control']     = 'public, max-age=0, must-revalidate, s-maxage=10, stale-while-revalidate=31536000, stale-if-error=31536000'
-
-    # 4. CF专属兜底（可选，增强兼容性）
-    # - edge-cache-ttl=10：CF边缘缓存TTL=10秒（和s-maxage=10一致）
-    # - always-use-stale: true：源站不可用时强制使用缓存
-    resp.headers['Edge-Cache-TTL']    = '10'
-    resp.headers['Surrogate-Control'] = 'stale-while-revalidate=31536000, stale-if-error=31536000'
-
-    # 5. Vary: Cookie 按 Cookie 区分缓存版本
-    resp.headers['Vary']              = 'Cookie'
-
-    # 01、CF-Cache-Status 手动设置！这个字段是CF自动返回的，手动设会失效/冲突
-    # 02、CF-Cache-Status = 'HIT'/'DYNAMIC'，这是CF的响应标识，不是源站可设置的请求头
-    # resp.headers['CF-Cache-Status'] = 'HIT'  # 仅标识，CF会自动更新 (不能保留,因为这由CF决定)
-    # resp.headers['CF-Cache-Status'] = 'DYNAMIC'  # 标记为动态内容，CF 不会强制缓存 (不能保留,否则不会错误缓存)
     return resp
 
 @app.route('/api/datas')
 def api_trackers():
     resp = jsonify(db.get_trackers())
-    # 1. 基础内容类型（根据你的资源调整，比如text/html）
-    resp.headers['Content-Type']      = 'application/json'
-
-    # 2. ETag（必须！用于验证内容是否更新，源站内容变则ETag变）保证ETag能随内容变化生成（需要定义否则报错,先拿掉）
-    # resp.headers['ETag']              = etag
-
-    # 3. 核心缓存规则（重点）
-    # - public：允许所有缓存（浏览器/CF）存储
-    # - max-age=0：浏览器每次都验证（可选，根据你对浏览器的需求）
-    # - must-revalidate：强制过期后验证
-    # - s-maxage=10：CF边缘缓存10秒（10秒后过期，触发回源验证）
-    # - stale-while-revalidate=31536000：CF过期后仍可用缓存，同时后台异步回源更新
-    # - stale-if-error=31536000：源站离线/错误时，CF无限期使用最后一次缓存
-    resp.headers['Cache-Control']     = 'public, max-age=0, must-revalidate, s-maxage=10, stale-while-revalidate=31536000, stale-if-error=31536000'
-
-    # 4. CF专属兜底（可选，增强兼容性）
-    # - edge-cache-ttl=10：CF边缘缓存TTL=10秒（和s-maxage=10一致）
-    # - always-use-stale: true：源站不可用时强制使用缓存
-    resp.headers['Edge-Cache-TTL']    = '10'
-    resp.headers['Surrogate-Control'] = 'stale-while-revalidate=31536000, stale-if-error=31536000'
-
-    # 5. Vary: Cookie 按 Cookie 区分缓存版本
-    resp.headers['Vary']              = 'Cookie'
-
-    # 01、CF-Cache-Status 手动设置！这个字段是CF自动返回的，手动设会失效/冲突
-    # 02、CF-Cache-Status = 'HIT'/'DYNAMIC'，这是CF的响应标识，不是源站可设置的请求头
-    # resp.headers['CF-Cache-Status'] = 'HIT'  # 仅标识，CF会自动更新 (不能保留,因为这由CF决定)
-    # resp.headers['CF-Cache-Status'] = 'DYNAMIC'  # 标记为动态内容，CF 不会强制缓存 (不能保留,否则不会错误缓存)
     return resp
 
 
@@ -2697,34 +2649,6 @@ def api_ranking(period):
     if period not in ('24h','7d','30d'): period='24h'
     min_uptime = request.args.get('min_uptime', 0, type=float)
     resp = jsonify({'period':period,'ranking':db.get_ranking(period, 200, min_uptime)})
-    # 1. 基础内容类型（根据你的资源调整，比如text/html）
-    resp.headers['Content-Type']      = 'application/json'
-
-    # 2. ETag（必须！用于验证内容是否更新，源站内容变则ETag变）保证ETag能随内容变化生成（需要定义否则报错,先拿掉）
-    # resp.headers['ETag']              = etag
-
-    # 3. 核心缓存规则（重点）
-    # - public：允许所有缓存（浏览器/CF）存储
-    # - max-age=0：浏览器每次都验证（可选，根据你对浏览器的需求）
-    # - must-revalidate：强制过期后验证
-    # - s-maxage=10：CF边缘缓存10秒（10秒后过期，触发回源验证）
-    # - stale-while-revalidate=31536000：CF过期后仍可用缓存，同时后台异步回源更新
-    # - stale-if-error=31536000：源站离线/错误时，CF无限期使用最后一次缓存
-    resp.headers['Cache-Control']     = 'public, max-age=0, must-revalidate, s-maxage=10, stale-while-revalidate=31536000, stale-if-error=31536000'
-
-    # 4. CF专属兜底（可选，增强兼容性）
-    # - edge-cache-ttl=10：CF边缘缓存TTL=10秒（和s-maxage=10一致）
-    # - always-use-stale: true：源站不可用时强制使用缓存
-    resp.headers['Edge-Cache-TTL']    = '10'
-    resp.headers['Surrogate-Control'] = 'stale-while-revalidate=31536000, stale-if-error=31536000'
-
-    # 5. Vary: Cookie 按 Cookie 区分缓存版本
-    resp.headers['Vary']              = 'Cookie'
-
-    # 01、CF-Cache-Status 手动设置！这个字段是CF自动返回的，手动设会失效/冲突
-    # 02、CF-Cache-Status = 'HIT'/'DYNAMIC'，这是CF的响应标识，不是源站可设置的请求头
-    # resp.headers['CF-Cache-Status'] = 'HIT'  # 仅标识，CF会自动更新 (不能保留,因为这由CF决定)
-    # resp.headers['CF-Cache-Status'] = 'DYNAMIC'  # 标记为动态内容，CF 不会强制缓存 (不能保留,否则不会错误缓存)
     return resp
 
 
@@ -2974,34 +2898,6 @@ def api_logs():
     level = request.args.get('level', 'all').lower()  # all | info | success | error
     if level not in ('all', 'info', 'success', 'error'): level = 'all'
     resp = jsonify(db.get_logs(limit, level=level))
-    # 1. 基础内容类型（根据你的资源调整，比如text/html）
-    resp.headers['Content-Type']      = 'application/json'
-
-    # 2. ETag（必须！用于验证内容是否更新，源站内容变则ETag变）保证ETag能随内容变化生成（需要定义否则报错,先拿掉）
-    # resp.headers['ETag']              = etag
-
-    # 3. 核心缓存规则（重点）
-    # - public：允许所有缓存（浏览器/CF）存储
-    # - max-age=0：浏览器每次都验证（可选，根据你对浏览器的需求）
-    # - must-revalidate：强制过期后验证
-    # - s-maxage=10：CF边缘缓存10秒（10秒后过期，触发回源验证）
-    # - stale-while-revalidate=31536000：CF过期后仍可用缓存，同时后台异步回源更新
-    # - stale-if-error=31536000：源站离线/错误时，CF无限期使用最后一次缓存
-    resp.headers['Cache-Control']     = 'public, max-age=0, must-revalidate, s-maxage=10, stale-while-revalidate=31536000, stale-if-error=31536000'
-
-    # 4. CF专属兜底（可选，增强兼容性）
-    # - edge-cache-ttl=10：CF边缘缓存TTL=10秒（和s-maxage=10一致）
-    # - always-use-stale: true：源站不可用时强制使用缓存
-    resp.headers['Edge-Cache-TTL']    = '10'
-    resp.headers['Surrogate-Control'] = 'stale-while-revalidate=31536000, stale-if-error=31536000'
-
-    # 5. Vary: Cookie 按 Cookie 区分缓存版本
-    resp.headers['Vary']              = 'Cookie'
-
-    # 01、CF-Cache-Status 手动设置！这个字段是CF自动返回的，手动设会失效/冲突
-    # 02、CF-Cache-Status = 'HIT'/'DYNAMIC'，这是CF的响应标识，不是源站可设置的请求头
-    # resp.headers['CF-Cache-Status'] = 'HIT'  # 仅标识，CF会自动更新 (不能保留,因为这由CF决定)
-    # resp.headers['CF-Cache-Status'] = 'DYNAMIC'  # 标记为动态内容，CF 不会强制缓存 (不能保留,否则不会错误缓存)
     return resp
 
 @app.route('/api/logs/clear', methods=['POST'])

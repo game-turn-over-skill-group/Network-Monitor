@@ -3134,7 +3134,8 @@ createApp({
                 if (domainF && domain !== domainF) continue;
                 const p = cfg.value.dashboard_stat_period || '24h';
                 const pkMap = {'24h':'uptime_24h','7d':'uptime_7d','30d':'uptime_30d'};
-                const u = tr[pkMap[p] || 'uptime_24h'] ?? null;
+                const u = tr[pkMap[p] || 'uptime_24h'] ?? null;   // 域名级（给 upcls 和排行用）
+                const ipUptimeKey = pkMap[p] || 'uptime_24h';     // 新增：IP 级使用同一周期的 key（关键修复）
                 const activeIps = (tr.ips||[]).filter(ip=>!ip.removed);
                 const hasOnline = activeIps.some(ip=>ip.status==='online');
                 const hasOff = activeIps.some(ip=>ip.status==='offline');
@@ -3175,7 +3176,7 @@ createApp({
                         rawStatus: ip.status||'unknown',
                         paused: isPaused,
                         uptime: u!==null ? Math.round(u*10)/10 : null, upcls,
-                        ip_uptime: ip.ip_uptime !== undefined ? ip.ip_uptime : null,
+                        ip_uptime: ip[ipUptimeKey] !== undefined ? Math.round(ip[ipUptimeKey]*10)/10 : null,
                         last_check: ip.last_check || null
                     });
                 }
