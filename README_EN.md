@@ -457,4 +457,4 @@ MIT License
 ---
 
 ##### Project founder: rer
-##### Contributors: minimaxi, Claude, Doubao
+##### Contributors: minimaxi, Claude, Doubao、grok、deepseek

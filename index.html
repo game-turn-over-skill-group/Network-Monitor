@@ -1300,7 +1300,7 @@
                                         <span v-if="row.ip_uptime !== null && row.ip_uptime !== undefined"
                                               class="badge-up" :class="row.paused ? 'up-yellow' : (row.rawStatus === 'offline' ? 'up-red' : (row.ip_uptime>=80 ? 'up-green' : (row.ip_uptime>=50 ? 'up-yellow' : 'up-red')))"
                                               style="font-size:.78rem;opacity:.85;">{{ row.ip_uptime.toFixed(1) }}%</span>
-                                        <span v-else class="badge-up up-unknown" style="font-size:.78rem;opacity:.85;">?</span>
+                                        <span v-else style="font-size:.78rem;color:#64748b;">-</span>
                                     </td>
                                     <!-- 操作 -->
                                     <td style="text-align:center;">
@@ -3189,7 +3189,7 @@ createApp({
                         rawStatus: ip.status||'unknown',
                         paused: isPaused,
                         uptime: u!==null ? Math.round(u*10)/10 : null, upcls,
-                        ip_uptime: ip[ipUptimeKey] !== undefined ? Math.round(ip[ipUptimeKey]*10)/10 : null,
+                        ip_uptime: (ip[ipUptimeKey] !== undefined && ip[ipUptimeKey] !== null) ? Math.round(ip[ipUptimeKey] * 10) / 10 : null,
                         last_check: ip.last_check || null
                     });
                 }
