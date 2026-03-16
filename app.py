@@ -29,12 +29,18 @@ from werkzeug.exceptions import HTTPException
 # ==================== 配置持久化 ====================
 CONFIG_FILE  = 'config.json'
 DEFAULT_CONFIG = {
-    'port': 443,
+    'listen_port': 443,                # 新增，默认端口
+    'listen_ipv4': 'global',           # 新增，默认 IPv4 监听模式
+    'listen_ipv4_custom': '',          # 新增，默认自定义 IPv4 地址为空
+    'listen_ipv6': 'global',           # 新增，默认 IPv6 监听模式
+    'listen_ipv6_custom': '',          # 新增，默认自定义 IPv6 地址为空
+    'http_proxy_enabled': False,       # 新增，HTTP 代理独立开关
+    'udp_proxy_enabled': False,        # 新增，UDP 代理独立开关
     'check_interval': 30,
     'timeout': 5,
-    'retry_mode': 'polling',   # 'polling' | 固定秒数(int)
-    'retry_interval': 5,       # 当 retry_mode != 'polling' 时使用
-    'monitor_workers': 120,    # 并发检测线程数（可配置，建议 30~200）
+    'retry_mode': 'polling',    # 'polling' | 固定秒数(int)
+    'retry_interval': 5,        # 当 retry_mode != 'polling' 时使用
+    'monitor_workers': 120,     # 并发检测线程数（可配置，建议 30~200）
     'stagger_batch_proxy': 5,   # 代理模式：每批发包数
     'stagger_batch_direct': 5,  # 直连模式：每批发包数
     'stagger_delay_proxy': 150, # 代理模式：批间延迟 ms
@@ -46,7 +52,6 @@ DEFAULT_CONFIG = {
     'max_history': 2880,  # history_24h 上限：24h × 3600s ÷ 30s间隔 = 2880点
     'http_proxy': '',
     'udp_proxy': '',
-    'proxy_enabled': False,
     'dns_mode': 'system',      # system | dnspython | custom
     'dns_custom': '8.8.8.8',   # 自定义DNS时使用，支持多个用逗号分隔
     'max_log_entries': 1000,    # 日志最大条目数（兼容旧版，以下三项优先）
@@ -61,7 +66,6 @@ DEFAULT_CONFIG = {
     'export_suffix': '/announce',   # 导出 tracker 列表时追加的路径后缀
     'show_removed_ips': True,       # 是否显示已移除的历史IP（前端控制）
     'default_layout_width': '1700', # 默认页面视野宽度（px字符串，对应50%~100%）
-    'listen_local': False,          # 是否仅监听本地回环（127.0.0.1, [::1]）
     'users': [
         {"username": "admin",    "password": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", "role": "admin"},
         {"username": "operator", "password": "06e55b633481f7bb072957eabcf110c972e86691c3cfedabe088024bffe42f23", "role": "operator"},
@@ -79,9 +83,10 @@ def load_config():
             for k in ['check_interval','timeout','retry_mode','retry_interval',
                       'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
                       'log_to_disk','log_level','console_log_level',
-                      'http_proxy','udp_proxy','proxy_enabled',
+                      'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
+                      'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                       'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
-                      'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','listen_local','users']:
+                      'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','users']:
                 if k in saved:
                     cfg[k] = saved[k]
             # 向后兼容：旧配置文件用 rank_stat_period，迁移到 dashboard_stat_period
@@ -99,10 +104,11 @@ def persist_config(cfg):
         savable = {k: cfg[k] for k in ['check_interval','timeout','retry_mode','retry_interval',
                                         'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
                                         'log_to_disk','log_level',
-                                        'http_proxy','udp_proxy','proxy_enabled',
+                                        'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
+                                        'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                                         'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                                         'dashboard_stat_period','tracker_stat_period','cache_history',
-                                        'tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','listen_local','users']
+                                        'tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','users']
                    if k in cfg}
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(savable, f, indent=2, ensure_ascii=False)
@@ -331,7 +337,7 @@ def access_log(msg: str):
 # ==================== 代理工具 ====================
 def make_proxy_dict():
     """构建 requests 代理字典"""
-    if not CONFIG.get('proxy_enabled'):
+    if not CONFIG.get('http_proxy_enabled'):
         return None
     p = CONFIG.get('http_proxy', '').strip()
     if not p:
@@ -479,11 +485,17 @@ class TrackerDB:
                         if ip_obj.get('paused') and not ip_obj.get('removed'):
                             paused_ip_set.add(ip_obj.get('ip', ''))
                 for pk, secs in HISTORY_WINDOWS.items():
-                    s = hdb.get_domain_summary(domain, secs, excluded_ips=paused_ip_set if paused_ip_set else None)
-                    t_copy[f'uptime_{pk}'] = round(s['ok'] / s['total'] * 100, 1) if s['total'] > 0 else None
-                    t_copy[f'ok_{pk}']     = s['ok']
-                    t_copy[f'total_{pk}']  = s['total']
-                    t_copy[f'fail_{pk}']   = s['fail']
+                    if CONFIG.get('cache_history', True):
+                        s = hdb.get_domain_summary(domain, secs, excluded_ips=paused_ip_set if paused_ip_set else None)
+                        t_copy[f'uptime_{pk}'] = round(s['ok'] / s['total'] * 100, 1) if s['total'] > 0 else None
+                        t_copy[f'ok_{pk}']     = s['ok']
+                        t_copy[f'total_{pk}']  = s['total']
+                        t_copy[f'fail_{pk}']   = s['fail']
+                    else:
+                        t_copy[f'uptime_{pk}'] = None
+                        t_copy[f'ok_{pk}']     = None
+                        t_copy[f'total_{pk}']  = None
+                        t_copy[f'fail_{pk}']   = None
                 for k in ('history_24h', 'history_7d', 'history_30d'):
                     t_copy.pop(k, None)
                 result[domain] = t_copy
@@ -582,18 +594,19 @@ class TrackerDB:
                 if ip_info['ip'] not in existing:
                     ip_info.update({'status': 'unknown', 'latency': -1, 'last_check': None})
                     td['ips'].append(ip_info)
-            # 标记消失的旧 IP（不删除，仅 removed 标记；重启时从 ips 移出，历史保留在 history.json）
-            changed = False
-            for ip_obj in td['ips']:
+            # 处理消失的旧 IP
+            show_removed = CONFIG.get('show_removed_ips', True)
+            # 从后往前遍历，避免删除时索引问题
+            for i in range(len(td['ips'])-1, -1, -1):
+                ip_obj = td['ips'][i]
                 if ip_obj['ip'] not in new_ips:
-                    if not ip_obj.get('removed'):
-                        ip_obj['removed'] = True
-                        changed = True
-                else:
-                    if ip_obj.pop('removed', None):
-                        changed = True
-            if changed:
-                self._save()
+                    if show_removed:
+                        if not ip_obj.get('removed'):
+                            ip_obj['removed'] = True
+                    else:
+                        td['ips'].pop(i)  # 直接删除，不保留为 removed
+            self._recalc()
+            self._save()
 
     def _save(self):
         try:
@@ -604,6 +617,7 @@ class TrackerDB:
                     for ip_obj in t['ips']:
                         ip_entry = {k: v for k, v in ip_obj.items()
                                     if k not in ('history_24h','history_7d','history_30d')}
+                        # 如果 cache_history 为 True，才写入历史摘要
                         if CONFIG.get('cache_history', True):
                             # IP级摘要（供人工查看，不用于重启恢复）
                             ip = ip_obj.get('ip', '')
@@ -624,9 +638,11 @@ class TrackerDB:
                     data[d] = entry
             with open(CONFIG['data_file'], 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            # 同步保存 history.json
-            hdb.save()
-        except Exception: pass
+            # 只有 cache_history 为 True 时才保存 history.json
+            if CONFIG.get('cache_history', True):
+                hdb.save()
+        except Exception:
+            pass
 
     def load(self):
         try:
@@ -1554,7 +1570,7 @@ def _proxy_tcp_connect(ip, port, timeout):
 def tcp_ping(ip, port):
     """TCP 连接检测，支持 HTTP CONNECT 和 SOCKS5 代理，支持 IPv4/IPv6 目标。"""
     timeout = CONFIG['timeout']
-    use_proxy = (CONFIG.get('proxy_enabled') and
+    use_proxy = (CONFIG.get('http_proxy_enabled') and
                  CONFIG.get('http_proxy', '').strip())
     s = None
     try:
@@ -1684,7 +1700,7 @@ def udp_ping(ip, port):
     代理路径: 使用 Socks5UdpSocket（手动SOCKS5协议，支持IPv4/IPv6目标，不依赖PySocks）。
     直连路径: 使用 getaddrinfo 获取正确 sockaddr，原生支持 IPv4/IPv6。
     """
-    udp_proxy = CONFIG.get('udp_proxy', '').strip() if CONFIG.get('proxy_enabled') else ''
+    udp_proxy = CONFIG.get('udp_proxy', '').strip() if CONFIG.get('udp_proxy_enabled') else ''
     packet  = _udp_tracker_packet()
     timeout = CONFIG['timeout']
     tid     = packet[12:16]  # transaction_id bytes，用于校验响应
@@ -2034,7 +2050,7 @@ def monitor_loop():
                     with _round_lock: _round_fail[0] += 1
 
             # ── 发包错峰：分批提交避免瞬间高并发冲击本地网络/代理 ──────────
-            use_proxy_stagger = bool(CONFIG.get('proxy_enabled') and CONFIG.get('udp_proxy','').strip())
+            use_proxy_stagger = bool(CONFIG.get('udp_proxy_enabled') and CONFIG.get('udp_proxy','').strip())
             if use_proxy_stagger:
                 STAGGER_BATCH = int(CONFIG.get('stagger_batch_proxy', 5))
                 STAGGER_DELAY = int(CONFIG.get('stagger_delay_proxy', 150)) / 1000.0
@@ -2995,6 +3011,27 @@ def api_clear_history():
         app.logger.error('[history/clear] 清空历史失败: %s', e, exc_info=True)
         return jsonify({'success': False, 'error': '操作失败，请查看服务端日志'}), 500
 
+@app.route('/api/ips/clear-removed', methods=['POST'])
+@_require_role('admin', 'operator')
+def api_clear_removed_ips():
+    """清空所有标记为 removed 的历史IP（内存中删除，并保存到 data.json）"""
+    try:
+        with db.lock:
+            cleared = 0
+            for domain, td in db.trackers.items():
+                # 从后往前删除 removed 的 IP
+                for i in range(len(td['ips'])-1, -1, -1):
+                    if td['ips'][i].get('removed'):
+                        td['ips'].pop(i)
+                        cleared += 1
+            db._recalc()
+            db._save()
+        cprint(f'[api] 清空历史IP: 已删除 {cleared} 个IP', 'info')
+        return jsonify({'success': True, 'cleared': cleared})
+    except Exception as e:
+        app.logger.error(f"清空历史IP失败: {e}")
+        return jsonify({'error': '清空失败'}), 500
+
 @app.route('/api/history/status', methods=['GET'])
 @_require_role('admin', 'operator', 'viewer')
 def api_history_status():
@@ -3018,10 +3055,12 @@ def api_config():
             return jsonify({'error': '权限不足'}), 403
         data = request.json or {}
         keys = ['check_interval','timeout','retry_mode','retry_interval',
-                'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','show_removed_ips','default_layout_width','listen_local',
-                'log_to_disk','log_level','console_log_level','http_proxy','udp_proxy','proxy_enabled',
+                'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
+                'log_to_disk','log_level','console_log_level','http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
+                'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                 'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
-                'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh']
+                'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
+                'export_suffix','show_removed_ips','default_layout_width','users']
 
         # 字段的人可读标签
         labels = {
@@ -3034,14 +3073,18 @@ def api_config():
             'stagger_batch_direct':  '直连每批发包数',
             'stagger_delay_proxy':   '代理批间延迟',
             'stagger_delay_direct':  '直连批间延迟',
-            'export_suffix':         '导出后缀',
-            'listen_local':          '仅本地监听',
             'log_to_disk':           '日志存盘',
             'log_level':             '日志级别',
-            'console_log_level':     '日志级别',
+            'console_log_level':     '控制台日志级别',
             'http_proxy':            'HTTP代理',
             'udp_proxy':             'UDP代理',
-            'proxy_enabled':         '代理开关',
+            'http_proxy_enabled':    'HTTP代理开关',
+            'udp_proxy_enabled':     'UDP代理开关',
+            'listen_port':           '监听端口',
+            'listen_ipv4':           'ipv4监听',
+            'listen_ipv4_custom':    '自定义ipv4监听',
+            'listen_ipv6':           'ipv6监听',
+            'listen_ipv6_custom':    '自定义ipv6监听',
             'dns_mode':              'DNS模式',
             'dns_custom':            '自定义DNS',
             'max_log_entries':       '最大日志条数',
@@ -3050,9 +3093,13 @@ def api_config():
             'max_log_error':         'Error日志最大条数',
             'page_refresh_ms':       '页面刷新间隔',
             'dashboard_stat_period': '仪表盘统计周期',
-            'tracker_stat_period':   '监控统计周期',
+            'tracker_stat_period':   '监控列表统计周期',
             'cache_history':         '缓存统计可用率',
             'tab_switch_refresh':    '切换时刷新',
+            'export_suffix':         '导出后缀',
+            'show_removed_ips':      '显示历史IP',
+            'default_layout_width':  '默认页面视野宽度',
+            'users':                 '用户账户',
         }
         suffixes = {
             'check_interval': 's', 'timeout': 's', 'retry_interval': 's',
@@ -3080,7 +3127,8 @@ def api_config():
 
         persist_config(CONFIG)
 
-        proxy_changed_keys = {'udp_proxy', 'proxy_enabled', 'timeout'}
+        # 如果代理相关配置变化，重置 SOCKS5 连接池
+        proxy_changed_keys = {'udp_proxy', 'timeout', 'udp_proxy_enabled', 'http_proxy_enabled'}
         if any(k in data for k in proxy_changed_keys):
             _socks5_pool.invalidate()
             cprint('[SOCKS5Pool] 代理配置变更，连接池已重置', 'debug')
@@ -3098,10 +3146,10 @@ def api_config():
         return jsonify({k: CONFIG.get(k) for k in public_keys})
     # 已登录用户返回更多展示字段，但不含账户信息（users/密钥）
     all_keys = ['check_interval','timeout','retry_mode','retry_interval',
-                'log_to_disk','log_level','http_proxy','udp_proxy','proxy_enabled',
+                'log_to_disk','log_level','http_proxy','udp_proxy','http_proxy_enabled','udp_proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
-                'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width','listen_local']
+                'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width']
     return jsonify({k: CONFIG.get(k) for k in all_keys})
 
 @app.route('/api/users', methods=['GET'])
@@ -3192,10 +3240,19 @@ if __name__ == '__main__':
     probe_t = threading.Thread(target=_probe_loop, daemon=True)
     probe_t.start()
 
+    # 显示启动信息（略，但需要更新端口显示）
+    port = CONFIG['listen_port']  # 使用新的端口配置
+    ipv4_mode = CONFIG.get('listen_ipv4', 'global')
+    ipv6_mode = CONFIG.get('listen_ipv6', 'global')
+    ipv4_custom = CONFIG.get('listen_ipv4_custom', '')
+    ipv6_custom = CONFIG.get('listen_ipv6_custom', '')
+
     print(f"\n{'='*58}")
     print(f"  网络监控 - Network Monitor")
     print(f"{'='*58}")
-    print(f"  访问地址       : http://localhost:{CONFIG['port']}  (IPv4+IPv6 双栈)")
+    print(f"  IPv4监听模式   : {ipv4_mode}" + (f" ({ipv4_custom})" if ipv4_mode == 'custom' and ipv4_custom else ""))
+    print(f"  IPv6监听模式   : {ipv6_mode}" + (f" ({ipv6_custom})" if ipv6_mode == 'custom' and ipv6_custom else ""))
+    print(f"  访问地址       : http://localhost:{CONFIG['listen_port']}  (IPv4+IPv6 双栈)")
     print(f"  监控间隔       : {CONFIG['check_interval']}秒")
     print(f"  超时时间       : {CONFIG['timeout']}秒")
     dns_desc = {'system':'系统DNS','dnspython':'dnspython','custom':f"自定义({CONFIG.get('dns_custom','8.8.8.8')})"}.get(CONFIG.get('dns_mode','system'),'系统DNS')
@@ -3204,15 +3261,18 @@ if __name__ == '__main__':
     print(f"  重试模式       : {CONFIG['retry_mode']}")
     print(f"  日志级别       : {CONFIG.get('log_level', 'info')}")
     print(f"  磁盘日志       : {'开启' if CONFIG['log_to_disk'] else '关闭'}")
-    if CONFIG['proxy_enabled']:
+    if CONFIG['http_proxy_enabled']:
         http_p = CONFIG.get('http_proxy','').strip()
-        udp_p  = CONFIG.get('udp_proxy','').strip()
-        print(f"  代理           : 启用")
-        print(f"    HTTP/TCP代理 : {http_p if http_p else '(未设置)'}")
-        print(f"    UDP代理      : {udp_p  if udp_p  else '(未设置)'}")
+        print(f"  HTTP代理       : 启用")
+        print(f"  HTTP/TCP代理   : {http_p if http_p else '(未设置)'}")
     else:
-        print(f"  代理           : 关闭")
-    print(f"  监听设置       : {'仅本地回环 (127.0.0.1, [::1])' if CONFIG.get('listen_local') else '所有接口 (0.0.0.0, [::])'}")
+        print(f"  HTTP代理       : 关闭")
+    if CONFIG['udp_proxy_enabled']:
+        udp_p  = CONFIG.get('udp_proxy','').strip()
+        print(f"  UDP代理        : 启用")
+        print(f"  UDP代理        : {udp_p  if udp_p  else '(未设置)'}")
+    else:
+        print(f"  UDP代理        : 关闭")
     users_info = CONFIG.get('users', [])
     print(f"  用户账户       : {len(users_info)} 个 ({', '.join(u['username']+'('+u['role']+')' for u in users_info)})")
     print(f"{'='*58}")
@@ -3225,23 +3285,52 @@ if __name__ == '__main__':
     try:
         from waitress import serve
         print("  使用 waitress 生产服务器\n")
-        port = CONFIG['port']
-        listen_local = CONFIG.get('listen_local', False)
-        if listen_local:
-            listen_str = f'127.0.0.1:{port} [::1]:{port}'
-        else:
-            listen_str = f'0.0.0.0:{port} [::]:{port}'
-        serve(app, listen=listen_str, threads=8, ident='')  # 禁止 waitress 注入 Server 响应头
+
+        # 构建监听地址列表
+        listen_addrs = []
+
+        # IPv4 地址处理
+        if ipv4_mode == 'global':
+            listen_addrs.append(f'0.0.0.0:{port}')
+        elif ipv4_mode == 'local':
+            listen_addrs.append(f'127.0.0.1:{port}')
+        elif ipv4_mode == 'custom':
+            if ipv4_custom:
+                listen_addrs.append(f'{ipv4_custom}:{port}')
+            else:
+                print("警告: IPv4 自定义地址为空，将不监听 IPv4")
+
+        # IPv6 地址处理
+        if ipv6_mode == 'global':
+            listen_addrs.append(f'[::]:{port}')
+        elif ipv6_mode == 'local':
+            listen_addrs.append(f'[::1]:{port}')
+        elif ipv6_mode == 'custom':
+            if ipv6_custom:
+                # 如果自定义 IPv6 地址不含方括号，添加方括号
+                if ':' in ipv6_custom and not ipv6_custom.startswith('['):
+                    ipv6_custom = f'[{ipv6_custom}]'
+                listen_addrs.append(f'{ipv6_custom}:{port}')
+            else:
+                print("警告: IPv6 自定义地址为空，将不监听 IPv6")
+
+        if not listen_addrs:
+            print("错误：至少需要监听一个地址", file=sys.stderr)
+            sys.exit(1)
+
+        serve(app, listen=listen_addrs, threads=8, ident='')
     except ImportError:
         print("  提示: pip install waitress 可消除开发警告\n")
+        # 使用 Flask 内置服务器（仅用于开发，不支持同时监听多地址）
+        # 这里简化：如果同时监听了多个地址，使用第一个 IPv4 地址；如果只监听 IPv6 则使用 IPv6
         import socket
-        try:
-            s = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
-            s.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
-            s.close()
-            listen_local = CONFIG.get('listen_local', False)
-            host = '::1' if listen_local else '::'
-            app.run(host=host, port=CONFIG['port'], debug=False)
-        except OSError:
-            host = '127.0.0.1' if CONFIG.get('listen_local', False) else '0.0.0.0'
-            app.run(host=host, port=CONFIG['port'], debug=False)
+        host = None
+        if listen_addrs:
+            first = listen_addrs[0]
+            if '[' in first:  # IPv6
+                host = first.split('[')[1].split(']')[0]
+            else:
+                host = first.split(':')[0]
+        else:
+            host = '127.0.0.1'  # fallback
+        app.run(host=host, port=port, debug=False)

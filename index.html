@@ -1874,34 +1874,91 @@
                 </div>
             </div>
 
-            <!-- 代理配置 -->
-            <div class="card mb-3">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span>{{ t('config.proxyTitle') }}</span>
-                    <div class="form-check form-switch mb-0">
-                        <input class="form-check-input" type="checkbox" v-model="cfg.proxy_enabled" @change="saveCfg">
-                        <label class="form-check-label">{{ t('config.enable') }}</label>
-                    </div>
-                </div>
+            <!-- 网络设置 -->
+             <div class="card mb-3">
+                <div class="card-header">{{ t('config.networkTitle') }}</div>
                 <div class="card-body">
-                    <div class="row g-3">
-                        <div class="col-md-6">
+                    <!-- 监听端口 -->
+                    <div class="row mb-3">                        
+                        <div class="col-md-2">
+                            <label class="form-label">{{ t('config.listenPort') }}</label>
+                        </div>
+                        <div class="col-md-3">
+                            <input type="number" class="form-control" v-model.number="cfg.listen_port" @change="saveCfg" min="1" max="65535">
+                            <div class="form-text">{{ t('config.listenPortDesc') }}</div>
+                        </div>
+                    </div>
+                    <!-- IPv4 监听模式 -->
+                    <div class="row mb-3 align-items-center">
+                        <div class="col-md-2">
+                            <label class="form-label">{{ t('config.listenIPv4') }}</label>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" v-model="cfg.listen_ipv4" @change="saveCfg">
+                                <option value="global">{{ t('config.listenGlobal') }}</option>
+                                <option value="local">{{ t('config.listenLocal') }}</option>
+                                <option value="disabled">{{ t('config.listenDisabled') }}</option>
+                                <option value="custom">{{ t('config.listenCustom') }}</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4" v-if="cfg.listen_ipv4 === 'custom'">
+                            <input type="text" class="form-control" v-model="cfg.listen_ipv4_custom" @change="saveCfg" placeholder="1.2.3.4">
+                        </div>
+                    </div>
+                    <!-- IPv6 监听模式 -->
+                    <div class="row mb-3 align-items-center">
+                        <div class="col-md-2">
+                            <label class="form-label">{{ t('config.listenIPv6') }}</label>
+                        </div>
+                        <div class="col-md-3">
+                            <select class="form-select" v-model="cfg.listen_ipv6" @change="saveCfg">
+                                <option value="global">{{ t('config.listenGlobal') }}</option>
+                                <option value="local">{{ t('config.listenLocal') }}</option>
+                                <option value="disabled">{{ t('config.listenDisabled') }}</option>
+                                <option value="custom">{{ t('config.listenCustom') }}</option>
+                            </select>
+                        </div>
+                        <div class="col-md-4" v-if="cfg.listen_ipv6 === 'custom'">
+                            <input type="text" class="form-control" v-model="cfg.listen_ipv6_custom" @change="saveCfg" placeholder="2001:db8::1">
+                        </div>
+                    </div>
+                    <hr class="my-3">
+                    <!-- HTTP 代理 -->
+                    <div class="row mb-3 align-items-center">
+                        <div class="col-md-2">
                             <label class="form-label">{{ t('config.httpProxy') }}</label>
-                            <input type="text" class="form-control" v-model="cfg.http_proxy"
-                                   :placeholder="t('config.httpProxyPlaceholder')" @blur="saveCfg">
-                            <div class="form-text">{{ t('config.httpProxyDesc') }}</div>
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" v-model="cfg.http_proxy_enabled" @change="toggleHttpProxy" id="httpProxySwitch">
+                                <label class="form-check-label" for="httpProxySwitch">{{ t('config.enable') }}</label>
+                            </div>
                         </div>
                         <div class="col-md-6">
+                            <input type="text" class="form-control" v-model="cfg.http_proxy" :disabled="!cfg.http_proxy_enabled" :placeholder="t('config.httpProxyPlaceholder')" @blur="saveCfg">
+                            <div class="form-text">{{ t('config.httpProxyDesc') }}</div>
+                        </div>
+                    </div>
+                    <!-- UDP 代理 -->
+                    <div class="row mb-3 align-items-center">
+                        <div class="col-md-2">
                             <label class="form-label">{{ t('config.udpProxy') }}</label>
-                            <input type="text" class="form-control" v-model="cfg.udp_proxy"
-                                   :placeholder="t('config.udpProxyPlaceholder')" @blur="saveCfg">
+                        </div>
+                        <div class="col-md-2">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" v-model="cfg.udp_proxy_enabled" @change="toggleUdpProxy" id="udpProxySwitch">
+                                <label class="form-check-label" for="udpProxySwitch">{{ t('config.enable') }}</label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <input type="text" class="form-control" v-model="cfg.udp_proxy" :disabled="!cfg.udp_proxy_enabled" :placeholder="t('config.udpProxyPlaceholder')" @blur="saveCfg">
                             <div class="form-text">{{ t('config.udpProxyDesc') }}</div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- 显示 & 日志配置 -->
+            <!-- 配置 & 显示配置 -->
             <div class="card mb-3">
                 <div class="card-header">{{ t('config.displayTitle') }}</div>
                 <div class="card-body">
@@ -1974,40 +2031,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="col-md-4 d-flex align-items-center">
-                            <div class="cfg-row w-100">
-                                <div>
-                                    <strong>{{ t('config.showRemovedIps') }}</strong>
-                                    <p class="text-secondary mb-0" style="font-size:.8rem;">{{ t('config.showRemovedIpsDesc') }}</p>
-                                </div>
-                                <div class="form-check form-switch mb-0">
-                                    <input class="form-check-input" type="checkbox" v-model="cfg.show_removed_ips" @change="saveCfg" style="cursor:pointer;">
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-4 d-flex align-items-center">
-                            <div class="cfg-row w-100">
-                                <div>
-                                    <strong>{{ t('config.logToDisk') }}</strong>
-                                    <p class="text-secondary mb-0" style="font-size:.8rem;">{{ t('config.logToDiskDesc') }}</p>
-                                </div>
-                                <div class="form-check form-switch">
-                                    <input class="form-check-input" type="checkbox" v-model="cfg.log_to_disk" @change="saveCfg">
-                                </div>
-                            </div>
-                        </div>
-                        <!-- 新增：仅本地监听开关 -->
-                        <div class="col-md-4 d-flex align-items-center">
-                            <div class="cfg-row w-100">
-                                <div>
-                                    <strong>{{ t('config.listenLocal') }}</strong>
-                                    <p class="text-secondary mb-0" style="font-size:.8rem;">{{ t('config.listenLocalDesc') }}</p>
-                                </div>
-                                <div class="form-check form-switch mb-0">
-                                    <input class="form-check-input" type="checkbox" v-model="cfg.listen_local" @change="saveCfg">
-                                </div>
-                            </div>
-                        </div>
+                        <!-- 结束 -->
                     </div>
                 </div>
             </div>
@@ -2044,6 +2068,16 @@
                 <div class="card-header">{{ t('config.cacheTitle') }}</div>
                 <div class="card-body">
                     <div class="row g-3">
+                        <!-- 日志存盘开关移到第一位 -->
+                        <div class="col-md-8">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" v-model="cfg.log_to_disk" @change="saveCfg" id="logToDiskSwitch">
+                                <label class="form-check-label" for="logToDiskSwitch">{{ t('config.logToDisk') }}</label>
+                            </div>
+                            <div class="form-text">{{ t('config.logToDiskDesc') }}</div>
+                        </div>
+                        <div class="col-md-4"></div>
+                        <!-- 缓存统计可用率开关（第二位） -->
                         <div class="col-md-8">
                             <div class="form-check form-switch">
                                 <input class="form-check-input" type="checkbox" v-model="cfg.cache_history" @change="saveCfg" id="cacheHistorySwitch">
@@ -2054,6 +2088,19 @@
                         <div class="col-md-4 d-flex align-items-center">
                             <button class="btn btn-sm btn-outline-danger" @click="clearHistory">
                                 <i class="bi bi-trash me-1"></i>{{ t('config.clearHistory') }}
+                            </button>
+                        </div>
+                        <!-- 显示历史IP开关（第三位） -->
+                        <div class="col-md-8">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" v-model="cfg.show_removed_ips" @change="saveCfg" id="showRemovedIpsSwitch">
+                                <label class="form-check-label" for="showRemovedIpsSwitch">{{ t('config.showRemovedIps') }}</label>
+                            </div>
+                            <div class="form-text">{{ t('config.showRemovedIpsDesc') }}</div>
+                        </div>
+                        <div class="col-md-4 d-flex align-items-center">
+                            <button class="btn btn-sm btn-outline-warning" @click="clearRemovedIps">
+                                <i class="bi bi-trash me-1"></i>{{ t('config.clearRemovedIps') }}
                             </button>
                         </div>
                     </div>
@@ -2323,8 +2370,43 @@ createApp({
         };
         const logs = ref([]);
         const logLvl = ref('');
-        const logSearch = ref('');
-        const cfg = ref({log_to_disk:false,check_interval:30,timeout:5,retry_mode:'polling',retry_interval:5,console_log_level:'info',http_proxy:'',udp_proxy:'',proxy_enabled:false,dns_mode:'system',dns_custom:'8.8.8.8',max_log_entries:1000,max_log_info:1000,max_log_success:1000,max_log_error:1000,page_refresh_ms:30000,dashboard_stat_period:'24h',tracker_stat_period:'24h',cache_history:true,tab_switch_refresh:true,monitor_workers:120,stagger_batch_proxy:5,stagger_batch_direct:5,stagger_delay_proxy:150,stagger_delay_direct:100,export_suffix:'/announce',show_removed_ips:true,default_layout_width:'1700',listen_local:false});
+        const logSearch = ref('');        
+        const cfg = ref({
+            log_to_disk: false,
+            check_interval: 30,
+            timeout: 5,
+            retry_mode: 'polling',
+            retry_interval: 5,
+            console_log_level: 'info',
+            http_proxy: '',
+            udp_proxy: '',
+            dns_mode: 'system',
+            dns_custom: '8.8.8.8',
+            max_log_entries: 1000,
+            max_log_info: 1000,
+            max_log_success: 1000,
+            max_log_error: 1000,
+            page_refresh_ms: 30000,
+            dashboard_stat_period: '24h',
+            tracker_stat_period: '24h',
+            cache_history: true,
+            tab_switch_refresh: true,
+            monitor_workers: 120,
+            stagger_batch_proxy: 5,
+            stagger_batch_direct: 5,
+            stagger_delay_proxy: 150,
+            stagger_delay_direct: 100,
+            export_suffix: '/announce',
+            show_removed_ips: true,
+            default_layout_width: '1700',
+            listen_port: 443,
+            listen_ipv4: 'global',
+            listen_ipv4_custom: '',
+            listen_ipv6: 'global',
+            listen_ipv6_custom: '',
+            http_proxy_enabled: false,
+            udp_proxy_enabled: false
+        });
         // 仪表盘 rank 切换 / 快速搜索
         const dashRankMode = ref('worst'); // 'worst' | 'best'
         const qsSearch = ref('');
@@ -2860,7 +2942,32 @@ createApp({
             }
         };
 
+        // Http代理
+        const toggleHttpProxy = async () => {
+            if (cfg.value.http_proxy_enabled && !cfg.value.http_proxy.trim()) {
+                showToast(t('config.proxyEmptyWarning'), 'warn');
+                cfg.value.http_proxy_enabled = false;
+                return;
+            }
+            await saveCfg();
+        };
+        // UDP代理
+        const toggleUdpProxy = async () => {
+            if (cfg.value.udp_proxy_enabled && !cfg.value.udp_proxy.trim()) {
+                showToast(t('config.proxyEmptyWarning'), 'warn');
+                cfg.value.udp_proxy_enabled = false;
+                return;
+            }
+            await saveCfg();
+        };
+
         const saveCfg = async () => {
+            // 记录旧值
+            const oldPort = cfg.value.listen_port;
+            const oldIPv4Mode = cfg.value.listen_ipv4;
+            const oldIPv4Custom = cfg.value.listen_ipv4_custom;
+            const oldIPv6Mode = cfg.value.listen_ipv6;
+            const oldIPv6Custom = cfg.value.listen_ipv6_custom;
             try {
                 const res = await axios.post('/api/config',{
                     log_to_disk:cfg.value.log_to_disk,
@@ -2871,7 +2978,6 @@ createApp({
                     console_log_level: cfg.value.console_log_level,
                     http_proxy:cfg.value.http_proxy,
                     udp_proxy:cfg.value.udp_proxy,
-                    proxy_enabled:cfg.value.proxy_enabled,
                     dns_mode:cfg.value.dns_mode,
                     dns_custom:cfg.value.dns_custom,
                     max_log_entries:cfg.value.max_log_entries,max_log_info:cfg.value.max_log_info,max_log_success:cfg.value.max_log_success,max_log_error:cfg.value.max_log_error,
@@ -2888,9 +2994,23 @@ createApp({
                     export_suffix:cfg.value.export_suffix||'/announce',
                     show_removed_ips:cfg.value.show_removed_ips !== false,
                     default_layout_width:cfg.value.default_layout_width||'1700',
-                    listen_local: cfg.value.listen_local,
+                    listen_port: cfg.value.listen_port,
+                    listen_ipv4: cfg.value.listen_ipv4,
+                    listen_ipv4_custom: cfg.value.listen_ipv4_custom,
+                    listen_ipv6: cfg.value.listen_ipv6,
+                    listen_ipv6_custom: cfg.value.listen_ipv6_custom,
+                    http_proxy_enabled: cfg.value.http_proxy_enabled,
+                    udp_proxy_enabled: cfg.value.udp_proxy_enabled,
                 });
                 if (res.data?.success) showToast(_t('config.savedOk'), 'ok', 2000);
+                // 检测端口或监听地址是否改变
+                if (oldPort !== cfg.value.listen_port ||
+                    oldIPv4Mode !== cfg.value.listen_ipv4 ||
+                    oldIPv4Custom !== cfg.value.listen_ipv4_custom ||
+                    oldIPv6Mode !== cfg.value.listen_ipv6 ||
+                    oldIPv6Custom !== cfg.value.listen_ipv6_custom) {
+                    showToast(_t('config.restartRequired'), 'info', 5000);
+                }
             } catch(e){ showToast(_t('config.savedFail'), 'error', 3000); }
         };
 
@@ -2964,9 +3084,24 @@ createApp({
             _toastTimer = setTimeout(() => { toast.value = {...toast.value, show:false}; }, ms);
         };
         // setup 内部翻译快捷方法（避免依赖 return 中的 t）
-        const _t = (key) => i18n.global.t(key);
+        const _t = (key, args) => i18n.global.t(key, args);
+
+        // ===== 新增：清空历史IP =====
+        const clearRemovedIps = async () => {
+            if (!confirm(_t('config.clearRemovedIpsConfirm'))) return;  // 使用 _t 而不是 t
+            try {
+                const res = await axios.post('/api/ips/clear-removed');
+                showToast(_t('config.clearRemovedIpsDone', { count: res.data.cleared }), 'ok', 3000);
+                await loadTrackers();  // 刷新列表
+            } catch(e) {
+                showToast(_t('config.clearRemovedIpsFail'), 'error');
+            }
+        };
 
         const clearHistory = async () => {
+            // 使用 i18n 提示（需在语言文件中添加 clearHistoryConfirm）
+            if (!confirm(_t('config.clearHistoryConfirm'))) return;
+
             // 前置检查1：缓存开关必须关闭
             if (cfg.value.cache_history) {
                 showToast(_t('config.clearCacheNeedOff'), 'warn', 5000);
@@ -2989,7 +3124,7 @@ createApp({
                 await axios.post('/api/history/clear');
                 showToast(_t('config.clearHistoryDone'), 'ok', 4000);
             } catch(e) {
-                showToast('清空失败: ' + e, 'error');
+                showToast(_t('config.clearHistoryFail', { error: e.message || e }), 'error');
             }
         };
         const fmtTime = (ts) => ts ? new Date(ts).toLocaleTimeString() : '-';
@@ -3443,7 +3578,10 @@ createApp({
             if (refreshMs.value > 0) timer = setInterval(async () => {
                 await loadTrackers();
                 const tab = currentTab.value;
-                if (tab === 'dashboard') await loadStats(); // stats 仅仪表盘需要
+                if (tab === 'dashboard') {     // 仪表盘需要
+                    await loadStats();
+                    await loadLogs('error');   // 新增：仅加载 error 日志
+                }
                 if (tab === 'ranking') await loadRanking();
                 if (tab === 'logs') await loadLogs();
             }, refreshMs.value);
@@ -3546,8 +3684,9 @@ createApp({
             userRows, userSaving, userSaveMsg, addUserRow, removeUserRow, saveUsers,
             tabIcon, go, loadRanking, toggleExpand, openAdd, closeAdd, doAdd,
             delTracker, pauseDomain, pauseIp, pauseAll, allPaused, retryDomain, retryIp, clearLogs, saveCfg, changeLocale,
+            toggleHttpProxy, toggleUdpProxy,
             uptime, uptimeCls, stCls, stIcon, stTxt, latCls, latW,
-            fmtTime, fmtFullTime, fmtShortTime, fmtLogTime, flag, resetRefresh, clearHistory, clearHistoryMsg, toast, showToast,
+            fmtTime, fmtFullTime, fmtShortTime, fmtLogTime, flag, resetRefresh, clearRemovedIps, clearHistory, clearHistoryMsg, toast, showToast,
             dashRankMode, dashRankList, dashAlerts, dashErrorGroups, dashErrorLogs,
             dashAvgLatency, dashP95Latency, statCardTrend,
             qsSearch, qsFilterDomain, qsPage, qsSelected, qsSelectAll, rankFilterDomain,
