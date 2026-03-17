@@ -589,24 +589,39 @@ class TrackerDB:
                 return
             existing = {x['ip']: x for x in td['ips']}
             new_ips  = {x['ip'] for x in new_ip_list}
-            # 添加新出现的 IP
-            for ip_info in new_ip_list:
-                if ip_info['ip'] not in existing:
-                    ip_info.update({'status': 'unknown', 'latency': -1, 'last_check': None})
-                    td['ips'].append(ip_info)
-            # 处理消失的旧 IP
             show_removed = CONFIG.get('show_removed_ips', True)
-            # 从后往前遍历，避免删除时索引问题
+            changed = False
+            # 从后往前遍历现有 IP
             for i in range(len(td['ips'])-1, -1, -1):
                 ip_obj = td['ips'][i]
-                if ip_obj['ip'] not in new_ips:
+                ip = ip_obj['ip']
+                if ip in new_ips:
+                    # IP 仍然存在：若有 removed 标记则清除
+                    if ip_obj.pop('removed', None) is not None:
+                        changed = True
+                else:
+                    # IP 消失
                     if show_removed:
                         if not ip_obj.get('removed'):
                             ip_obj['removed'] = True
+                            changed = True
                     else:
-                        td['ips'].pop(i)  # 直接删除，不保留为 removed
-            self._recalc()
-            self._save()
+                        td['ips'].pop(i)
+                        changed = True
+            # 添加新 IP
+            for ip_info in new_ip_list:
+                if ip_info['ip'] not in existing:
+                    ip_info.update({
+                        'status': 'unknown',
+                        'latency': -1,
+                        'last_check': None,
+                        'added_time': datetime.now().isoformat()
+                    })
+                    td['ips'].append(ip_info)
+                    changed = True
+            if changed:
+                self._recalc()
+                self._save()
 
     def _save(self):
         try:
