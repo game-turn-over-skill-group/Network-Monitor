@@ -2247,6 +2247,18 @@
 const { createApp, ref, computed, onMounted, watch, nextTick } = Vue;
 const { createI18n } = VueI18n;
 
+// 添加 axios 全局拦截器，自动附加 CSRF token
+axios.interceptors.request.use(function (config) {
+    // 从 cookie 中读取 csrf_token
+    const csrfToken = document.cookie.split('; ').find(row => row.startsWith('csrf_token='))?.split('=')[1];
+    if (csrfToken && ['post', 'put', 'delete', 'patch'].includes(config.method?.toLowerCase())) {
+        config.headers['X-CSRFToken'] = csrfToken;
+    }
+    return config;
+}, function (error) {
+    return Promise.reject(error);
+});
+
 const msgs = {
     zh: window.__i18n_zh,
     en: window.__i18n_en,
@@ -3093,6 +3105,8 @@ createApp({
                 const res = await axios.post('/api/ips/clear-removed');
                 showToast(_t('config.clearRemovedIpsDone', { count: res.data.cleared }), 'ok', 3000);
                 await loadTrackers();  // 刷新列表
+                await loadStats();      // 刷新统计卡片
+                await loadRanking();    // 刷新排行榜
             } catch(e) {
                 showToast(_t('config.clearRemovedIpsFail'), 'error');
             }
@@ -3577,14 +3591,24 @@ createApp({
             // 未登录时不启动定时刷新（cfg 为默认值，且无权限读取配置）
             if (!authUser.value.logged_in) return;
             if (refreshMs.value > 0) timer = setInterval(async () => {
-                await loadTrackers();
                 const tab = currentTab.value;
-                if (tab === 'dashboard') {     // 仪表盘需要
-                    await loadStats();
-                    await loadLogs('error');   // 新增：仅加载 error 日志
+                // 只在仪表盘和监控列表页面加载 trackers 数据
+                if (tab === 'dashboard' || tab === 'trackers') {
+                    await loadTrackers();
                 }
-                if (tab === 'ranking') await loadRanking();
-                if (tab === 'logs') await loadLogs();
+                // 仪表盘额外加载 stats 和 error 日志
+                if (tab === 'dashboard') {
+                    await loadStats();
+                    await loadLogs('error');
+                }
+                // 排行榜页面加载 ranking
+                if (tab === 'ranking') {
+                    await loadRanking();
+                }
+                // 日志页面加载 logs（内部会根据 logLvl 自动处理）
+                if (tab === 'logs') {
+                    await loadLogs();
+                }
             }, refreshMs.value);
         };
 

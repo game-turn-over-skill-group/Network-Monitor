@@ -16,14 +16,14 @@ import random
 import re
 import hashlib
 import secrets
-from datetime import datetime
+from datetime import datetime, timedelta
+from functools import wraps
 from flask import Flask, jsonify, request, make_response, session, g, Response, redirect, send_from_directory
 from flask_cors import CORS
 import dns.resolver
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests as req_lib
-import functools
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple, List
 from werkzeug.exceptions import HTTPException
 
 # ==================== 配置持久化 ====================
@@ -38,41 +38,43 @@ DEFAULT_CONFIG = {
     'udp_proxy_enabled': False,        # 新增，UDP 代理独立开关
     'check_interval': 30,
     'timeout': 5,
-    'retry_mode': 'polling',    # 'polling' | 固定秒数(int)
-    'retry_interval': 5,        # 当 retry_mode != 'polling' 时使用
-    'monitor_workers': 120,     # 并发检测线程数（可配置，建议 30~200）
-    'stagger_batch_proxy': 5,   # 代理模式：每批发包数
-    'stagger_batch_direct': 5,  # 直连模式：每批发包数
-    'stagger_delay_proxy': 150, # 代理模式：批间延迟 ms
-    'stagger_delay_direct': 100,# 直连模式：批间延迟 ms
+    'retry_mode': 'polling',           # 'polling' | 固定秒数(int)
+    'retry_interval': 5,               # 当 retry_mode != 'polling' 时使用
+    'monitor_workers': 120,            # 并发检测线程数（可配置，建议 30~200）
+    'stagger_batch_proxy': 5,          # 代理模式：每批发包数
+    'stagger_batch_direct': 5,         # 直连模式：每批发包数
+    'stagger_delay_proxy': 150,        # 代理模式：批间延迟 ms
+    'stagger_delay_direct': 100,       # 直连模式：批间延迟 ms
     'log_to_disk': False,
-    'log_level': 'info',  # none | info | error | debug（原 console_log_level）
+    'log_level': 'info',               # none | info | error | debug
     'log_file': 'error.log',
     'data_file': 'data.json',
-    'max_history': 2880,  # history_24h 上限：24h × 3600s ÷ 30s间隔 = 2880点
+    'max_history': 2880,               # history_24h 上限：24h × 3600s ÷ 30s间隔 = 2880点
     'http_proxy': '',
     'udp_proxy': '',
-    'dns_mode': 'system',      # system | dnspython | custom
-    'dns_custom': '8.8.8.8',   # 自定义DNS时使用，支持多个用逗号分隔
-    'max_log_entries': 1000,    # 日志最大条目数（兼容旧版，以下三项优先）
-    'max_log_info': 1000,       # Info 级日志最大条目数
-    'max_log_success': 1000,    # Success 级日志最大条目数
-    'max_log_error': 1000,      # Error 级日志最大条目数
-    'page_refresh_ms': 30000,   # 前端页面自动刷新间隔(ms)，0=禁用
-    'cache_history': True,      # 是否缓存历史可用率到JSON（重启不丢失）
-    'dashboard_stat_period': '24h', # 仪表盘可用率统计周期：24h | 7d | 30d（排行TOP10+快速搜索）
-    'tracker_stat_period': '24h', # 监控列表可用率统计周期：24h | 7d | 30d
-    'tab_switch_refresh': True,   # 切换仪表盘/监控列表时是否刷新数据
-    'export_suffix': '/announce',   # 导出 tracker 列表时追加的路径后缀
-    'show_removed_ips': True,       # 是否显示已移除的历史IP（前端控制）
-    'default_layout_width': '1700', # 默认页面视野宽度（px字符串，对应50%~100%）
+    'dns_mode': 'system',              # system | dnspython | custom
+    'dns_custom': '8.8.8.8',           # 自定义DNS时使用，支持多个用逗号分隔
+    'max_log_entries': 1000,           # 日志最大条目数（兼容旧版，以下三项优先）
+    'max_log_info': 1000,              # Info 级日志最大条目数
+    'max_log_success': 1000,           # Success 级日志最大条目数
+    'max_log_error': 1000,             # Error 级日志最大条目数
+    'page_refresh_ms': 30000,          # 前端页面自动刷新间隔(ms)，0=禁用
+    'cache_history': True,             # 是否缓存历史可用率到JSON（重启不丢失）
+    'dashboard_stat_period': '24h',    # 仪表盘可用率统计周期：24h | 7d | 30d（排行TOP10+快速搜索）
+    'tracker_stat_period': '24h',      # 监控列表可用率统计周期：24h | 7d | 30d
+    'tab_switch_refresh': True,        # 切换仪表盘/监控列表时是否刷新数据
+    'export_suffix': '/announce',      # 导出 tracker 列表时追加的路径后缀
+    'show_removed_ips': True,          # 是否显示已移除的历史IP（前端控制）
+    'default_layout_width': '1700',    # 默认页面视野宽度（px字符串，对应50%~100%）
+    'allow_private_ips': False,        # 新增：是否允许添加内网IP，默认禁止（SSRF防护）
+    'min_password_length': 8,          # 新增：最小密码长度
     'users': [
         {"username": "admin",    "password": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", "role": "admin"},
         {"username": "operator", "password": "06e55b633481f7bb072957eabcf110c972e86691c3cfedabe088024bffe42f23", "role": "operator"},
         {"username": "viewer",   "password": "d35ca5051b82ffc326a3b0b6574a9a3161dee16b9478a199ee39cd803ce5b799",  "role": "viewer"},
     ],
 }
-POLLING_SEQUENCE = [5, 15, 30, 60]   # 轮询重试的秒数序列
+POLLING_SEQUENCE = [5, 15, 30, 60]
 
 def load_config():
     cfg = dict(DEFAULT_CONFIG)
@@ -86,7 +88,8 @@ def load_config():
                       'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                       'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                       'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
-                      'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','users']:
+                      'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','export_suffix',
+                      'show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users']:
                 if k in saved:
                     cfg[k] = saved[k]
             # 向后兼容：旧配置文件用 rank_stat_period，迁移到 dashboard_stat_period
@@ -95,8 +98,8 @@ def load_config():
             # 向后兼容：旧配置文件用 console_log_level，迁移到 log_level
             if 'log_level' not in cfg and 'console_log_level' in cfg:
                 cfg['log_level'] = cfg['console_log_level']
-    except Exception:
-        pass
+    except Exception as e:
+        cprint(f"配置加载失败: {e}", 'error')
     return cfg
 
 def persist_config(cfg):
@@ -108,12 +111,13 @@ def persist_config(cfg):
                                         'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                                         'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                                         'dashboard_stat_period','tracker_stat_period','cache_history',
-                                        'tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width','users']
+                                        'tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width',
+                                        'allow_private_ips','min_password_length','users']
                    if k in cfg}
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(savable, f, indent=2, ensure_ascii=False)
-    except Exception:
-        pass
+    except Exception as e:
+        cprint(f"配置保存失败: {e}", 'error')
 
 CONFIG = load_config()
 
@@ -139,9 +143,10 @@ app.secret_key = _get_secret_key()
 # Session 安全配置
 app.config['SESSION_COOKIE_HTTPONLY']  = True   # 防止 JS 读取 Cookie (XSS防护)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF 基础防护
+# 如果通过 HTTPS 访问，应设为 True；否则保持 False（本地开发）
 # 注意：SESSION_COOKIE_SECURE=True 需要 HTTPS，本地HTTP部署时不开启
 # 如果使用 HTTPS 反向代理，请手动改为 True
-app.config['SESSION_COOKIE_SECURE']   = False
+app.config['SESSION_COOKIE_SECURE']   = False   # 部署到公网HTTPS时请手动改为True
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7  # Session 有效期 7天
 app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024    # 请求体上限 1MB，防 DoS
 
@@ -155,7 +160,6 @@ def handle_unhandled_exception(e):
     # HTTP 异常（如404）继续由 Flask 处理
     if isinstance(e, HTTPException):
         return e
-
     # 收集请求信息
     ip = _client_ip()
     username = session.get('username', '?')
@@ -167,11 +171,10 @@ def handle_unhandled_exception(e):
             data = request.get_json(silent=True) or {}
         except:
             pass
-
     log_msg = (f"Unhandled exception - IP: {ip}, User: {username}, "
                f"{method} {path}, Data: {data}, Error: {repr(e)}")
     app.logger.error(log_msg, exc_info=True)
-
+    cprint(log_msg, 'error')
     return jsonify({'success': False, 'error': '服务器内部错误，请稍后重试'}), 500
 
 # ==================== 权限工具 ====================
@@ -225,64 +228,64 @@ def _require_role(*roles):
         return wrapper
     return decorator
 
-# operator 重试限流：{username: last_retry_time}
-_retry_throttle: dict = {}
-_retry_throttle_lock = threading.Lock()
+# ==================== CSRF 防护 ====================
+def generate_csrf_token():
+    if 'csrf_token' not in session:
+        session['csrf_token'] = secrets.token_hex(32)
+    return session['csrf_token']
 
-# 登录暴力破解防护：{ip: [fail_count, lockout_until]}
-_login_fail: dict = {}
-_login_fail_lock = threading.Lock()
-_LOGIN_MAX_FAIL  = 10          # 最大连续失败次数
-_LOGIN_LOCKOUT_S = 600         # 锁定时长（秒）= 10分钟
+def csrf_protect(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if request.method in ['POST', 'PUT', 'DELETE', 'PATCH']:
+            token = request.headers.get('X-CSRFToken')
+            if not token or token != session.get('csrf_token'):
+                return jsonify({'error': 'CSRF token invalid or missing'}), 403
+        return f(*args, **kwargs)
+    return decorated_function
 
-# 日志写入锁：防止多线程并发写入造成行截断
-_log_write_lock = threading.Lock()
+# 提供一个 API 获取 CSRF token（可选）
+@app.route('/api/csrf-token', methods=['GET'])
+def get_csrf_token():
+    token = generate_csrf_token()
+    return jsonify({'csrf_token': token})
 
-def _login_check_and_record(ip: str, success: bool) -> tuple:
-    """检查是否被锁定，并记录结果。
-    返回 (is_locked, seconds_remaining)。
-    locked_until=0 表示未锁定。
-    warned=True 表示本次锁定已打印过告警，不再重复。"""
-    now = time.time()
-    with _login_fail_lock:
-        rec = _login_fail.get(ip, [0, 0, False])  # [fail_count, locked_until, warned]
-        fail_count, locked_until, warned = rec[0], rec[1], rec[2] if len(rec) > 2 else False
-        # 已在锁定期内
-        if locked_until > now:
-            return True, int(locked_until - now)
-        # 锁定已过期，重置
-        if locked_until and locked_until <= now:
-            fail_count, locked_until, warned = 0, 0, False
-        if success:
-            _login_fail[ip] = [0, 0, False]
-            return False, 0
-        fail_count += 1
-        new_warned = warned
-        if fail_count >= _LOGIN_MAX_FAIL and not warned:
-            locked_until = now + _LOGIN_LOCKOUT_S
-            new_warned = True
-            # 只打印一次，后续同一IP被拒绝时静默（nginx access log 照常记录 429）
-            cprint(f'[auth] IP {ip} 登录失败 {fail_count} 次，锁定 {_LOGIN_LOCKOUT_S//60} 分钟', 'info')
-        _login_fail[ip] = [fail_count, locked_until, new_warned]
-        return False, 0
+# ==================== 限流工具 ====================
+# 更精细的限流：使用内存存储，每个 IP 每分钟限制请求数
+_rate_limit_store = {}
+_rate_limit_lock = threading.Lock()
 
-def _check_retry_throttle(interval_ms: float) -> bool:
-    """检查当前用户是否超过重试频率限制。True=允许，False=拒绝"""
-    username = session.get('username', session.get('remote', request.remote_addr))
-    now = time.time()
-    with _retry_throttle_lock:
-        last = _retry_throttle.get(username, 0)
-        if now - last < interval_ms / 1000:
-            return False
-        _retry_throttle[username] = now
-        return True
+def rate_limit(limit: int = 60, window: int = 60):
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            ip = _client_ip()
+            now = time.time()
+            with _rate_limit_lock:
+                records = _rate_limit_store.get(ip, [])
+                # 清理过期记录
+                records = [t for t in records if now - t < window]
+                if len(records) >= limit:
+                    # 检查是否已打印警告
+                    with _rate_limit_warned_lock:
+                        last_warn = _rate_limit_warned.get(ip, 0)
+                        if now - last_warn >= window:  # 超过窗口期或从未警告
+                            _rate_limit_warned[ip] = now
+                            cprint(f"IP {ip} 请求超过限流 ({limit}/{window}s)，已拒绝", 'info')
+                    return jsonify({'error': '请求过于频繁，请稍后再试'}), 429
+                records.append(now)
+                _rate_limit_store[ip] = records
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator
+
+# 重试限流已存在，这里用于其他 API
 
 # ==================== 控制台输出工具 ====================
 LEVEL_ORDER = {'none': 0, 'info': 1, 'error': 2, 'debug': 3}
-
 # 完全静默的路径（前端内部轮询/导航，不是真实用户请求）
+_log_write_lock = threading.Lock()   # 新增：定义锁
 _NOISY_PATHS = {'/api/auth/whoami', '/api/nav'}
-
 _ACCESS_LOG_FILE = 'access.log'
 
 def cprint(msg: str, level: str = 'info', raw: bool = False):
@@ -314,8 +317,8 @@ def cprint(msg: str, level: str = 'info', raw: bool = False):
                 try:
                     with open(_ACCESS_LOG_FILE, 'a', encoding='utf-8') as f:
                         f.write(line + '\n')
-                except Exception:
-                    pass
+                except Exception as e:
+                    cprint(f"写入 access.log 失败: {e}", 'error')
 
 def _write_access_log(line: str):
     """把一行 nginx 格式日志写入 access.log（仅 log_to_disk=True 时）。加锁防截断。"""
@@ -324,8 +327,8 @@ def _write_access_log(line: str):
             try:
                 with open(_ACCESS_LOG_FILE, 'a', encoding='utf-8') as f:
                     f.write(line + '\n')
-            except Exception:
-                pass
+            except Exception as e:
+                cprint(f"写入 access.log 失败: {e}", 'error')
 
 def access_log(msg: str):
     """业务操作日志（登录/登出/添加/删除/重试/配置变更等）。
@@ -333,6 +336,7 @@ def access_log(msg: str):
     这里只负责打印到控制台，不再自己写 access.log。
     """
     cprint(msg, 'info')
+
 
 # ==================== 代理工具 ====================
 def make_proxy_dict():
@@ -353,12 +357,41 @@ def get_requests_session():
     return s
 
 # ==================== 数据库 ====================
+_geo_cache_lock = threading.Lock()
 class TrackerDB:
     def __init__(self):
         self.lock  = threading.RLock()
         self.trackers = {}
         self.logs  = []
         self.stats = {'total': 0, 'alive': 0, 'ipv4': 0, 'ipv6': 0}
+        # 可用率缓存
+        self.uptime_cache = {}
+        self.cache_lock = threading.RLock()
+        self.cache_ttl = 30  # 秒
+        # 异步保存线程池（单线程）
+        self._save_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="db_save")
+        self._save_pending = False
+
+    def _get_uptime_cached(self, domain, period):
+        """从缓存获取域名可用率，如果缓存有效则返回，否则 None"""
+        with self.cache_lock:
+            entry = self.uptime_cache.get((domain, period))
+            if entry and time.time() - entry['time'] < self.cache_ttl:
+                return entry['value']
+        return None
+
+    def _set_uptime_cache(self, domain, period, value):
+        with self.cache_lock:
+            self.uptime_cache[(domain, period)] = {'value': value, 'time': time.time()}
+
+    def _clear_uptime_cache(self, domain=None):
+        with self.cache_lock:
+            if domain:
+                keys_to_delete = [k for k in self.uptime_cache if k[0] == domain]
+                for k in keys_to_delete:
+                    del self.uptime_cache[k]
+            else:
+                self.uptime_cache.clear()
 
     # ---------- tracker 管理 ----------
     def add_tracker(self, domain, port, protocol, ip_list=None):
@@ -380,7 +413,7 @@ class TrackerDB:
                         info.update({'status': 'unknown', 'latency': -1, 'last_check': None,
                                      'added_time': datetime.now().isoformat()})
                         self.trackers[domain]['ips'].append(info)
-            self._save()
+            self._save_async()  # 改为异步保存
 
     def update_status(self, domain, ip, status, latency):
         with self.lock:
@@ -393,6 +426,8 @@ class TrackerDB:
                         break
                 self._push_history(domain, ip, status)
                 self._recalc()
+                self._clear_uptime_cache(domain)
+                self._save_async()  # 异步保存
 
     def _push_history(self, domain, ip, status):
         """把探测结果写入 hdb（时间戳历史库）。
@@ -449,57 +484,70 @@ class TrackerDB:
         }
 
     def get_trackers(self):
-        """返回 tracker 字典，IP/域名的可用率统计全部从 hdb 按时间窗口计算。"""
+        """返回 tracker 字典，使用快照减少锁持有时间 IP/域名的可用率统计全部从 hdb 按时间窗口计算。"""
         with self.lock:
-            result = {}
+            # 浅拷贝 trackers 结构
+            trackers_copy = {}
             for domain, t in self.trackers.items():
                 t_copy = dict(t)
-                ips_copy = []
-                for ip_obj in t.get('ips', []):
-                    ip_copy = {k: v for k, v in ip_obj.items()
-                               if k not in ('history_24h','history_7d','history_30d')}
-                    if 'added_time' not in ip_copy:
-                        ip_copy['added_time'] = t.get('added_time')
-                    ip = ip_obj.get('ip', '')
-                    # IP 级三个周期可用率
-                    for pk, secs in HISTORY_WINDOWS.items():
-                        ip_copy[f'uptime_{pk}'] = hdb.get_ip_uptime(domain, ip, secs)
-                    # ip_uptime 用当前配置周期
-                    period = CONFIG.get('tracker_stat_period', '24h')
-                    ip_copy['ip_uptime'] = ip_copy.get(f'uptime_{period}')
-                    # IP 级末尾连续失败次数（近24h）
-                    recent = hdb.get_ip_recent(domain, ip, 86400)
-                    ip_consec = 0
-                    for v in reversed(recent):
-                        if v == 0: ip_consec += 1
-                        else: break
-                    ip_copy['consec_fail'] = ip_consec
-                    ips_copy.append(ip_copy)
-                t_copy['ips'] = ips_copy
-                # 域名级：hdb 内该域名下所有IP（含历史已移除）汇总，但排除已暂停IP
-                # 已暂停IP不参与域名可用率计算，实时生效
-                domain_paused = t.get('paused', False)
-                paused_ip_set = set()
-                if not domain_paused:
-                    for ip_obj in t.get('ips', []):
-                        if ip_obj.get('paused') and not ip_obj.get('removed'):
-                            paused_ip_set.add(ip_obj.get('ip', ''))
+                t_copy['ips'] = t['ips'][:]  # 复制列表
+                trackers_copy[domain] = t_copy
+        # 锁外填充可用率
+        result = {}
+        for domain, t_copy in trackers_copy.items():
+            ips_copy = []
+            for ip_obj in t_copy['ips']:
+                ip_copy = {k: v for k, v in ip_obj.items()
+                           if k not in ('history_24h','history_7d','history_30d')}
+                if 'added_time' not in ip_copy:
+                    ip_copy['added_time'] = t_copy.get('added_time')
+                ip = ip_obj.get('ip', '')
+                # IP 级三个周期可用率
                 for pk, secs in HISTORY_WINDOWS.items():
-                    if CONFIG.get('cache_history', True):
-                        s = hdb.get_domain_summary(domain, secs, excluded_ips=paused_ip_set if paused_ip_set else None)
-                        t_copy[f'uptime_{pk}'] = round(s['ok'] / s['total'] * 100, 1) if s['total'] > 0 else None
-                        t_copy[f'ok_{pk}']     = s['ok']
-                        t_copy[f'total_{pk}']  = s['total']
-                        t_copy[f'fail_{pk}']   = s['fail']
-                    else:
-                        t_copy[f'uptime_{pk}'] = None
-                        t_copy[f'ok_{pk}']     = None
-                        t_copy[f'total_{pk}']  = None
-                        t_copy[f'fail_{pk}']   = None
-                for k in ('history_24h', 'history_7d', 'history_30d'):
-                    t_copy.pop(k, None)
-                result[domain] = t_copy
-            return result
+                    ip_copy[f'uptime_{pk}'] = hdb.get_ip_uptime(domain, ip, secs)
+                # ip_uptime 用当前配置周期
+                period = CONFIG.get('tracker_stat_period', '24h')
+                ip_copy['ip_uptime'] = ip_copy.get(f'uptime_{period}')
+                # IP 级末尾连续失败次数（近24h）
+                recent = hdb.get_ip_recent(domain, ip, 86400)
+                ip_consec = 0
+                for v in reversed(recent):
+                    if v == 0: ip_consec += 1
+                    else: break
+                ip_copy['consec_fail'] = ip_consec
+                ips_copy.append(ip_copy)
+            t_copy['ips'] = ips_copy
+            # 域名级：hdb 内该域名下所有IP（含历史已移除）汇总，但排除已暂停IP
+            # 已暂停IP不参与域名可用率计算，实时生效
+            domain_paused = t_copy.get('paused', False)
+            paused_ip_set = set()
+            if not domain_paused:
+                for ip_obj in t_copy['ips']:
+                    if ip_obj.get('paused') and not ip_obj.get('removed'):
+                        paused_ip_set.add(ip_obj.get('ip', ''))
+            for pk, secs in HISTORY_WINDOWS.items():
+                cache_key = (domain, pk)
+                cached = self._get_uptime_cached(domain, pk)
+                if cached is not None:
+                    t_copy[f'uptime_{pk}'] = cached
+                    continue
+                if CONFIG.get('cache_history', True):
+                    s = hdb.get_domain_summary(domain, secs, excluded_ips=paused_ip_set if paused_ip_set else None)
+                    uptime_val = round(s['ok'] / s['total'] * 100, 1) if s['total'] > 0 else None
+                    t_copy[f'uptime_{pk}'] = uptime_val
+                    t_copy[f'ok_{pk}']     = s['ok']
+                    t_copy[f'total_{pk}']  = s['total']
+                    t_copy[f'fail_{pk}']   = s['fail']
+                    self._set_uptime_cache(domain, pk, uptime_val)
+                else:
+                    t_copy[f'uptime_{pk}'] = None
+                    t_copy[f'ok_{pk}']     = None
+                    t_copy[f'total_{pk}']  = None
+                    t_copy[f'fail_{pk}']   = None
+            for k in ('history_24h', 'history_7d', 'history_30d'):
+                t_copy.pop(k, None)
+            result[domain] = t_copy
+        return result
 
     def get_stats(self):
         with self.lock: return dict(self.stats)
@@ -556,7 +604,8 @@ class TrackerDB:
                 try:
                     with open(CONFIG['log_file'], 'a', encoding='utf-8') as f:
                         f.write(f"[{entry['time']}][{level.upper()}] {message}\n")
-                except Exception: pass
+                except Exception as e:
+                    cprint(f"写入 error.log 失败: {e}", 'error')
 
     def get_logs(self, limit=1000, level=None):
         with self.lock:
@@ -621,7 +670,22 @@ class TrackerDB:
                     changed = True
             if changed:
                 self._recalc()
+                self._clear_uptime_cache(domain)
+                self._save_async()
+
+    # 异步保存：将保存任务提交到线程池
+    def _save_async(self):
+        if self._save_pending:
+            return   # 已有保存任务在排队，跳过本次
+        self._save_pending = True
+        def _save_worker():
+            try:
                 self._save()
+            except Exception as e:
+                cprint(f"异步保存失败: {e}", 'error')
+            finally:
+                self._save_pending = False
+        self._save_executor.submit(_save_worker)
 
     def _save(self):
         try:
@@ -653,11 +717,10 @@ class TrackerDB:
                     data[d] = entry
             with open(CONFIG['data_file'], 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            # 只有 cache_history 为 True 时才保存 history.json
             if CONFIG.get('cache_history', True):
                 hdb.save()
-        except Exception:
-            pass
+        except Exception as e:
+            cprint(f"保存 data.json 失败: {e}", 'error')
 
     def load(self):
         try:
@@ -695,7 +758,9 @@ class TrackerDB:
             if warmed:
                 cprint(f"[geo] 预热归属地缓存 {warmed} 条", 'info')
             return True
-        except Exception: return False
+        except Exception as e:
+            cprint(f"加载 data.json 失败: {e}", 'error')
+            return False
 
     def _cleanup_hdb_on_startup(self):
         """重启后只做 GC，不清除任何 IP key。
@@ -728,7 +793,7 @@ HISTORY_WINDOWS = {
 class HistoryDB:
     def __init__(self):
         self.lock     = threading.RLock()
-        self._data    = {}   # {domain: {ip_key: [[ts, v], ...]}}
+        self._data    = {}
         self._last_gc = 0
 
     def _key_ip(self, ip): return f'ip:{ip}'
@@ -851,10 +916,7 @@ hdb = HistoryDB()
 class _ProxyConnectError(OSError):
     pass
 
-
 # 代理故障冷却时间（秒）
-
-
 class Socks5ProxySession:
     """
     SOCKS5 代理会话：一个固定 UDP socket，所有线程共享同一源端口。
@@ -985,7 +1047,6 @@ class Socks5ProxySession:
         except: pass
         try: self._udp.close()
         except: pass
-
 
 
 class Socks5ProxyPool:
@@ -1365,6 +1426,7 @@ class Socks5UdpSocket:
                 except: pass
         self._udp_sock = self._tcp_ctrl = None
 
+
 # ==================== 网络工具 ====================
 # GEO缓存：key=IP, value=geo dict。进程生命周期内永久缓存，重启自动清空。
 _geo_cache: dict = {}
@@ -1382,6 +1444,15 @@ def _is_safe_public_ip(ip: str) -> bool:
     except ValueError:
         return False  # 非IP格式（域名等）不查geo
 
+def is_private_ip(ip: str) -> bool:
+    """判断是否为私有/保留地址"""
+    import ipaddress
+    try:
+        addr = ipaddress.ip_address(ip)
+        return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast or addr.is_unspecified
+    except ValueError:
+        return False
+
 def get_geo(ip: str) -> dict:
     # 先查缓存，命中直接返回，不发网络请求
     with _geo_cache_lock:
@@ -1394,7 +1465,6 @@ def get_geo(ip: str) -> dict:
         with _geo_cache_lock:
             _geo_cache[ip] = result
         return result
-    # 未命中，请求 ip-api.com
     try:
         s = get_requests_session()
         import urllib.parse
@@ -1432,7 +1502,6 @@ def _resolve_system(domain: str):
             db.add_log(f"[system] DNS {ver} 异常 {domain}: {type(e).__name__}: {e}", 'debug')
     return ips
 
-
 def _resolve_dnspython(domain: str):
     """模式2: dnspython 内置解析器（走 /etc/resolv.conf 或 Windows注册表DNS）"""
     ips = []
@@ -1452,7 +1521,6 @@ def _resolve_dnspython(domain: str):
         except Exception as e:
             db.add_log(f"[dnspython] DNS {rtype} {domain}: {type(e).__name__}: {e}", 'debug')
     return ips
-
 
 def _resolve_custom(domain: str):
     """模式3: 自定义DNS服务器（支持多个，逗号分隔，如 8.8.8.8,8.8.4.4）"""
@@ -1479,20 +1547,25 @@ def _resolve_custom(domain: str):
             db.add_log(f"[custom:{','.join(servers)}] DNS {rtype} {domain}: {type(e).__name__}: {e}", 'debug')
     return ips
 
-
 def resolve(domain: str):
     """根据 CONFIG['dns_mode'] 选择 DNS 解析策略"""
     mode = CONFIG.get('dns_mode', 'system')
-    if mode == 'dnspython':
-        ips = _resolve_dnspython(domain)
-    elif mode == 'custom':
-        ips = _resolve_custom(domain)
-    else:  # 'system'（默认）
-        ips = _resolve_system(domain)
+    try:
+        if mode == 'dnspython':
+            ips = _resolve_dnspython(domain)
+        elif mode == 'custom':
+            ips = _resolve_custom(domain)
+        else:
+            ips = _resolve_system(domain)
+    except Exception as e:
+        cprint(f"DNS解析异常 {domain}: {e}", 'error')
+        db.add_log(f"DNS解析异常 {domain}: {e}", 'error')
+        return []
     if not ips:
         db.add_log(f"DNS解析失败 {domain} [模式:{mode}]: 无结果", 'error')
         cprint(f"DNS解析失败 {domain} [模式:{mode}]", 'error')
     return ips
+
 
 def _proxy_tcp_connect(ip, port, timeout):
     """通过 HTTP CONNECT 或 SOCKS5 代理建立 TCP 连接，返回已连接的 socket。
@@ -1620,6 +1693,7 @@ def tcp_ping(ip, port):
             try: s.close()
             except: pass
         return False, -1, f"{type(e).__name__}: {e}"
+
 
 def parse_proxy_addr(proxy_url: str):
     """从 socks5://host:port 或 socks5://[IPv6]:port 中解析 (host, port)"""
@@ -1850,21 +1924,17 @@ _PROXY_UNAVAIL_PREFIX = 'PROXY_UNAVAIL:'
 def _is_proxy_unavail(err: str) -> bool:
     return bool(err and err.startswith(_PROXY_UNAVAIL_PREFIX))
 
-
 def check_ip(domain, ip_info, retry=True, update_db=True):
     ip   = ip_info['ip']
     with db.lock:
         td       = db.trackers.get(domain, {})
         port     = td.get('port', 80)
         protocol = td.get('protocol', 'tcp')
-
     fn = udp_ping if protocol == 'udp' else tcp_ping
     ok, lat, err = fn(ip, port)
-
     # 代理不可用 → 跳过重试和状态更新，保留上次状态不变
     if not ok and _is_proxy_unavail(err):
         return 'skipped', lat, err
-
     if not ok and retry:
         wait = get_retry_wait(domain)
         cprint(f"首次失败 {domain}:{port} ({ip}) 等待{wait}s重试 | {err}", 'debug')
@@ -1873,7 +1943,6 @@ def check_ip(domain, ip_info, retry=True, update_db=True):
         # 重试后再次判断
         if not ok and _is_proxy_unavail(err):
             return 'skipped', lat, err
-
     status = 'online' if ok else 'offline'
     if update_db:
         db.update_status(domain, ip, status, lat)
@@ -1896,79 +1965,11 @@ def _resolve_and_update(domain, port, protocol):
         db.update_ips(domain, [], dns_error=True)
         cprint(f"DNS刷新异常 {domain}: {e}", 'error')
 
-
-def _check_one(domain, ip_info):
-    """单个 IP 检测任务，供线程池调用(已弃用该函数)"""
-    ip = ip_info['ip']
-    # 已标记 removed 的 IP 仍然检测（保留到重启），只是在前端会标注
-    with db.lock:
-        td       = db.trackers.get(domain, {})
-        port     = td.get('port', 80)
-        protocol = td.get('protocol', 'tcp')
-    proto_s = protocol.upper()
-    try:
-        status, lat, err = check_ip(domain, ip_info, retry=True)
-        lat_s = f"{lat}ms" if lat >= 0 else "N/A"
-        if status == 'skipped':
-            cprint(f"⏭ {proto_s}://{domain}:{port} ({ip}) 跳过 | {err}", 'debug')
-            return
-        
-        # 读取网络故障标志
-        with _probe_lock:
-            net_bad = _net_bad
-
-        if net_bad:
-            # 网络故障期间，只打印日志，不更新状态和历史
-            if status == 'online':
-                msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s} (网络故障，不记录历史)"
-                # db.add_log(msg, 'success')
-                cprint(msg, 'success')
-            else:
-                reason = f" | {err}" if err else ""
-                msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason} (网络故障，不记录历史)"
-                # db.add_log(msg, 'error')
-                cprint(msg, 'error')
-            return   # 直接返回，不更新数据库
-        
-        # 网络正常，正常更新状态和历史
-        if status == 'online':
-            msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}"
-            db.add_log(msg, 'success')
-            cprint(msg, 'success')
-        else:
-            reason = f" | {err}" if err else ""
-            msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}"
-            db.add_log(msg, 'error')
-            cprint(msg, 'error')
-        db.update_status(domain, ip, status, lat)
-
-        # 归属地补查逻辑: 若该 IP 归属地未知，顺带补查（锁外查询，避免长时间持锁）
-        need_geo = False
-        with db.lock:
-            for ip_obj in db.trackers.get(domain, {}).get('ips', []):
-                if ip_obj.get('ip') == ip:
-                    need_geo = ip_obj.get('country', {}).get('country_code', 'XX') == 'XX'
-                    break
-        if need_geo:
-            new_geo = get_geo(ip)  # 网络请求在锁外
-            if new_geo.get('country_code', 'XX') != 'XX':
-                with db.lock:
-                    for ip_obj in db.trackers.get(domain, {}).get('ips', []):
-                        if ip_obj.get('ip') == ip:
-                            ip_obj['country'] = new_geo
-                            break
-    except Exception as e:
-        msg = f"检查异常 {domain}:{port} ({ip}): {type(e).__name__}: {e}"
-        db.add_log(msg, 'error')
-        cprint(msg, 'error')
-
-
 # ==================== 网络探针 ====================
 # 双重网络健康判断：
 #   方案A（探针）：后台定期 TCP 连接 8.8.8.8:53，维护 _probe_ok 状态
 #   方案B（失败率）：monitor_loop 每轮统计，≥90% 失败视为本地网络异常
 # 两种方案任一触发，即认定本地网络异常，跳过本轮历史写入
-
 _probe_ok   = True    # 探针当前状态（True=可达，False=不可达）
 _probe_lock = threading.Lock()
 _net_bad = False   # 网络故障标志，由 monitor_loop 每轮更新
@@ -1984,7 +1985,6 @@ def _probe_loop():
         ('114.114.114.114', 53),  # 国内DNS（服务器在国内也能探到）
     ]
     PROBE_TIMEOUT = 3
-
     while True:
         probe_interval = CONFIG.get('check_interval', 30)
         reachable = False
@@ -1998,11 +1998,9 @@ def _probe_loop():
                 break
             except Exception:
                 continue
-
         with _probe_lock:
             prev = _probe_ok
             _probe_ok = reachable
-
         if not reachable and not _warned:
             targets_str = ', '.join(f"{h}:{p}" for h,p in PROBE_TARGETS)
             msg = f"[探针] 全部目标({targets_str})均不可达，本地网络可能异常"
@@ -2014,22 +2012,83 @@ def _probe_loop():
             db.add_log(msg, 'info')
             cprint(msg, 'info')
             _warned = False
-
         time.sleep(probe_interval)
-
 
 # 立即检测触发器：启动时或添加 tracker 后置位，monitor_loop 检测到后立即执行（不等待 check_interval）
 _check_now = threading.Event()
+
+def _check_one_and_record(domain, ip_info, temp_results, round_ok, round_fail, round_lock, temp_lock):
+    ip = ip_info['ip']
+    with db.lock:
+        td       = db.trackers.get(domain, {})
+        port     = td.get('port', 80)
+        protocol = td.get('protocol', 'tcp')
+    proto_s = protocol.upper()
+    try:
+        # 调用 check_ip 但不更新数据库
+        status, lat, err = check_ip(domain, ip_info, retry=True, update_db=False)
+        lat_s = f"{lat}ms" if lat >= 0 else "N/A"
+        if status == 'skipped':
+            cprint(f"⏭ {proto_s}://{domain}:{port} ({ip}) 跳过 | {err}", 'debug')
+            return
+        # 存储结果
+        with temp_lock:
+            temp_results[(domain, ip)] = (status, lat, err, protocol, port)
+        # 更新计数（用于失败率判断）
+        if status == 'online':
+            with round_lock: round_ok[0] += 1
+        else:
+            with round_lock: round_fail[0] += 1
+        # 立即打印控制台日志，但不写入 db.logs
+        if status == 'online':
+            msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}"
+            cprint(msg, 'success')
+        else:
+            reason = f" | {err}" if err else ""
+            msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}"
+            cprint(msg, 'error')
+    except Exception as e:
+        msg = f"检查异常 {domain}:{port} ({ip}): {type(e).__name__}: {e}"
+        cprint(msg, 'error')
+        with round_lock: round_fail[0] += 1
+
+def _write_healthy_results(temp_results):
+    for (domain, ip), (status, lat, err, protocol, port) in temp_results.items():
+        # 更新状态和历史
+        db.update_status(domain, ip, status, lat)
+        # 添加日志
+        proto_s = protocol.upper()
+        lat_s = f"{lat}ms" if lat >= 0 else "N/A"
+        if status == 'online':
+            msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}"
+            db.add_log(msg, 'success')
+        else:
+            reason = f" | {err}" if err else ""
+            msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}"
+            db.add_log(msg, 'error')
+        # 归属地补查（与原有逻辑相同）
+        need_geo = False
+        with db.lock:
+            for ip_obj in db.trackers.get(domain, {}).get('ips', []):
+                if ip_obj.get('ip') == ip:
+                    need_geo = ip_obj.get('country', {}).get('country_code', 'XX') == 'XX'
+                    break
+        if need_geo:
+            new_geo = get_geo(ip)
+            if new_geo.get('country_code', 'XX') != 'XX':
+                with db.lock:
+                    for ip_obj in db.trackers.get(domain, {}).get('ips', []):
+                        if ip_obj.get('ip') == ip:
+                            ip_obj['country'] = new_geo
+                            break
 
 def monitor_loop():
     db.add_log("监控服务启动", 'info')
     cprint("监控服务启动", 'info')
     _net_warn_printed = False   # 本次网络异常告警只打一次，恢复后重置
-
     while True:
         try:
             snapshot = db.get_trackers()
-
             # ── 第一步：并行重新解析所有域名 DNS ─────────────────────────
             with ThreadPoolExecutor(max_workers=32) as dns_pool:
                 dns_futures = {
@@ -2043,7 +2102,6 @@ def monitor_loop():
                     try: f.result()
                     except Exception as e:
                         cprint(f"DNS线程异常: {e}", 'error')
-
             # ── 第二步：并行检测所有 IP（暂不更新数据库） ───────────────
             snapshot = db.get_trackers()
             tasks = []
@@ -2053,52 +2111,13 @@ def monitor_loop():
                 for ip_info in data.get('ips', []):
                     if not ip_info.get('removed') and not ip_info.get('paused'):
                         tasks.append((domain, ip_info))
-
             # 存储本轮结果的字典：{(domain, ip): (status, lat, err, protocol, port)}
             temp_results = {}
             temp_lock = threading.Lock()
             # 用计数器收集本轮检测结果，检测完后判断网络健康度
-            _round_ok  = [0]
-            _round_fail = [0]
-            _round_lock = threading.Lock()
-
-            def _check_one_and_record(domain, ip_info):
-                ip = ip_info['ip']
-                with db.lock:
-                    td       = db.trackers.get(domain, {})
-                    port     = td.get('port', 80)
-                    protocol = td.get('protocol', 'tcp')
-                proto_s = protocol.upper()
-                try:
-                    # 调用 check_ip 但不更新数据库
-                    status, lat, err = check_ip(domain, ip_info, retry=True, update_db=False)
-                    lat_s = f"{lat}ms" if lat >= 0 else "N/A"
-                    if status == 'skipped':
-                        cprint(f"⏭ {proto_s}://{domain}:{port} ({ip}) 跳过 | {err}", 'debug')
-                        return
-                    # 存储结果
-                    with temp_lock:
-                        temp_results[(domain, ip)] = (status, lat, err, protocol, port)
-                    # 更新计数（用于失败率判断）
-                    if status == 'online':
-                        with _round_lock: _round_ok[0] += 1
-                    else:
-                        with _round_lock: _round_fail[0] += 1
-                    # 立即打印控制台日志，但不写入 db.logs
-                    if status == 'online':
-                        msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}"
-                        # db.add_log(msg, 'success')
-                        cprint(msg, 'success')
-                    else:
-                        reason = f" | {err}" if err else ""
-                        msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}"
-                        # db.add_log(msg, 'error')
-                        cprint(msg, 'error')
-                except Exception as e:
-                    msg = f"检查异常 {domain}:{port} ({ip}): {type(e).__name__}: {e}"
-                    cprint(msg, 'error')
-                    with _round_lock: _round_fail[0] += 1
-
+            round_ok  = [0]
+            round_fail = [0]
+            round_lock = threading.Lock()
             # ── 发包错峰：分批提交避免瞬间高并发冲击本地网络/代理 ──────────
             use_proxy_stagger = bool(CONFIG.get('udp_proxy_enabled') and CONFIG.get('udp_proxy','').strip())
             if use_proxy_stagger:
@@ -2107,45 +2126,42 @@ def monitor_loop():
             else:
                 STAGGER_BATCH = int(CONFIG.get('stagger_batch_direct', 5))
                 STAGGER_DELAY = int(CONFIG.get('stagger_delay_direct', 100)) / 1000.0
-
             with ThreadPoolExecutor(max_workers=max(8, CONFIG.get('monitor_workers', 120))) as chk_pool:
                 futures = {}
                 if len(tasks) > STAGGER_BATCH:
                     for i in range(0, len(tasks), STAGGER_BATCH):
                         batch = tasks[i:i + STAGGER_BATCH]
                         for d, ipi in batch:
-                            f = chk_pool.submit(_check_one_and_record, d, ipi)
+                            f = chk_pool.submit(_check_one_and_record, d, ipi, temp_results,
+                                                round_ok, round_fail, round_lock, temp_lock)
                             futures[f] = (d, ipi['ip'])
                         if i + STAGGER_BATCH < len(tasks):
                             time.sleep(STAGGER_DELAY)
                 else:
-                    futures = {chk_pool.submit(_check_one_and_record, d, ipi): (d, ipi['ip'])
+                    futures = {chk_pool.submit(_check_one_and_record, d, ipi, temp_results,
+                                               round_ok, round_fail, round_lock, temp_lock): (d, ipi['ip'])
                                for d, ipi in tasks}
                 for f in as_completed(futures):
                     try: f.result()
                     except Exception as e:
                         d, ip = futures[f]
                         cprint(f"检测线程异常 {d} ({ip}): {e}", 'error')
-
             # ── 第三步：网络健康判断（探针 + 失败率双重保障）────────────
-            total_checked = _round_ok[0] + _round_fail[0]
+            total_checked = round_ok[0] + round_fail[0]
             net_ok = True
             net_reason = ''
-
             # 方案A：探针状态（由 _probe_loop 后台维护）
             with _probe_lock:
                 probe_reachable = _probe_ok
             if not probe_reachable:
                 net_ok = False
                 net_reason = '探针不可达(8.8.8.8:53)'
-
             # 方案B：本轮失败率 ≥ 90%（仅在探针正常时才额外判断，避免重复告警）
             if net_ok and total_checked >= 5:
-                fail_rate = _round_fail[0] / total_checked
+                fail_rate = round_fail[0] / total_checked
                 if fail_rate >= 0.90:
                     net_ok = False
-                    net_reason = f'失败率{fail_rate*100:.0f}%({_round_fail[0]}/{total_checked})'
-
+                    net_reason = f'失败率{fail_rate*100:.0f}%({round_fail[0]}/{total_checked})'
             if not net_ok:
                 if not _net_warn_printed:
                     warn_msg = (f"[网络异常] 疑似本地网络故障（{net_reason}），"
@@ -2153,9 +2169,9 @@ def monitor_loop():
                     db.add_log(warn_msg, 'error')
                     cprint(warn_msg, 'error')
                     _net_warn_printed = True
-                    with _probe_lock:
-                        _net_bad = True
-                    # 本轮结果直接丢弃，不更新数据库
+                with _probe_lock:
+                    _net_bad = True
+                # 本轮结果直接丢弃，不更新数据库
             else:
                 if _net_warn_printed:
                     recover_msg = "[网络恢复] 探针与检测均正常，恢复历史数据统计"
@@ -2164,51 +2180,23 @@ def monitor_loop():
                     _net_warn_printed = False
                 with _probe_lock:
                     _net_bad = False
-                # 网络正常，将临时结果写入数据库
-                for (domain, ip), (status, lat, err, protocol, port) in temp_results.items():
-                    # 更新状态和历史
-                    db.update_status(domain, ip, status, lat)
-                    # 添加日志
-                    proto_s = protocol.upper()
-                    lat_s = f"{lat}ms" if lat >= 0 else "N/A"
-                    if status == 'online':
-                        msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}"
-                        db.add_log(msg, 'success')
-                    else:
-                        reason = f" | {err}" if err else ""
-                        msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}"
-                        db.add_log(msg, 'error')
-                    # 归属地补查（与原有逻辑相同）
-                    need_geo = False
-                    with db.lock:
-                        for ip_obj in db.trackers.get(domain, {}).get('ips', []):
-                            if ip_obj.get('ip') == ip:
-                                need_geo = ip_obj.get('country', {}).get('country_code', 'XX') == 'XX'
-                                break
-                    if need_geo:
-                        new_geo = get_geo(ip)
-                        if new_geo.get('country_code', 'XX') != 'XX':
-                            with db.lock:
-                                for ip_obj in db.trackers.get(domain, {}).get('ips', []):
-                                    if ip_obj.get('ip') == ip:
-                                        ip_obj['country'] = new_geo
-                                        break
+                if temp_results:   # 只有有实际检测结果才写入
+                    _write_healthy_results(temp_results)
+                    if CONFIG.get('cache_history', True):
+                        db._save_async()
                 # 保存数据（仅当 cache_history 开启）
                 if CONFIG.get('cache_history', True):
-                    db._save()
-
+                    db._save_async()  # 改为异步保存
             s = db.get_stats()
             summary = (f"轮检完成 | "
                        f"总:{s['total']} [v4:{s['ipv4']} v6:{s['ipv6']}] | "
                        f"在线:{s['alive']} [v4:{s['alive_v4']} v6:{s['alive_v6']}]"
                        + (" | ⚠ 网络异常轮次，历史跳过" if not net_ok else ""))
             db.add_log(summary, 'info')
-
         except Exception as e:
             msg = f"监控线程错误: {type(e).__name__}: {e}"
             db.add_log(msg, 'error')
             cprint(msg, 'error')
-        # 等待下一轮：check_interval 秒超时，或被 _check_now 提前唤醒
         _check_now.wait(timeout=CONFIG['check_interval'])
         _check_now.clear()
 
@@ -2224,7 +2212,6 @@ def log_request():
     method = request.method
     remote = request.remote_addr
     now    = time.time()
-
     if path.startswith('/api/'):
         if path.split('?')[0].rstrip('/') in _NOISY_PATHS:
             return
@@ -2247,13 +2234,10 @@ def security_headers(response):
     response.headers['Referrer-Policy']        = 'same-origin'
     # Server 头不暴露服务器特征，直接移除
     response.headers.remove('Server')
-
     path   = request.path
     method = request.method
-
     # ── 调试模式判断（控制 304 是否静默） ──
     is_debug_mode = CONFIG.get('log_level') == 'debug' or getattr(app, 'debug', False)
-
     # ── 静态资源（/static/）缓存策略 ──
     # 路径安全：Flask send_from_directory 内部用 werkzeug.security.safe_join，
     # 已防止路径穿越（CWE-22），无需额外处理。
@@ -2267,7 +2251,6 @@ def security_headers(response):
         if response.status_code == 304 and not is_debug_mode:
             return response  # 非调试模式下 304静默
         # 200 继续往下，正常记录日志
-
     # ── JSON API gzip 压缩（浏览器支持时，响应 >1KB 才压缩）──
     # 文件下载（Content-Disposition）跳过，避免对已压缩内容二次压缩
     ct = response.content_type or ''
@@ -2285,19 +2268,15 @@ def security_headers(response):
                     response.headers['Content-Length'] = str(len(gz))
             except Exception:
                 pass
-
     # 保留此逻辑，因为这些请求每秒几十次，完全无调试价值
     # 静默路径（前端内部轮询/导航）：不打印日志 = 始终静默（即使 debug 模式也不输出）──
     if path.split('?')[0].rstrip('/') in _NOISY_PATHS:
         return response
-
     # HTML 页面的 304（ETag命中/CF回源验证）静默：非调试模式下隐藏:0字节请求（不刷控制台、不写 access.log）
     # 只有调试模式才放行，让正常日志流程输出
     _HTML_PATHS = {'/', '/home', '/stats', '/ranking', '/logs', '/config'}
     if (path.rstrip('/') or '/') in _HTML_PATHS and response.status_code == 304 and not is_debug_mode:
         return response
-
-
     # ── Nginx 风格访问日志 ──
     real_ip   = request.headers.get('X-Real-IP', request.remote_addr)
     cf_ip     = request.headers.get('CF-Connecting-IP', '-')
@@ -2314,16 +2293,18 @@ def security_headers(response):
     except Exception:
         size = 0
     full_path = request.full_path.rstrip('?') if request.query_string else path
-
     # 业务注解：路由函数可通过 g.access_note 附加一行说明（如登录用户、重试摘要）
     note = getattr(g, 'access_note', None)
-
     line = f'{real_ip} - {cf_ip} - - [{now_str}] "{method} {full_path} HTTP/1.1" {status} {size}'
     if note:
         line += f'  # {note}'
-
     cprint(line, 'info', raw=True)
     _write_access_log(line)   # 写盘（log_to_disk=True 时）
+
+    # ===== 新增：为 GET 页面请求设置 CSRF cookie =====
+    if request.method == 'GET' and not request.path.startswith('/api/'):
+        token = generate_csrf_token()
+        response.set_cookie('csrf_token', token, httponly=False, samesite='Lax', secure=app.config['SESSION_COOKIE_SECURE'])
 
     return response
 
@@ -2335,7 +2316,6 @@ def find_html():
     return None
 
 # language/ 已移入 static/language/，由 Flask 内置静态路由处理，无需自定义路由
-
 import gzip as _gzip
 
 # ── HTML 内容缓存（避免每次读盘，mtime变化时自动失效）──
@@ -2359,7 +2339,6 @@ def _serve_html():
         return "index.html not found.", 404
     cache = _load_html(p)
     etag  = f'"{cache["etag"]}"'
-
     # 无论客户端是否发了 Cache-Control: no-cache（即 F5 刷新），
     # 只要 If-None-Match 匹配就返回 304，让浏览器用本地缓存。
     # RFC 7234 §5.2：服务端可以忽略 no-cache 指令并返回 304，
@@ -2371,7 +2350,6 @@ def _serve_html():
         resp.headers['Vary']          = 'Accept-Encoding, Cookie'
         resp.headers['Content-Length'] = '0'
         return resp
-
     accept_gz = 'gzip' in request.headers.get('Accept-Encoding', '')
     body      = cache['gz'] if accept_gz else cache['raw']
     resp = make_response(body, 200)
@@ -2405,7 +2383,6 @@ def spa_routes():
         safe_path = request.path if request.path in _SPA_PATH_WHITELIST else '/'
         return redirect(safe_path, code=301)
     return _serve_html()
-
 
 # ── 公开 Tracker 导出 API ──
 @app.route('/trackers')
@@ -2446,11 +2423,9 @@ def api_trackers_export():
     else:
         # 允许传 "announce" 自动补斜杠，或传 "" 表示无后缀
         suffix = ('/' + suffix_raw.lstrip('/')) if suffix_raw else ''
-
     ranking = db.get_ranking(period, 9999, min_uptime)
     with db.lock:
         trackers_snap = {k: dict(v) for k, v in db.trackers.items()}
-
     lines = []
     for item in ranking:
         domain   = item['domain']
@@ -2458,34 +2433,30 @@ def api_trackers_export():
         protocol = td.get('protocol', 'tcp')
         port     = td.get('port', 80)
         ips      = td.get('ips', [])
-
         if proto != 'all':
             is_udp = (protocol == 'udp')
             if proto == 'udp' and not is_udp: continue
             if proto == 'tcp' and is_udp: continue
-
         online_ips = [ip for ip in ips if not ip.get('removed') and ip.get('status') == 'online']
         if ip_ver != 'all':
             online_ips = [ip for ip in online_ips if ip.get('version','ipv4') == ip_ver]
         if not online_ips: continue
-
         scheme = 'udp' if protocol == 'udp' else ('https' if protocol == 'https' else 'http')
         url = f"{scheme}://{domain}:{port}{suffix}"
         lines.append(url)
         lines.append('')  # 每个域名后空一行
-
     while lines and lines[-1] == '':
         lines.pop()
-
     text = '\n'.join(lines)
     resp = Response(text, mimetype='text/plain')
     resp.headers['Cache-Control'] = 'public, max-age=60'
     return resp
 
 # ==================== API ====================
-
+_login_fail_lock = threading.Lock()
 # ── 认证 ──
 @app.route('/api/auth/login', methods=['POST'])
+@rate_limit(limit=10, window=60)  # 登录限流
 def api_login():
     client = _client_ip()
     # 先纯检查是否已被锁定（不记录失败次数）
@@ -2496,7 +2467,6 @@ def api_login():
             remaining = int(locked_until - time.time())
             # 锁定期间的重复请求：nginx access log 照常记 429，不额外 cprint（已打印过一次）
             return jsonify({'error': f'登录尝试过多，请 {remaining//60} 分 {remaining%60} 秒后再试'}), 429
-
     data = request.json or {}
     username = (data.get('username','') or '').strip()
     password = data.get('password','') or ''
@@ -2523,10 +2493,15 @@ def api_login():
     session['username'] = username
     session['role'] = user['role']
     session.permanent = True
+    # 生成 CSRF token
+    token = generate_csrf_token()
+    resp = jsonify({'success': True, 'username': username, 'role': user['role'], 'csrf_token': token})
+    resp.set_cookie('csrf_token', token, httponly=False, samesite='Lax', secure=app.config['SESSION_COOKIE_SECURE'])
     g.access_note = f"login [{username}] role={user['role']}"
-    return jsonify({'success': True, 'username': username, 'role': user['role']})
+    return resp
 
 @app.route('/api/auth/logout', methods=['POST'])
+@csrf_protect
 def api_logout():
     username = session.get('username','?')
     session.clear()
@@ -2534,6 +2509,7 @@ def api_logout():
     return jsonify({'success': True})
 
 @app.route('/api/auth/change-password', methods=['POST'])
+@csrf_protect
 def api_change_password():
     """已登录用户修改自己的密码，需验证旧密码"""
     role = session.get('role')
@@ -2546,8 +2522,9 @@ def api_change_password():
     # 基本校验
     if not old_pw or not new_pw:
         return jsonify({'error': '旧密码和新密码不能为空'}), 400
-    if len(new_pw) < 6:
-        return jsonify({'error': '新密码长度不能少于6位'}), 400
+    min_len = CONFIG.get('min_password_length', 8)
+    if len(new_pw) < min_len:
+        return jsonify({'error': f'新密码长度不能少于{min_len}位'}), 400
     if len(new_pw) > 256:
         return jsonify({'error': '密码过长'}), 400
     user = _find_user(username)
@@ -2572,13 +2549,15 @@ def api_whoami():
         return jsonify({'logged_in': False, 'role': None, 'username': None})
     return jsonify({'logged_in': True, 'role': role, 'username': session.get('username')})
 
+# ── 统计 ──
 @app.route('/api/count')
 def api_stats():
     s = db.get_stats()
     with _probe_lock:
         probe_ok = _probe_ok
+        net_bad = _net_bad
     s['net_probe_ok'] = probe_ok
-    s['net_healthy']  = probe_ok and not getattr(_check_now, '_net_bad', False)
+    s['net_healthy']  = probe_ok and not net_bad
     today = datetime.now().strftime('%Y-%m-%d')
     logs = db.get_logs(limit=5000)
     s['today_alerts'] = sum(
@@ -2587,17 +2566,15 @@ def api_stats():
         and l.get('time', '').startswith(today)
         and ('离线' in l.get('message', '') or 'offline' in l.get('message', '').lower())
     )
-    resp = jsonify(s)
-    return resp
+    return jsonify(s)
 
 @app.route('/api/datas')
 def api_trackers():
-    resp = jsonify(db.get_trackers())
-    return resp
+    return jsonify(db.get_trackers())
 
+# ── tracker 管理 ──
 # 在文件顶部添加脱敏函数（例如紧跟在 _client_ip 定义之后）
 def _anonymize_ip(ip: str) -> str:
-    """脱敏 IP 地址，用于界面日志显示"""
     parts = ip.split('.')
     if len(parts) == 4:
         # IPv4: 1.2.3.4 -> 1.*.*.4
@@ -2608,8 +2585,25 @@ def _anonymize_ip(ip: str) -> str:
         return f"{segs[0]}:{segs[1]}:****:{segs[-1]}"
     return ip  # fallback
 
+def _validate_ip(ip: str) -> bool:
+    """检查 IP 是否允许添加（根据配置）"""
+    if CONFIG.get('allow_private_ips'):
+        return True
+    return not is_private_ip(ip)
+
+def _validate_domain_ips(ips: list) -> Tuple[bool, Optional[str]]:
+    """检查解析出的 IP 列表是否允许添加"""
+    if CONFIG.get('allow_private_ips'):
+        return True, None
+    for info in ips:
+        ip = info['ip']
+        if is_private_ip(ip):
+            return False, f"包含内网地址: {ip}"
+    return True, None
+
 @app.route('/api/tracker/add', methods=['POST'])
 @_require_role('admin', 'operator')
+@csrf_protect
 def api_add():
     raw = (request.json or {}).get('urls', (request.json or {}).get('url',''))
     if not raw:
@@ -2625,6 +2619,8 @@ def api_add():
         protocol = scheme if scheme in ('udp','https') else 'tcp'  # https://xxx 记为 https
         is_ip = bool(re.match(r'^\d{1,3}(?:\.\d{1,3}){3}$', host)) or ':' in host
         if is_ip:
+            if not _validate_ip(host):
+                errors.append(f"禁止添加内网IP: {host}"); continue
             geo  = get_geo(host)
             ver  = 'ipv6' if ':' in host else 'ipv4'
             ips  = [{'ip':host,'version':ver,'country':geo}]
@@ -2632,6 +2628,9 @@ def api_add():
             ips = resolve(host)
             if not ips:
                 errors.append(f"DNS解析失败: {host}"); continue
+            valid, msg = _validate_domain_ips(ips)
+            if not valid:
+                errors.append(f"{host} {msg}"); continue
         db.add_tracker(host, port, protocol, ips)
         # 获取原始 IP 并脱敏
         raw_ip = _client_ip()
@@ -2641,8 +2640,8 @@ def api_add():
         db.add_log(f"{masked_ip} [{op_user}] {msg}", 'info')   # 脱敏后写入日志
         g.access_note = f"add {protocol.upper()}://{host}:{port} ({len(ips)} IPs) by {raw_ip} [{op_user}]"
         def bg(d=host):
-            # 后台检测保持不变
             with db.lock:
+                # 后台检测保持不变
                 td  = db.trackers.get(d,{})
                 ipl = list(td.get('ips',[]))
             for ipi in ipl:
@@ -2658,6 +2657,7 @@ def api_add():
 
 @app.route('/api/tracker/delete', methods=['POST'])
 @_require_role('admin', 'operator')
+@csrf_protect
 def api_delete():
     domain = (request.json or {}).get('domain','').strip()
     with db.lock:
@@ -2666,7 +2666,8 @@ def api_delete():
             hdb.remove_domain(domain)
             del db.trackers[domain]
             db._recalc()
-            db._save()
+            db._clear_uptime_cache(domain)
+            db._save_async()
             raw_ip = _client_ip()
             masked_ip = _anonymize_ip(raw_ip)
             op_user = session.get('username', '?')
@@ -2678,17 +2679,17 @@ def api_delete():
 
 @app.route('/api/tracker/pause', methods=['POST'])
 @_require_role('admin', 'operator')
+@csrf_protect
 def api_pause():
     """暂停/恢复监控。支持：整个域名、域名下单个IP、全部域名。
     body: { action: 'pause'|'resume', domain?: str, ip?: str, all?: bool }
     """
     data   = request.json or {}
-    action = data.get('action', 'pause')   # 'pause' | 'resume'
+    action = data.get('action', 'pause')
     paused = (action == 'pause')
     domain = data.get('domain', '').strip()
     ip     = data.get('ip', '').strip()
     all_   = data.get('all', False)
-
     changed = []
     with db.lock:
         if all_:
@@ -2719,16 +2720,12 @@ def api_pause():
             changed.append(domain)
         else:
             return jsonify({'error': '参数错误'}), 400
-
-        db._save()
-
+        db._save_async()  # 异步保存
     label = '暂停' if paused else '恢复'
     target = 'ALL' if all_ else (f"{domain}/{ip}" if ip else domain)
-
     # 操作者信息
     raw_ip   = _client_ip()
     op_user  = session.get('username', '?')
-
     # IPv4: 1.*.*.256（保留第1段和最后1段，中间打星）
     # IPv6: 保留前2组和最后一组，中间打星
     parts = raw_ip.split('.')
@@ -2740,11 +2737,9 @@ def api_pause():
             masked_ip = f"{segs[0]}:{segs[1]}:****:{segs[-1]}"
         else:
             masked_ip = raw_ip
-
     # 控制台/access.log 用完整 IP；Web 日志用脱敏 IP
     console_str = f"{raw_ip} [{op_user}] 监控{label}: {target}"
     web_str     = f"{masked_ip} [{op_user}] 监控{label}: {target}"
-
     g.access_note = f"{label} {target} by {raw_ip} [{op_user}]"
     print(f"[PAUSE] {console_str}")          # 控制台完整 IP
     db.add_log(web_str, 'info')              # Web 界面脱敏 IP
@@ -2752,6 +2747,7 @@ def api_pause():
 
 @app.route('/api/tracker/check', methods=['POST'])
 @_require_role('admin', 'operator', 'viewer')
+@csrf_protect
 def api_check():
     role = _current_role()
     # viewer: 限速 1000ms；operator: 限速 500ms；admin: 不限
@@ -2769,7 +2765,6 @@ def api_check():
         port     = db.trackers[domain].get('port', 80)
         protocol = db.trackers[domain].get('protocol','tcp')
         ips_snap = list(db.trackers[domain]['ips'])
-    tag = f" IP:{target_ip}" if target_ip else " 全部IP"
     results = []
     for ipi in ips_snap:
         if target_ip and ipi['ip'] != target_ip: continue
@@ -2780,11 +2775,11 @@ def api_check():
         if status == 'skipped':
             reason_clean = err.replace(_PROXY_UNAVAIL_PREFIX, '') if err else ''
             res_msg = f"重试结果: {protocol.upper()}://{domain}:{port} ({ipi['ip']}) → 跳过(代理不可用) | {reason_clean}"
-            cprint(f"{ts} [INFO] 重试结果: {protocol.upper()}://{domain}:{port} ({ipi['ip']}) → 跳过(代理不可用)", 'info', raw=True)
+            cprint(f"{ts} [INFO] {res_msg}", 'info', raw=True)
         else:
             reason = f" | {err}" if err and status=='offline' else ""
             res_msg = f"重试结果: {protocol.upper()}://{domain}:{port} ({ipi['ip']}) → {status} {lat_s}{reason}"
-            cprint(f"{ts} [INFO] 重试结果: {protocol.upper()}://{domain}:{port} ({ipi['ip']}) → {status} {lat_s}{reason}", 'info', raw=True)
+            cprint(f"{ts} [INFO] {res_msg}", 'info', raw=True)
         db.add_log(res_msg, 'info')
         results.append({'ip':ipi['ip'],'status':status,'latency':lat,'error':err})
     # after_request 自动输出 nginx 行，无需 g.access_note（避免重复信息）
@@ -2794,9 +2789,7 @@ def api_check():
 def api_ranking(period):
     if period not in ('24h','7d','30d'): period='24h'
     min_uptime = request.args.get('min_uptime', 0, type=float)
-    resp = jsonify({'period':period,'ranking':db.get_ranking(period, 200, min_uptime)})
-    return resp
-
+    return jsonify({'period':period,'ranking':db.get_ranking(period, 200, min_uptime)})
 
 @app.route('/api/ranking/export')
 def api_ranking_export():
@@ -2814,30 +2807,24 @@ def api_ranking_export():
     proto      = request.args.get('proto', 'all').lower()      # tcp | udp | all
     ip_ver     = request.args.get('ip_ver', 'all').lower()     # ipv4 | ipv6 | all
     suffix     = request.args.get('suffix', CONFIG.get('export_suffix', '/announce'))
-
     ranking = db.get_ranking(period, 9999, min_uptime)
-
-    lines = []
     with db.lock:
         trackers_snap = {k: dict(v) for k, v in db.trackers.items()}
-
+    lines = []
     for item in ranking:
         domain   = item['domain']
         td       = trackers_snap.get(domain, {})
         protocol = td.get('protocol', 'tcp')   # tcp / https / udp
         port     = td.get('port', 80)
         ips      = td.get('ips', [])
-
         # 协议过滤
         is_udp = (protocol == 'udp')
         if proto == 'tcp' and is_udp: continue
         if proto == 'udp' and not is_udp: continue
-
         # IP版本过滤（检查该域名下是否有符合版本的 IP）
         if ip_ver != 'all':
             has_ver = any(ip.get('version') == ip_ver for ip in ips if not ip.get('removed'))
             if not has_ver: continue
-
         # 构造 URL
         if protocol == 'https':
             scheme = 'https'
@@ -2845,14 +2832,11 @@ def api_ranking_export():
             scheme = 'udp'
         else:
             scheme = 'http'
-
         url = f"{scheme}://{domain}:{port}{suffix}"
         lines.append(url)
         lines.append('')  # 每个域名后空一行
-
     while lines and lines[-1] == '':
         lines.pop()
-
     text = '\n'.join(lines)
     response = make_response(text)
     response.headers['Content-Type'] = 'text/plain; charset=utf-8'
@@ -2860,7 +2844,6 @@ def api_ranking_export():
     # 防止浏览器 MIME 嗅探将 text/plain 误解析为 HTML（防御 XSS）
     response.headers['X-Content-Type-Options'] = 'nosniff'
     return response
-
 
 # 是否信任反向代理的 X-Forwarded-For 头（直接暴露到公网时务必关闭，否则可伪造IP）
 # 仅在本机有反向代理（nginx/caddy 等）时设为 True
@@ -2888,7 +2871,6 @@ def api_nav():
     if tab in tab_names:
         g.access_note = f"nav [{tab_names[tab]}]"
     return jsonify({'ok': True})
-
 
 # ── /api/query 对外查询接口 ──────────────────────────────────────────────────
 # 速率限制：同IP每分钟最多66次
@@ -2921,24 +2903,20 @@ def api_query():
     """
     client_ip = request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()
     if not _query_rate_limit(client_ip):
-
         type_arg = request.args.get('type', '').lower()
         if type_arg == 'json':
             return jsonify({'error': 'Rate limit exceeded. Max 66/min per IP.', 'code': 429}), 429
         from flask import Response as _R
         return _R('Rate limit exceeded (max 66/min per IP)\n', status=429, mimetype='text/plain')
-
     host = request.args.get('host', '').strip()
     if not host:
         return jsonify({'error': 'Missing required parameter: host',
                         'usage': '/api/query?host=example.com',
                         'optional': 'list=status,uptime,delay,location,checked  type=json|txt'}), 400
-
     list_raw  = request.args.get('list', '').lower()
     type_raw  = request.args.get('type', '').lower()
     has_extra = bool(list_raw or type_raw)
-
-    # 字段集合
+     # 字段集合
     VALID = {'status', 'uptime', 'delay', 'location', 'checked'}
     if list_raw:
         fields = {f.strip() for f in list_raw.split(',') if f.strip()} & VALID
@@ -2946,19 +2924,15 @@ def api_query():
     else:
         fields = {'status', 'uptime', 'delay', 'checked'}
     fields.add('status')
-
     # 格式：仅带host→txt；有list/type时→json；显式type优先
     if   type_raw == 'txt':  fmt = 'txt'
     elif type_raw == 'json': fmt = 'json'
     elif not has_extra:      fmt = 'txt'
     else:                    fmt = 'json'
-
     # 查找匹配的 tracker
     matched_ip = None; matched_tr = None
-
     with db.lock:
         all_tr = dict(db.trackers)
-
     # 优先精确匹配域名
     if host in all_tr:
         matched_tr = all_tr[host]
@@ -2973,17 +2947,14 @@ def api_query():
                 if _ip.get('ip') == host and not _ip.get('removed'):
                     matched_tr = _tr; matched_ip = _ip; break
             if matched_tr: break
-
     if not matched_tr:
         if fmt == 'txt':
             from flask import Response as _R
             return _R(f'{host}  Not Found\n', status=404, mimetype='text/plain')
         return jsonify({'error': f'Host not found: {host}', 'host': host}), 404
-
     # 构建状态
     period = CONFIG.get('tracker_stat_period', '24h')
     pkmap = {'24h': 'uptime_24h', '7d': 'uptime_7d', '30d': 'uptime_30d'}
-
     # 域名/IP 级暂停状态
     is_paused = matched_tr.get('paused') or (matched_ip and matched_ip.get('paused'))
     raw_status = matched_ip.get('status', 'unknown') if matched_ip else 'unknown'
@@ -2995,7 +2966,6 @@ def api_query():
         status_val = 'Offline'
     else:
         status_val = 'Unknown'
-
     result = {'host': host}
     if 'status' in fields:
         result['status'] = status_val
@@ -3025,7 +2995,6 @@ def api_query():
         result['location'] = ' · '.join(parts) if parts else None
     if 'checked' in fields:
         result['checked'] = (matched_ip.get('last_check') or None) if matched_ip else None
-
     if fmt == 'txt':
         from flask import Response as _R
         col_order = ['status', 'uptime', 'delay', 'location', 'checked']
@@ -3033,26 +3002,23 @@ def api_query():
                           for k in col_order if k in result]
         return _R('  '.join(parts) + '\n', mimetype='text/plain',
                   headers={'Cache-Control': 'no-store'})
+    return jsonify(result)
 
-    resp = jsonify(result)
-    resp.headers['Cache-Control'] = 'no-store'
-    return resp
-
+# ── 日志 ──
 @app.route('/api/logs')
 def api_logs():
     limit = min(request.args.get('limit', 300, type=int), 5000)
     level = request.args.get('level', 'all').lower()  # all | info | success | error
     if level not in ('all', 'info', 'success', 'error'): level = 'all'
-    resp = jsonify(db.get_logs(limit, level=level))
-    return resp
+    return jsonify(db.get_logs(limit, level=level))
 
 @app.route('/api/logs/clear', methods=['POST'])
 @_require_role('admin')
+@csrf_protect
 def api_clear_logs():
     level = request.json.get('level', 'all') if request.json else 'all'
     if level not in ('all', 'info', 'success', 'error'): level = 'all'
     db.clear_logs(level=level)
-
     g.access_note = f"clear logs level={level}"
     return jsonify({'success':True})
 
@@ -3063,11 +3029,11 @@ def api_export_logs():
     """
     _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     _candidate = os.path.realpath(os.path.join(_BASE_DIR, 'error.log'))
-    if not (_candidate.startswith(_BASE_DIR + os.sep) or _candidate == os.path.join(_BASE_DIR, 'error.log')):
+    # 检查是否在 _BASE_DIR 下，防止路径遍历
+    if not os.path.abspath(_candidate).startswith(os.path.abspath(_BASE_DIR) + os.sep) and _candidate != os.path.join(_BASE_DIR, 'error.log'):
         return jsonify({'error': '路径非法'}), 400
     if not os.path.exists(_candidate):
         return jsonify({'error': 'error.log 不存在（日志存盘可能未开启）'}), 404
-
     with open(_candidate, 'rb') as f:
         raw = f.read()
     body = _gzip.compress(raw, compresslevel=6)
@@ -3078,8 +3044,10 @@ def api_export_logs():
         'Content-Length':      str(len(body)),
     })
 
+# ── 历史管理 ──
 @app.route('/api/history/clear', methods=['POST'])
 @_require_role('admin')
+@csrf_protect
 def api_clear_history():
     """清空 hdb 内存历史和 history.json，重启后统计从零开始。"""
     try:
@@ -3087,7 +3055,8 @@ def api_clear_history():
             hdb._data.clear()
         if os.path.exists(HISTORY_FILE):
             os.remove(HISTORY_FILE)
-        db._save()   # 顺带刷新 data.json 里的摘要（会变为全0）
+        db._clear_uptime_cache()
+        db._save_async()   # 顺带刷新 data.json 里的摘要（会变为全0）
         cprint('[history/clear] history.json 及内存历史已清空', 'info')
         return jsonify({'success': True})
     except Exception as e:
@@ -3095,20 +3064,21 @@ def api_clear_history():
         return jsonify({'success': False, 'error': '操作失败，请查看服务端日志'}), 500
 
 @app.route('/api/ips/clear-removed', methods=['POST'])
-@_require_role('admin', 'operator')
+@_require_role('admin')  # 仅限 admin
+@csrf_protect
 def api_clear_removed_ips():
     """清空所有标记为 removed 的历史IP（内存中删除，并保存到 data.json）"""
     try:
         with db.lock:
             cleared = 0
             for domain, td in db.trackers.items():
-                # 从后往前删除 removed 的 IP
                 for i in range(len(td['ips'])-1, -1, -1):
                     if td['ips'][i].get('removed'):
                         td['ips'].pop(i)
                         cleared += 1
             db._recalc()
-            db._save()
+            db._clear_uptime_cache()
+            db._save_async()
         cprint(f'[api] 清空历史IP: 已删除 {cleared} 个IP', 'info')
         return jsonify({'success': True, 'cleared': cleared})
     except Exception as e:
@@ -3129,6 +3099,7 @@ def api_history_status():
         app.logger.error('[history/status] 查询失败: %s', e, exc_info=True)
         return jsonify({'has_cache': False, 'error': '查询失败，请查看服务端日志'})
 
+# ── 配置 ──
 @app.route('/api/config', methods=['GET','POST'])
 def api_config():
     # POST 修改配置：仅 admin
@@ -3136,6 +3107,8 @@ def api_config():
         role = session.get('role')
         if role != 'admin':
             return jsonify({'error': '权限不足'}), 403
+        if not request.headers.get('X-CSRFToken') or request.headers.get('X-CSRFToken') != session.get('csrf_token'):
+            return jsonify({'error': 'CSRF token invalid'}), 403
         data = request.json or {}
         keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
@@ -3143,9 +3116,7 @@ def api_config():
                 'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                 'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
-                'export_suffix','show_removed_ips','default_layout_width','users']
-
-        # 字段的人可读标签
+                'export_suffix','show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users']
         labels = {
             'check_interval':        '监控间隔',
             'timeout':               '连接超时',
@@ -3182,6 +3153,8 @@ def api_config():
             'export_suffix':         '导出后缀',
             'show_removed_ips':      '显示历史IP',
             'default_layout_width':  '默认页面视野宽度',
+            'allow_private_ips':     '允许内网IP',
+            'min_password_length':   '最小密码长度',
             'users':                 '用户账户',
         }
         suffixes = {
@@ -3189,7 +3162,6 @@ def api_config():
             'page_refresh_ms': 'ms', 'stagger_delay_proxy': 'ms', 'stagger_delay_direct': 'ms',
         }
         bool_fmt = {True: '开', False: '关'}
-
         changes = []
         for k in keys:
             if k not in data: continue
@@ -3207,32 +3179,27 @@ def api_config():
             else:
                 val_str = f"{new_val}{suffix}"
             changes.append(f"{label}={val_str}")
-
         persist_config(CONFIG)
-
         # 如果代理相关配置变化，重置 SOCKS5 连接池
         proxy_changed_keys = {'udp_proxy', 'timeout', 'udp_proxy_enabled', 'http_proxy_enabled'}
         if any(k in data for k in proxy_changed_keys):
             _socks5_pool.invalidate()
             cprint('[SOCKS5Pool] 代理配置变更，连接池已重置', 'debug')
-
         if changes:
             msg = f"配置已更新: {' | '.join(changes)}"
             g.access_note = msg
-
         return jsonify({'success':True,'config':{k:CONFIG[k] for k in keys if k != 'console_log_level'}})
-
     # GET 读取配置：未登录只返回前端行为控制必要字段（不含账户/代理等敏感信息）
     # 已登录用户额外返回运维相关字段（仍不含账户信息）
-    public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'dashboard_stat_period', 'tracker_stat_period', 'show_removed_ips', 'default_layout_width']
+    public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'dashboard_stat_period', 'tracker_stat_period', 'show_removed_ips', 'default_layout_width', 'allow_private_ips', 'min_password_length']
     if not session.get('role'):
         return jsonify({k: CONFIG.get(k) for k in public_keys})
-    # 已登录用户返回更多展示字段，但不含账户信息（users/密钥）
     all_keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'log_to_disk','log_level','http_proxy','udp_proxy','http_proxy_enabled','udp_proxy_enabled',
                 'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
-                'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width']
+                'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width',
+                'allow_private_ips','min_password_length']
     return jsonify({k: CONFIG.get(k) for k in all_keys})
 
 @app.route('/api/users', methods=['GET'])
@@ -3244,12 +3211,14 @@ def api_users_get():
 
 @app.route('/api/users', methods=['POST'])
 @_require_role('admin')
+@csrf_protect
 def api_users_save():
     """批量保存用户配置，支持新增/修改/删除"""
     data = request.json or {}
     new_users = data.get('users', [])
     result = []
     existing = {u['username']: u for u in CONFIG.get('users', [])}
+    min_len = CONFIG.get('min_password_length', 8)
     for u in new_users:
         uname = (u.get('username','') or '').strip()
         role  = u.get('role','viewer')
@@ -3261,7 +3230,8 @@ def api_users_save():
             continue
         pw_plain = (u.get('password','') or '').strip()
         if pw_plain:
-            if len(pw_plain) < 4:
+            if len(pw_plain) < min_len:
+                # 不通过，但可跳过或报错，这里选择跳过（不保存该用户）
                 continue  # 密码太短，拒绝保存
             pw_hash, pw_salt = _hash_pw(pw_plain)
             result.append({'username': uname, 'role': role, 'password': pw_hash, 'salt': pw_salt})
@@ -3335,7 +3305,7 @@ if __name__ == '__main__':
     print(f"{'='*58}")
     print(f"  IPv4监听模式   : {ipv4_mode}" + (f" ({ipv4_custom})" if ipv4_mode == 'custom' and ipv4_custom else ""))
     print(f"  IPv6监听模式   : {ipv6_mode}" + (f" ({ipv6_custom})" if ipv6_mode == 'custom' and ipv6_custom else ""))
-    print(f"  访问地址       : http://localhost:{CONFIG['listen_port']}  (IPv4+IPv6 双栈)")
+    print(f"  访问地址       : http://localhost:{port}  (IPv4+IPv6 双栈)")
     print(f"  监控间隔       : {CONFIG['check_interval']}秒")
     print(f"  超时时间       : {CONFIG['timeout']}秒")
     dns_desc = {'system':'系统DNS','dnspython':'dnspython','custom':f"自定义({CONFIG.get('dns_custom','8.8.8.8')})"}.get(CONFIG.get('dns_mode','system'),'系统DNS')
@@ -3356,6 +3326,8 @@ if __name__ == '__main__':
         print(f"  UDP代理        : {udp_p  if udp_p  else '(未设置)'}")
     else:
         print(f"  UDP代理        : 关闭")
+    print(f"  允许内网IP     : {'是' if CONFIG.get('allow_private_ips') else '否'}")
+    print(f"  最小密码长度   : {CONFIG.get('min_password_length', 8)}")
     users_info = CONFIG.get('users', [])
     print(f"  用户账户       : {len(users_info)} 个 ({', '.join(u['username']+'('+u['role']+')' for u in users_info)})")
     print(f"{'='*58}")
@@ -3368,10 +3340,8 @@ if __name__ == '__main__':
     try:
         from waitress import serve
         print("  使用 waitress 生产服务器\n")
-
         # 构建监听地址列表
         listen_addrs = []
-
         # IPv4 地址处理
         if ipv4_mode == 'global':
             listen_addrs.append(f'0.0.0.0:{port}')
@@ -3382,7 +3352,6 @@ if __name__ == '__main__':
                 listen_addrs.append(f'{ipv4_custom}:{port}')
             else:
                 print("警告: IPv4 自定义地址为空，将不监听 IPv4")
-
         # IPv6 地址处理
         if ipv6_mode == 'global':
             listen_addrs.append(f'[::]:{port}')
@@ -3396,24 +3365,30 @@ if __name__ == '__main__':
                 listen_addrs.append(f'{ipv6_custom}:{port}')
             else:
                 print("警告: IPv6 自定义地址为空，将不监听 IPv6")
-
         if not listen_addrs:
             print("错误：至少需要监听一个地址", file=sys.stderr)
             sys.exit(1)
-
         serve(app, listen=listen_addrs, threads=8, ident='')
     except ImportError:
-        print("  提示: pip install waitress 可消除开发警告\n")
+        print("  警告: waitress 未安装，将使用 Flask 开发服务器（不推荐用于生产）")
+        print("  建议执行: pip install waitress")
+        try:
+            ans = input("是否继续使用开发服务器？(y/N): ").strip().lower()
+            if ans != 'y':
+                print("已取消启动。")
+                sys.exit(0)
+        except EOFError:
+            pass
         # 使用 Flask 内置服务器（仅用于开发，不支持同时监听多地址）
         # 这里简化：如果同时监听了多个地址，使用第一个 IPv4 地址；如果只监听 IPv6 则使用 IPv6
         import socket
         host = None
         if listen_addrs:
             first = listen_addrs[0]
-            if '[' in first:  # IPv6
+            if '[' in first:
                 host = first.split('[')[1].split(']')[0]
             else:
                 host = first.split(':')[0]
         else:
-            host = '127.0.0.1'  # fallback
+            host = '127.0.0.1'
         app.run(host=host, port=port, debug=False)
