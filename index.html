@@ -3308,7 +3308,8 @@ createApp({
                         const searchable = [
                             domain, ip.ip, displayProto, rawProto,
                             co.country||'', co.country_code||'', co.isp||'',
-                            statusSearchStr
+                            statusSearchStr,
+                            String(port)  // 新增：支持端口搜索
                         ].join(' ').toLowerCase();
                         if (!searchable.includes(q)) continue;
                     }
