@@ -1851,7 +1851,7 @@ def _is_proxy_unavail(err: str) -> bool:
     return bool(err and err.startswith(_PROXY_UNAVAIL_PREFIX))
 
 
-def check_ip(domain, ip_info, retry=True):
+def check_ip(domain, ip_info, retry=True, update_db=True):
     ip   = ip_info['ip']
     with db.lock:
         td       = db.trackers.get(domain, {})
@@ -1875,7 +1875,8 @@ def check_ip(domain, ip_info, retry=True):
             return 'skipped', lat, err
 
     status = 'online' if ok else 'offline'
-    db.update_status(domain, ip, status, lat)
+    if update_db:
+        db.update_status(domain, ip, status, lat)
     return status, lat, err
 
 def _resolve_and_update(domain, port, protocol):
@@ -1897,7 +1898,7 @@ def _resolve_and_update(domain, port, protocol):
 
 
 def _check_one(domain, ip_info):
-    """单个 IP 检测任务，供线程池调用"""
+    """单个 IP 检测任务，供线程池调用(已弃用该函数)"""
     ip = ip_info['ip']
     # 已标记 removed 的 IP 仍然检测（保留到重启），只是在前端会标注
     with db.lock:
@@ -1910,7 +1911,25 @@ def _check_one(domain, ip_info):
         lat_s = f"{lat}ms" if lat >= 0 else "N/A"
         if status == 'skipped':
             cprint(f"⏭ {proto_s}://{domain}:{port} ({ip}) 跳过 | {err}", 'debug')
-        elif status == 'online':
+            return
+        
+        # 读取网络故障标志
+        with _probe_lock:
+            net_bad = _net_bad
+
+        if net_bad:
+            # 网络故障期间，只打印日志，不更新状态和历史
+            if status == 'online':
+                msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s} (网络故障，不记录历史)"
+                cprint(msg, 'info')
+            else:
+                reason = f" | {err}" if err else ""
+                msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason} (网络故障，不记录历史)"
+                cprint(msg, 'error')
+            return   # 直接返回，不更新数据库
+        
+        # 网络正常，正常更新状态和历史
+        if status == 'online':
             msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}"
             db.add_log(msg, 'success')
             cprint(msg, 'success')
@@ -1919,7 +1938,9 @@ def _check_one(domain, ip_info):
             msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}"
             db.add_log(msg, 'error')
             cprint(msg, 'error')
-        # 若该 IP 归属地未知，顺带补查（锁外查询，避免长时间持锁）
+        db.update_status(domain, ip, status, lat)
+
+        # 归属地补查逻辑: 若该 IP 归属地未知，顺带补查（锁外查询，避免长时间持锁）
         need_geo = False
         with db.lock:
             for ip_obj in db.trackers.get(domain, {}).get('ips', []):
@@ -1948,6 +1969,7 @@ def _check_one(domain, ip_info):
 
 _probe_ok   = True    # 探针当前状态（True=可达，False=不可达）
 _probe_lock = threading.Lock()
+_net_bad = False   # 网络故障标志，由 monitor_loop 每轮更新
 
 def _probe_loop():
     """后台探针线程：多目标探测，任一可达即视为网络正常，全部不可达才告警。"""
@@ -2020,7 +2042,7 @@ def monitor_loop():
                     except Exception as e:
                         cprint(f"DNS线程异常: {e}", 'error')
 
-            # ── 第二步：并行检测所有 IP ───────────────────────────────────
+            # ── 第二步：并行检测所有 IP（暂不更新数据库） ───────────────
             snapshot = db.get_trackers()
             tasks = []
             for domain, data in snapshot.items():
@@ -2030,12 +2052,15 @@ def monitor_loop():
                     if not ip_info.get('removed') and not ip_info.get('paused'):
                         tasks.append((domain, ip_info))
 
+            # 存储本轮结果的字典：{(domain, ip): (status, lat, err, protocol, port)}
+            temp_results = {}
+            temp_lock = threading.Lock()
             # 用计数器收集本轮检测结果，检测完后判断网络健康度
             _round_ok  = [0]
             _round_fail = [0]
             _round_lock = threading.Lock()
 
-            def _check_one_counted(domain, ip_info):
+            def _check_one_and_record(domain, ip_info):
                 ip = ip_info['ip']
                 with db.lock:
                     td       = db.trackers.get(domain, {})
@@ -2043,24 +2068,30 @@ def monitor_loop():
                     protocol = td.get('protocol', 'tcp')
                 proto_s = protocol.upper()
                 try:
-                    status, lat, err = check_ip(domain, ip_info, retry=True)
+                    # 调用 check_ip 但不更新数据库
+                    status, lat, err = check_ip(domain, ip_info, retry=True, update_db=False)
                     lat_s = f"{lat}ms" if lat >= 0 else "N/A"
                     if status == 'skipped':
                         cprint(f"⏭ {proto_s}://{domain}:{port} ({ip}) 跳过 | {err}", 'debug')
-                    elif status == 'online':
-                        msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}"
-                        db.add_log(msg, 'success')
-                        cprint(msg, 'success')
+                        return
+                    # 存储结果
+                    with temp_lock:
+                        temp_results[(domain, ip)] = (status, lat, err, protocol, port)
+                    # 更新计数（用于失败率判断）
+                    if status == 'online':
                         with _round_lock: _round_ok[0] += 1
+                    else:
+                        with _round_lock: _round_fail[0] += 1
+                    # 立即打印控制台日志，但不写入 db.logs
+                    if status == 'online':
+                        msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}"
+                        cprint(msg, 'info')
                     else:
                         reason = f" | {err}" if err else ""
                         msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}"
-                        db.add_log(msg, 'error')
                         cprint(msg, 'error')
-                        with _round_lock: _round_fail[0] += 1
                 except Exception as e:
                     msg = f"检查异常 {domain}:{port} ({ip}): {type(e).__name__}: {e}"
-                    db.add_log(msg, 'error')
                     cprint(msg, 'error')
                     with _round_lock: _round_fail[0] += 1
 
@@ -2079,12 +2110,12 @@ def monitor_loop():
                     for i in range(0, len(tasks), STAGGER_BATCH):
                         batch = tasks[i:i + STAGGER_BATCH]
                         for d, ipi in batch:
-                            f = chk_pool.submit(_check_one_counted, d, ipi)
+                            f = chk_pool.submit(_check_one_and_record, d, ipi)
                             futures[f] = (d, ipi['ip'])
                         if i + STAGGER_BATCH < len(tasks):
                             time.sleep(STAGGER_DELAY)
                 else:
-                    futures = {chk_pool.submit(_check_one_counted, d, ipi): (d, ipi['ip'])
+                    futures = {chk_pool.submit(_check_one_and_record, d, ipi): (d, ipi['ip'])
                                for d, ipi in tasks}
                 for f in as_completed(futures):
                     try: f.result()
@@ -2118,14 +2149,49 @@ def monitor_loop():
                     db.add_log(warn_msg, 'error')
                     cprint(warn_msg, 'error')
                     _net_warn_printed = True
-                _check_now._net_bad = True
+                    with _probe_lock:
+                        _net_bad = True
+                    # 本轮结果直接丢弃，不更新数据库
             else:
                 if _net_warn_printed:
                     recover_msg = "[网络恢复] 探针与检测均正常，恢复历史数据统计"
                     db.add_log(recover_msg, 'info')
                     cprint(recover_msg, 'info')
-                _net_warn_printed = False
-                _check_now._net_bad = False
+                    _net_warn_printed = False
+                with _probe_lock:
+                    _net_bad = False
+                # 网络正常，将临时结果写入数据库
+                for (domain, ip), (status, lat, err, protocol, port) in temp_results.items():
+                    # 更新状态和历史
+                    db.update_status(domain, ip, status, lat)
+                    # 添加日志
+                    proto_s = protocol.upper()
+                    lat_s = f"{lat}ms" if lat >= 0 else "N/A"
+                    if status == 'online':
+                        msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}"
+                        db.add_log(msg, 'success')
+                    else:
+                        reason = f" | {err}" if err else ""
+                        msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}"
+                        db.add_log(msg, 'error')
+                    # 归属地补查（与原有逻辑相同）
+                    need_geo = False
+                    with db.lock:
+                        for ip_obj in db.trackers.get(domain, {}).get('ips', []):
+                            if ip_obj.get('ip') == ip:
+                                need_geo = ip_obj.get('country', {}).get('country_code', 'XX') == 'XX'
+                                break
+                    if need_geo:
+                        new_geo = get_geo(ip)
+                        if new_geo.get('country_code', 'XX') != 'XX':
+                            with db.lock:
+                                for ip_obj in db.trackers.get(domain, {}).get('ips', []):
+                                    if ip_obj.get('ip') == ip:
+                                        ip_obj['country'] = new_geo
+                                        break
+                # 保存数据（仅当 cache_history 开启）
+                if CONFIG.get('cache_history', True):
+                    db._save()
 
             s = db.get_stats()
             summary = (f"轮检完成 | "
@@ -2133,8 +2199,6 @@ def monitor_loop():
                        f"在线:{s['alive']} [v4:{s['alive_v4']} v6:{s['alive_v6']}]"
                        + (" | ⚠ 网络异常轮次，历史跳过" if not net_ok else ""))
             db.add_log(summary, 'info')
-            if net_ok and CONFIG.get('cache_history', True):
-                db._save()
 
         except Exception as e:
             msg = f"监控线程错误: {type(e).__name__}: {e}"
