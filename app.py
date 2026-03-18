@@ -1921,10 +1921,12 @@ def _check_one(domain, ip_info):
             # 网络故障期间，只打印日志，不更新状态和历史
             if status == 'online':
                 msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s} (网络故障，不记录历史)"
-                cprint(msg, 'info')
+                # db.add_log(msg, 'success')
+                cprint(msg, 'success')
             else:
                 reason = f" | {err}" if err else ""
                 msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason} (网络故障，不记录历史)"
+                # db.add_log(msg, 'error')
                 cprint(msg, 'error')
             return   # 直接返回，不更新数据库
         
@@ -2085,10 +2087,12 @@ def monitor_loop():
                     # 立即打印控制台日志，但不写入 db.logs
                     if status == 'online':
                         msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}"
-                        cprint(msg, 'info')
+                        # db.add_log(msg, 'success')
+                        cprint(msg, 'success')
                     else:
                         reason = f" | {err}" if err else ""
                         msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}"
+                        # db.add_log(msg, 'error')
                         cprint(msg, 'error')
                 except Exception as e:
                     msg = f"检查异常 {domain}:{port} ({ip}): {type(e).__name__}: {e}"
