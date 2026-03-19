@@ -447,9 +447,13 @@ class TrackerDB:
     def _recalc(self):
         total = alive = ipv4 = ipv6 = 0
         alive_v4 = alive_v6 = 0
+        offline = 0        # 总离线IP数
+        unknown = 0        # 总未知IP数
+        unknown_v4 = 0     # IPv4未知数
+        unknown_v6 = 0     # IPv6未知数
         paused_count = 0   # 已暂停的监控数量（域名级或IP级）
-        # TCP（含 tcp/http/https）和 UDP 分类统计
-        tcp_total = tcp_alive = udp_total = udp_alive = 0
+        tcp_total = tcp_alive = tcp_offline = tcp_unknown = 0   # 新增 tcp_unknown
+        udp_total = udp_alive = udp_offline = udp_unknown = 0   # 新增 udp_unknown
         for d in self.trackers.values():
             proto = d.get('protocol', 'tcp')
             is_udp = (proto == 'udp')
@@ -462,25 +466,49 @@ class TrackerDB:
                     continue   # 已暂停不计入在线/离线统计
                 total += 1
                 is6 = ':' in ip['ip']
-                if is6: ipv6 += 1
-                else:   ipv4 += 1
+                if is6:
+                    ipv6 += 1
+                else:
+                    ipv4 += 1
                 online = ip['status'] == 'online'
+                offline_ip = ip['status'] == 'offline'
                 if online:
                     alive += 1
-                    if is6: alive_v6 += 1
-                    else:   alive_v4 += 1
+                    if is6:
+                        alive_v6 += 1
+                    else:
+                        alive_v4 += 1
+                elif offline_ip:
+                    offline += 1           # 累计离线IP
+                else:
+                    unknown += 1           # 未知状态
+                    if is6:
+                        unknown_v6 += 1
+                    else:
+                        unknown_v4 += 1
                 if is_udp:
                     udp_total += 1
-                    if online: udp_alive += 1
+                    if online:
+                        udp_alive += 1
+                    elif offline_ip:
+                        udp_offline += 1
+                    else:
+                        udp_unknown += 1
                 else:
                     tcp_total += 1
-                    if online: tcp_alive += 1
+                    if online:
+                        tcp_alive += 1
+                    elif offline_ip:
+                        tcp_offline += 1
+                    else:
+                        tcp_unknown += 1
         self.stats = {
-            'total': total, 'alive': alive,
+            'total': total, 'alive': alive, 'offline': offline, 'unknown': unknown,
             'ipv4': ipv4, 'ipv6': ipv6,
             'alive_v4': alive_v4, 'alive_v6': alive_v6,
-            'tcp_total': tcp_total, 'tcp_alive': tcp_alive,
-            'udp_total': udp_total, 'udp_alive': udp_alive,
+            'unknown_v4': unknown_v4, 'unknown_v6': unknown_v6,   # 新增版本未知数
+            'tcp_total': tcp_total, 'tcp_alive': tcp_alive, 'tcp_offline': tcp_offline, 'tcp_unknown': tcp_unknown,
+            'udp_total': udp_total, 'udp_alive': udp_alive, 'udp_offline': udp_offline, 'udp_unknown': udp_unknown,
             'paused_count': paused_count,
         }
 

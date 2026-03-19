@@ -30,7 +30,7 @@ window.__i18n_en = {
     todayAlerts: 'Today Alerts',
     activeAlerts: 'active alerts',
     allNormal: 'All Normal',
-    onlineLabel: 'Online / Total',
+    onlineLabel: 'Online / Unknown / Total',
     offlineLabel: 'Offline / Total',
     paused: 'Paused',
     faultLabel: 'Offline',

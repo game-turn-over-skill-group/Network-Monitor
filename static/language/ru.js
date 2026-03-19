@@ -30,7 +30,7 @@ window.__i18n_ru = {
     todayAlerts: 'Оповещения за сегодня',
     activeAlerts: 'активных оповещений',
     allNormal: 'Все нормально',
-    onlineLabel: 'Онлайн / Всего',
+    onlineLabel: 'Онлайн / неизвестный / Всего',
     offlineLabel: 'Офлайн / Всего',
     paused: 'Приостановлено',
     faultLabel: 'Сбой',

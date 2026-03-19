@@ -30,7 +30,7 @@ window.__i18n_ja = {
     todayAlerts: '本日のアラート',
     activeAlerts: '件のアクティブなアラート',
     allNormal: 'すべて正常',
-    onlineLabel: 'オンライン / 合計',
+    onlineLabel: 'オンライン / 不明 / 合計',
     offlineLabel: 'オフライン / 合計',
     paused: '一時停止',
     faultLabel: '障害',

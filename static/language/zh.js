@@ -30,7 +30,7 @@ window.__i18n_zh = {
     todayAlerts: '今日告警',
     activeAlerts: '条活跃告警',
     allNormal: '全部正常',
-    onlineLabel: '在线 / 监控',
+    onlineLabel: '在线 / 未知 / 监控',
     offlineLabel: '故障 / 监控',
     paused: '已暂停',
     faultLabel: '故障',

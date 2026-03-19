@@ -30,7 +30,7 @@ window.__i18n_ko = {
     todayAlerts: '오늘의 알림',
     activeAlerts: '건의 활성 알림',
     allNormal: '모두 정상',
-    onlineLabel: '온라인 / 전체',
+    onlineLabel: '온라인 / 알려지지 않은 / 전체',
     offlineLabel: '오프라인 / 전체',
     paused: '일시정지',
     faultLabel: '장애',
