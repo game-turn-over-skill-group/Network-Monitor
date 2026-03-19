@@ -2270,6 +2270,18 @@ const msgs = {
 
 const i18n = createI18n({ legacy:false, locale:'zh', fallbackLocale:'zh', messages: msgs });
 
+// 智能搜索：从 URL 中提取主机名（域名或 IP）
+function extractSearchTerm(input) {
+    if (!input) return input;
+    const s = input.trim().toLowerCase();
+    // 匹配 http://、https://、udp:// 后跟主机名（可能带端口）
+    const urlMatch = s.match(/^(https?|udp):\/\/([^/:]+)/i);
+    if (urlMatch) {
+        return urlMatch[2]; // 返回主机名部分（已转小写）
+    }
+    return s;
+}
+
 createApp({
     setup() {
         const currentTab = ref('dashboard');
@@ -2682,9 +2694,10 @@ createApp({
             }
             if (!searchQ.value) return base;
             const q = searchQ.value.toLowerCase();
+            const searchTerm = extractSearchTerm(q); // 智能搜索：如果输入是 URL 则提取域名
             const r = {};
             for (const [d,data] of Object.entries(base)) {
-                if (d.toLowerCase().includes(q)) { r[d]=data; continue; }
+                if (d.toLowerCase().includes(searchTerm)) { r[d]=data; continue; } // 智能搜索 q替换为searchTerm
                 // 端口搜索
                 if (String(data.port).includes(q)) { r[d]=data; continue; }
                 // 添加时间
@@ -3289,6 +3302,7 @@ createApp({
         // 快速搜索结果（IP维度展平，支持分页 + 默认显示全部）
         const qsAllResults = computed(() => {
             const q = qsSearch.value.toLowerCase().trim();
+            const searchTerm = extractSearchTerm(q); // 智能搜索：如果输入是 URL 则提取域名，否则原样使用
             const domainF = qsFilterDomain.value;
             const results = [];
             for (const [domain, tr] of Object.entries(trackers.value)) {
@@ -3325,7 +3339,7 @@ createApp({
                             statusSearchStr,
                             String(port)  // 新增：支持端口搜索
                         ].join(' ').toLowerCase();
-                        if (!searchable.includes(q)) continue;
+                        if (!searchable.includes(searchTerm)) continue; //智能搜索 q替换为searchTerm
                     }
                     // 计算有效显示状态（考虑暂停）
                     const isPaused = tr.paused || ip.paused;
