@@ -66,8 +66,9 @@ DEFAULT_CONFIG = {
     'export_suffix': '/announce',      # 导出 tracker 列表时追加的路径后缀
     'show_removed_ips': True,          # 是否显示已移除的历史IP（前端控制）
     'default_layout_width': '1700',    # 默认页面视野宽度（px字符串，对应50%~100%）
-    'allow_private_ips': False,        # 新增：是否允许添加内网IP，默认禁止（SSRF防护）
-    'min_password_length': 8,          # 新增：最小密码长度
+    'allow_private_ips': False,        # 是否允许添加内网IP，默认禁止（SSRF防护）
+    'min_password_length': 8,          # 用户修改密码最小长度
+    'refresh_geo_on_restart': True,    # 重启时自动更新 IP 归属地
     'users': [
         {"username": "admin",    "password": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", "role": "admin"},
         {"username": "operator", "password": "06e55b633481f7bb072957eabcf110c972e86691c3cfedabe088024bffe42f23", "role": "operator"},
@@ -3256,34 +3257,115 @@ if __name__ == '__main__':
     db._cleanup_hdb_on_startup()   # 清理已移除IP和domain级的hdb key
     db.add_log("网络监控服务启动", 'info')
 
-    # 启动后台 geo 补查线程：修复 data.json 中遗留的 XX/Unknown 归属地
-    def _geo_repair_loop():
-        """启动后延迟10s开始，逐个补查归属地为 Unknown 的 IP，避免启动时并发过高"""
-        import time as _time
-        _time.sleep(10)
+    def _get_geo_force(ip: str) -> dict:
+        """强制查询 IP 归属地，跳过缓存，并更新缓存（用于批量刷新）"""
+        # 先查缓存（仅用于防止短时间内重复查询，此处可忽略）
+        # 直接发起网络请求
+        result = {'country':'Unknown', 'country_code':'XX', 'isp':'Unknown'}
+        # SSRF防护：仅对公网IP发起查询
+        if not _is_safe_public_ip(ip):
+            with _geo_cache_lock:
+                _geo_cache[ip] = result
+            return result
+        try:
+            s = get_requests_session()
+            import urllib.parse
+            safe_ip = urllib.parse.quote(ip, safe=':.[]')
+            r = s.get(f"http://ip-api.com/json/{safe_ip}?fields=country,countryCode,isp", timeout=5)
+            if r.status_code == 200:
+                d = r.json()
+                if d.get('countryCode') and d['countryCode'] != 'XX':
+                    result = {'country': d.get('country','Unknown'),
+                    'country_code': d.get('countryCode','XX'),
+                    'isp': d.get('isp','Unknown')}
+            # 更新缓存（无论成功与否，避免反复查询无法访问的IP）
+            with _geo_cache_lock:
+                _geo_cache[ip] = result
+        except Exception:
+            pass
+        return result
+    
+    # ==================== 启动后 geo 更新线程 ====================
+    def _geo_update_loop():
+        """后台更新 IP 归属地信息（根据配置执行不同策略）"""
+        time.sleep(10)   # 等待服务完全启动
+        refresh_all = CONFIG.get('refresh_geo_on_restart', True)
+        # 用于记录连续失败的 IP，避免无限重试（仅本次启动有效）
+        fail_count = {}
+        MAX_FAIL = 3   # 连续失败超过此次数则跳过
+
         with db.lock:
-            xx_ips = []
+            # 收集需要处理的 IP
+            targets = []
             for domain, td in db.trackers.items():
                 for ip_obj in td.get('ips', []):
-                    c = ip_obj.get('country', {})
-                    if isinstance(c, dict) and c.get('country_code', 'XX') == 'XX':
-                        xx_ips.append((domain, ip_obj))
-        if xx_ips:
-            cprint(f"[geo] 发现 {len(xx_ips)} 个未知归属地IP，开始后台补查…", 'info')
-        for domain, ip_obj in xx_ips:
-            ip = ip_obj.get('ip', '')
-            if not ip: continue
-            new_geo = get_geo(ip)
-            if new_geo.get('country_code', 'XX') != 'XX':
-                with db.lock:
-                    for td in db.trackers.values():
-                        for obj in td.get('ips', []):
-                            if obj.get('ip') == ip:
-                                obj['country'] = new_geo
-                cprint(f"[geo] 补查完成: {ip} → {new_geo['country']} / {new_geo['isp']}", 'info')
-            _time.sleep(0.5)  # 限速，避免 ip-api 429
+                    ip = ip_obj.get('ip', '')
+                    if not ip:
+                        continue
+                    if refresh_all:
+                        # 全部刷新：所有IP都加入
+                        targets.append((domain, ip_obj))
+                    else:
+                        # 仅修复未知归属地
+                        c = ip_obj.get('country', {})
+                        if isinstance(c, dict) and c.get('country_code', 'XX') == 'XX':
+                            targets.append((domain, ip_obj))
+        
+        if not targets:
+            cprint("[geo] 没有需要更新归属地的 IP", 'info')
+            return
+        
+        mode = "全部刷新" if refresh_all else "修复未知"
+        cprint(f"[geo] 开始{mode}，共 {len(targets)} 个 IP（间隔 0.8 秒，避免触发限流）", 'info')
 
-    geo_repair_t = threading.Thread(target=_geo_repair_loop, daemon=True)
+        updated_count = 0
+        for domain, ip_obj in targets:
+            ip = ip_obj.get('ip', '')
+            if not ip:
+                continue
+            new_geo = get_geo(ip)
+            # 如果该 IP 已连续失败超过 MAX_FAIL 次，则跳过本次更新
+            if fail_count.get(ip, 0) >= MAX_FAIL:
+                cprint(f"[geo] 跳过 {ip}（已连续失败 {MAX_FAIL} 次）", 'debug')
+                continue
+            
+            # 强制查询最新归属地（绕过缓存）
+            new_geo = _get_geo_force(ip)
+
+            # 判断是否成功获取到有效数据（country_code != 'XX'）
+            if new_geo.get('country_code', 'XX') != 'XX':
+                # 成功：重置失败计数
+                fail_count.pop(ip, None)
+                # 获取当前数据库中的旧值
+                old_geo = ip_obj.get('country', {})
+                old_cc = old_geo.get('country_code', 'XX')
+                new_cc = new_geo.get('country_code', 'XX')
+                # 如果不同，才更新
+                if old_cc != new_cc or old_geo.get('isp') != new_geo.get('isp'):
+                    with db.lock:
+                        # 重新定位该 IP（防止列表在遍历过程中发生变化）
+                        for td in db.trackers.values():
+                            for obj in td.get('ips', []):
+                                if obj.get('ip') == ip:
+                                    obj['country'] = new_geo
+                                    updated_count += 1
+                                    break
+                    if updated_count % 10 == 0:
+                        db._save_async() # 每更新 10 个 IP 异步保存一次
+                    cprint(f"[geo] 更新 {ip}: {old_cc} -> {new_cc}", 'debug')
+            else:
+                # 查询失败：增加失败计数
+                fail_count[ip] = fail_count.get(ip, 0) + 1
+                cprint(f"[geo] 查询失败 {ip}（失败 {fail_count[ip]}/{MAX_FAIL}）", 'debug')
+            time.sleep(0.8)   # 避免触发 ip-api 限流
+        
+        if updated_count:
+            db._save_async()
+            cprint(f"[geo] 归属地更新完成，共更新 {updated_count} 个 IP", 'info')
+        else:
+            cprint("[geo] 没有 IP 的归属地发生更新", 'info')
+
+    geo_repair_t = threading.Thread(target=_geo_update_loop, daemon=True)
     geo_repair_t.start()
 
     t = threading.Thread(target=monitor_loop, daemon=True)
