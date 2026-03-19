@@ -3413,7 +3413,11 @@ if __name__ == '__main__':
     print(f"  允许内网IP     : {'是' if CONFIG.get('allow_private_ips') else '否'}")
     print(f"  最小密码长度   : {CONFIG.get('min_password_length', 8)}")
     users_info = CONFIG.get('users', [])
-    print(f"  用户账户       : {len(users_info)} 个 ({', '.join(u['username']+'('+u['role']+')' for u in users_info)})")
+    admin_count = sum(1 for u in users_info if u.get('role') == 'admin')
+    operator_count = sum(1 for u in users_info if u.get('role') == 'operator')
+    viewer_count = sum(1 for u in users_info if u.get('role') == 'viewer')
+    print(f"  用户账户       : {len(users_info)} 个 (admin: {admin_count}, operator: {operator_count}, viewer: {viewer_count})")
+    # print(f"  用户账户       : {len(users_info)} 个 ({', '.join(u['username']+'('+u['role']+')' for u in users_info)})") # 控制台 暴露用户名 不可取
     print(f"{'='*58}")
     print(f"  权限说明:")
     print(f"    admin    - 全部权限（配置+用户管理，重试不限速）")
