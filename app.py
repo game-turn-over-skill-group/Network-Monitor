@@ -416,14 +416,14 @@ class TrackerDB:
                         self.trackers[domain]['ips'].append(info)
             self._save_async()  # 改为异步保存
 
-    def update_status(self, domain, ip, status, latency):
+    def update_status(self, domain, ip, status, latency, check_time=None):
         with self.lock:
             if domain in self.trackers:
                 for info in self.trackers[domain]['ips']:
                     if info['ip'] == ip:
                         info['status']     = status
                         info['latency']    = latency
-                        info['last_check'] = datetime.now().isoformat()
+                        info['last_check'] = check_time or datetime.now().isoformat()  # 优先使用传入的时间
                         break
                 self._push_history(domain, ip, status)
                 self._recalc()
@@ -2032,9 +2032,11 @@ def _check_one_and_record(domain, ip_info, temp_results, round_ok, round_fail, r
         if status == 'skipped':
             cprint(f"⏭ {proto_s}://{domain}:{port} ({ip}) 跳过 | {err}", 'debug')
             return
-        # 存储结果
+        # 记录检测完成的时间戳
+        check_time = datetime.now().isoformat()
+        # 存储结果（增加 check_time）
         with temp_lock:
-            temp_results[(domain, ip)] = (status, lat, err, protocol, port)
+            temp_results[(domain, ip)] = (status, lat, err, protocol, port, check_time)
         # 更新计数（用于失败率判断）
         if status == 'online':
             with round_lock: round_ok[0] += 1
@@ -2054,9 +2056,9 @@ def _check_one_and_record(domain, ip_info, temp_results, round_ok, round_fail, r
         with round_lock: round_fail[0] += 1
 
 def _write_healthy_results(temp_results):
-    for (domain, ip), (status, lat, err, protocol, port) in temp_results.items():
-        # 更新状态和历史
-        db.update_status(domain, ip, status, lat)
+    for (domain, ip), (status, lat, err, protocol, port, check_time) in temp_results.items():
+        # 更新状态和历史，传入 check_time
+        db.update_status(domain, ip, status, lat, check_time)
         # 添加日志
         proto_s = protocol.upper()
         lat_s = f"{lat}ms" if lat >= 0 else "N/A"
