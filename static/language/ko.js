@@ -34,6 +34,7 @@ window.__i18n_ko = {
     offlineLabel: '오프라인 / 전체',
     paused: '일시정지',
     faultLabel: '장애',
+    unknownLabel: '알 수 없음',
   },
   monitor: {
     title: '모니터링 목록',

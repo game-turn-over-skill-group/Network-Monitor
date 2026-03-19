@@ -34,6 +34,7 @@ window.__i18n_fr = {
     offlineLabel: 'Hors ligne / Total',
     paused: 'En pause',
     faultLabel: 'Panne',
+    unknownLabel: 'Inconnu',
   },
   monitor: {
     title: 'Liste de surveillance',

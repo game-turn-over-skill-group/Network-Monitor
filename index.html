@@ -925,158 +925,296 @@
             <!-- 顶部6格统计卡 -->
             <div class="row mb-2 g-2" style="align-items:stretch;">
 
-                <!-- 卡1：在线/未知/监控（排除已暂停） -->
+                <!-- 卡1：在线 / 监控 -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
-                    <div class="stat-card-new card">
-                        <div class="scn-label">{{ t('stats.onlineLabel') }}</div>
-                        <div class="scn-main" style="font-size:1.7rem;display:flex;align-items:baseline;gap:4px;flex-wrap:wrap;">
-                            <span class="ok" style="font-size:2rem;">{{ stats.alive||0 }}</span>
-                            <span style="font-size:1.2rem;font-weight:400;">/</span>
-                            <span :style="{ color: stats.unknown ? 'var(--warn)' : '' }" style="font-size:1.5rem;">{{ stats.unknown||0 }}</span>
-                            <span style="font-size:1.2rem;font-weight:400;">/</span>
-                            <span style="font-size:2rem;">{{ stats.total||0 }}</span>
+                    <div class="stat-card-new card" style="justify-content:space-between;">
+                        <!-- 顶部标题：对半 -->
+                        <div style="display:flex;width:100%;border-bottom:1px solid var(--glass-border);padding-bottom:4px;margin-bottom:6px;">
+                            <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;border-right:1px solid var(--glass-border);">{{ t('stats.alive') }}</div>
+                            <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;">{{ t('stats.total') }}</div>
                         </div>
-                        <div class="scn-sub" style="flex-direction:column;align-items:flex-start;gap:3px;">
-                            <!-- 在线率，颜色随比率 -->
-                            <span style="font-size:.82rem;font-weight:700;"
-                                :class="stats.total>0&&(stats.alive/stats.total)>=0.8?'ok':stats.total>0&&(stats.alive/stats.total)>=0.5?'warn':'err'">
-                                {{ stats.total>0 ? ((stats.alive||0)/stats.total*100).toFixed(1)+'%' : '-' }}
-                            </span>
-                            <!-- IPv4/IPv6 详细：在线/未知/总数 -->
-                            <span style="font-size:.72rem;">
-                                IPv4&nbsp;
-                                <span :class="stats.alive_v4===stats.ipv4?'':'ok'" style="font-weight:600;">{{ stats.alive_v4||0 }}</span>
-                                <span style="">/</span>
-                                <span :style="{ color: stats.unknown_v4 ? 'var(--warn)' : '' }">{{ stats.unknown_v4||0 }}</span>
-                                <span style="">/</span>
-                                <span style="">{{ stats.ipv4||0 }}</span>
-                                &nbsp;·&nbsp;
-                                IPv6&nbsp;
-                                <span :class="stats.alive_v6===stats.ipv6?'':'ok'" style="font-weight:600;">{{ stats.alive_v6||0 }}</span>
-                                <span style="">/</span>
-                                <span :style="{ color: stats.unknown_v6 ? 'var(--warn)' : '' }">{{ stats.unknown_v6||0 }}</span>
-                                <span style="">/</span>
-                                <span style="">{{ stats.ipv6||0 }}</span>
-                            </span>
+                        <!-- 大数字：对半 -->
+                        <div style="display:flex;width:100%;margin-bottom:4px;">
+                            <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
+                                <span class="ok" style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.alive||0 }}</span>
+                            </div>
+                            <div style="flex:1;text-align:center;">
+                                <span style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.total||0 }}</span>
+                            </div>
+                        </div>
+                        <!-- 在线率% | 空 -->
+                        <div style="display:flex;width:100%;margin-bottom:auto;">
+                            <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
+                                <span style="font-size:.82rem;font-weight:700;"
+                                    :class="stats.total>0&&(stats.alive/stats.total)>=0.8?'ok':stats.total>0&&(stats.alive/stats.total)>=0.5?'warn':'err'">
+                                    {{ stats.total>0 ? ((stats.alive||0)/stats.total*100).toFixed(1)+'%' : '-' }}
+                                </span>
+                            </div>
+                            <div style="flex:1;"></div>
+                        </div>
+                        <!-- IPv4 行：对半，左=在线 右=总数 -->
+                        <div style="display:flex;width:100%;border-top:1px solid var(--glass-border);padding-top:3px;margin-top:6px;">
+                            <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
+                                <div style="font-size:.6rem;color:var(--muted);">IPv4</div>
+                                <div style="font-size:.8rem;font-weight:600;" :class="stats.alive_v4===stats.ipv4?'':'ok'">{{ stats.alive_v4||0 }}</div>
+                            </div>
+                            <div style="flex:1;text-align:center;">
+                                <div style="font-size:.6rem;color:var(--muted);">IPv4</div>
+                                <div style="font-size:.8rem;font-weight:600;color:var(--muted);">{{ stats.ipv4||0 }}</div>
+                            </div>
+                        </div>
+                        <!-- IPv6 行：对半 -->
+                        <div style="display:flex;width:100%;padding-top:3px;">
+                            <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
+                                <div style="font-size:.6rem;color:var(--muted);">IPv6</div>
+                                <div style="font-size:.8rem;font-weight:600;" :class="stats.alive_v6===stats.ipv6?'':'ok'">{{ stats.alive_v6||0 }}</div>
+                            </div>
+                            <div style="flex:1;text-align:center;">
+                                <div style="font-size:.6rem;color:var(--muted);">IPv6</div>
+                                <div style="font-size:.8rem;font-weight:600;color:var(--muted);">{{ stats.ipv6||0 }}</div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- 卡2：故障 / 暂停 / 监控 -->
+                <!-- 卡2：故障 / 未知 -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
-                    <div class="stat-card-new card">
-                        <div class="scn-label">{{ t('stats.offlineLabel') }}</div>
-                        <div class="scn-main" style="font-size:1.7rem;display:flex;align-items:baseline;gap:4px;flex-wrap:wrap;">
-                            <span :class="stats.offline>0?'err':''" style="font-size:2rem;">{{ stats.offline || 0 }}</span>
-                            <span style="color:var(--muted);font-size:1.2rem;font-weight:400;">/</span>
-                            <span style="font-size:2rem;">{{ stats.total||0 }}</span>
+                    <div class="stat-card-new card" style="justify-content:space-between;">
+                        <!-- 顶部标题：对半 -->
+                        <div style="display:flex;width:100%;border-bottom:1px solid var(--glass-border);padding-bottom:4px;margin-bottom:6px;">
+                            <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;border-right:1px solid var(--glass-border);">{{ t('stats.offline') }}</div>
+                            <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;">{{ t('stats.unknownLabel') }}</div>
                         </div>
-                        <div class="scn-sub" style="flex-direction:column;align-items:flex-start;gap:3px;">
-                            <span class="scn-desc">{{ t('stats.offlineDesc') }}</span>
-                            <!-- 暂停数：有暂停时显示黄色 -->
-                            <span v-if="stats.paused_count>0" style="font-size:.78rem;font-weight:600;color:#eab308;">
-                                ⏸ {{ t('stats.paused') }} {{ stats.paused_count }}
-                            </span>
+                        <!-- 大数字：对半 -->
+                        <div style="display:flex;width:100%;margin-bottom:4px;">
+                            <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
+                                <span :class="stats.offline>0?'err':''" style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.offline||0 }}</span>
+                            </div>
+                            <div style="flex:1;text-align:center;">
+                                <span :style="{ color: stats.unknown ? 'var(--warn)' : '' }" style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.unknown||0 }}</span>
+                            </div>
+                        </div>
+                        <!-- 空 | 已暂停 -->
+                        <div style="display:flex;width:100%;margin-bottom:auto;">
+                            <div style="flex:1;border-right:1px solid var(--glass-border);"></div>
+                            <div style="flex:1;text-align:center;">
+                                <span v-if="stats.paused_count>0" style="font-size:.72rem;font-weight:600;color:#eab308;">⏸ {{ t('stats.paused') }} {{ stats.paused_count }}</span>
+                                <span v-else style="font-size:.72rem;color:var(--muted);">-</span>
+                            </div>
+                        </div>
+                        <!-- IPv4 行：对半，左=故障 右=未知 -->
+                        <div style="display:flex;width:100%;border-top:1px solid var(--glass-border);padding-top:3px;margin-top:6px;">
+                            <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
+                                <div style="font-size:.6rem;color:var(--muted);">IPv4</div>
+                                <div style="font-size:.8rem;font-weight:600;" :class="(stats.offline_v4||0)>0?'err':''">{{ stats.offline_v4||0 }}</div>
+                            </div>
+                            <div style="flex:1;text-align:center;">
+                                <div style="font-size:.6rem;color:var(--muted);">IPv4</div>
+                                <div style="font-size:.8rem;font-weight:600;" :style="{ color: stats.unknown_v4 ? 'var(--warn)' : 'var(--muted)' }">{{ stats.unknown_v4||0 }}</div>
+                            </div>
+                        </div>
+                        <!-- IPv6 行：对半 -->
+                        <div style="display:flex;width:100%;padding-top:3px;">
+                            <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
+                                <div style="font-size:.6rem;color:var(--muted);">IPv6</div>
+                                <div style="font-size:.8rem;font-weight:600;" :class="(stats.offline_v6||0)>0?'err':''">{{ stats.offline_v6||0 }}</div>
+                            </div>
+                            <div style="flex:1;text-align:center;">
+                                <div style="font-size:.6rem;color:var(--muted);">IPv6</div>
+                                <div style="font-size:.8rem;font-weight:600;" :style="{ color: stats.unknown_v6 ? 'var(--warn)' : 'var(--muted)' }">{{ stats.unknown_v6||0 }}</div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- 卡3：平均延迟（不变） -->
+                <!-- 卡3：平均延迟 -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
-                    <div class="stat-card-new card">
-                        <div class="scn-label">{{ t('stats.avgLatency') }}</div>
-                        <div class="scn-main" :class="dashAvgLatency>1000?'err':dashAvgLatency>500?'warn':''">{{ dashAvgLatency > 0 ? dashAvgLatency+'ms' : '-' }}</div>
-                        <div class="scn-sub">
-                            <span class="scn-desc">P95: {{ dashP95Latency > 0 ? dashP95Latency+'ms' : '-' }}</span>
+                    <div class="stat-card-new card" style="justify-content:space-between;">
+                        <!-- 标题 -->
+                        <div style="text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;border-bottom:1px solid var(--glass-border);padding-bottom:4px;">
+                            {{ t('stats.avgLatency') }}
+                        </div>
+                        <!-- 各行：标签左对齐 | 延迟居中 -->
+                        <div style="display:flex;align-items:center;width:100%;">
+                            <div style="font-size:.68rem;color:var(--muted);width:32px;flex-shrink:0;">{{ t('stats.total')||'总' }}</div>
+                            <div style="flex:1;text-align:center;font-size:1.4rem;font-weight:700;"
+                                :class="stats.avg_latency>1000?'err':stats.avg_latency>500?'warn':''">
+                                {{ stats.avg_latency>0 ? stats.avg_latency+'ms' : '-' }}
+                            </div>
+                        </div>
+                        <div style="display:flex;align-items:center;width:100%;">
+                            <div style="font-size:.68rem;color:var(--muted);width:32px;flex-shrink:0;">IPv4</div>
+                            <div style="flex:1;text-align:center;font-size:.9rem;font-weight:600;"
+                                :class="stats.avg_latency_v4>1000?'err':stats.avg_latency_v4>500?'warn':''">
+                                {{ stats.avg_latency_v4>0 ? stats.avg_latency_v4+'ms' : '-' }}
+                            </div>
+                        </div>
+                        <div style="display:flex;align-items:center;width:100%;">
+                            <div style="font-size:.68rem;color:var(--muted);width:32px;flex-shrink:0;">IPv6</div>
+                            <div style="flex:1;text-align:center;font-size:.9rem;font-weight:600;"
+                                :class="stats.avg_latency_v6>1000?'err':stats.avg_latency_v6>500?'warn':''">
+                                {{ stats.avg_latency_v6>0 ? stats.avg_latency_v6+'ms' : '-' }}
+                            </div>
+                        </div>
+                        <div style="display:flex;align-items:center;width:100%;">
+                            <div style="font-size:.68rem;color:var(--muted);width:32px;flex-shrink:0;">TCP</div>
+                            <div style="flex:1;text-align:center;font-size:.9rem;font-weight:600;"
+                                :class="stats.avg_latency_tcp>1000?'err':stats.avg_latency_tcp>500?'warn':''">
+                                {{ stats.avg_latency_tcp>0 ? stats.avg_latency_tcp+'ms' : '-' }}
+                            </div>
+                        </div>
+                        <div style="display:flex;align-items:center;width:100%;">
+                            <div style="font-size:.68rem;color:var(--muted);width:32px;flex-shrink:0;">UDP</div>
+                            <div style="flex:1;text-align:center;font-size:.9rem;font-weight:600;"
+                                :class="stats.avg_latency_udp>1000?'err':stats.avg_latency_udp>500?'warn':''">
+                                {{ stats.avg_latency_udp>0 ? stats.avg_latency_udp+'ms' : '-' }}
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                <!-- 卡4：网络状态 -->
+                <!-- 卡4：网络健康 -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
-                    <div class="stat-card-new card">
-                        <div class="scn-label">{{ t('stats.netHealth') }}</div>
-                        <div class="scn-main" style="font-size:1.9rem;" :class="stats.net_healthy===false?'err':'ok'">
+                    <div class="stat-card-new card" style="justify-content:space-between;cursor:default;"
+                         @mousemove="probeTooltipX=$event.clientX; probeTooltipY=$event.clientY"
+                         @mouseenter="showProbeTooltip=true" @mouseleave="showProbeTooltip=false">
+                        <!-- 标题 -->
+                        <div style="text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;border-bottom:1px solid var(--glass-border);padding-bottom:4px;">
+                            {{ t('stats.netHealth') }}
+                        </div>
+                        <!-- 大符号 -->
+                        <div style="text-align:center;font-size:2rem;line-height:1;" :class="stats.net_healthy===false?'err':'ok'">
                             {{ stats.net_healthy===false ? '✗' : '✔' }}
                         </div>
-                        <div class="scn-sub" style="flex-direction:column;align-items:flex-start;gap:2px;">
-                            <span style="font-size:.78rem;font-weight:600;" :class="stats.net_healthy===false?'err':'ok'">
-                                {{ stats.net_healthy===false ? t('stats.netBad') : t('stats.netOk') }}
-                            </span>
-                            <span class="scn-desc" style="font-size:.68rem;">
-                                {{ t('stats.probe') }} {{ stats.net_probe_ok===false ? t('stats.probeDown') : t('stats.probeOk') }}
-                            </span>
+                        <!-- 状态文字 -->
+                        <div style="text-align:center;font-size:.82rem;font-weight:600;" :class="stats.net_healthy===false?'err':'ok'">
+                            {{ stats.net_healthy===false ? t('stats.netBad') : t('stats.netOk') }}
+                        </div>
+                        <!-- 探针摘要 -->
+                        <div style="text-align:center;font-size:.68rem;color:var(--muted);">
+                            {{ t('stats.probe') }} {{ stats.net_probe_ok===false ? t('stats.probeDown') : t('stats.probeOk') }}
                         </div>
                     </div>
                 </div>
+
+                <!-- 探针详情浮层（fixed，跟随鼠标，脱离所有层叠上下文） -->
+                <teleport to="body">
+                    <div v-if="showProbeTooltip"
+                         :style="{ position:'fixed', left:(probeTooltipX+14)+'px', top:(probeTooltipY+14)+'px', zIndex:99999,
+                                   background:'var(--glass-nav)', border:'1px solid var(--glass-border)',
+                                   borderRadius:'8px', padding:'8px 14px', minWidth:'160px',
+                                   backdropFilter:'blur(14px)', boxShadow:'0 6px 24px rgba(0,0,0,.5)',
+                                   whiteSpace:'nowrap', pointerEvents:'none' }">
+                        <div style="font-size:.65rem;color:var(--muted);margin-bottom:4px;font-weight:600;letter-spacing:.3px;">
+                            {{ t('stats.probe') }}
+                        </div>
+                        <div v-for="(ok, ip) in (stats.probe_details||{})" :key="ip"
+                             style="font-size:.78rem;font-weight:600;line-height:2;"
+                             :style="{ color: ok ? 'var(--ok)' : 'var(--err)' }">
+                            <span style="margin-right:6px;">{{ ok ? '✔' : '✗' }}</span>{{ ip }}
+                        </div>
+                    </div>
+                </teleport>
 
                 <!-- 卡5：TCP -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
-                    <div class="stat-card-new card">
-                        <div class="scn-label">TCP <span style="font-size:.65rem;color:#4b5563;font-weight:400;">http/https</span></div>
-                        <!-- 在线/未知/总数，颜色随比率：100%白，≥80%绿，≥50%黄，<50%红 -->
-                        <div class="scn-main" style="display:flex;align-items:baseline;gap:4px;flex-wrap:wrap;">
-                            <span class="ok" style="font-size:2rem;">{{ stats.tcp_alive||0 }}</span>
-                            <span style="font-size:1.2rem;font-weight:400;">/</span>
-                            <span :style="{ color: stats.tcp_unknown ? 'var(--warn)' : '' }" style="font-size:1.5rem;">{{ stats.tcp_unknown||0 }}</span>
-                            <span style="font-size:1.2rem;font-weight:400;">/</span>
-                            <span style="font-size:2rem;">{{ stats.tcp_total||0 }}</span>
+                    <div class="stat-card-new card" style="justify-content:space-between;">
+                        <!-- 标题 -->
+                        <div style="text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;border-bottom:1px solid var(--glass-border);padding-bottom:4px;">
+                            TCP <span style="font-size:.6rem;color:#4b5563;font-weight:400;">http/https</span>
                         </div>
-                        <div class="scn-sub" style="flex-direction:column;align-items:flex-start;gap:2px;">
-                            <!-- 在线率（基于在线+离线，排除未知） -->
-                            <span style="font-size:.8rem;font-weight:700;"
-                            :class="stats.tcp_alive + stats.tcp_offline > 0 ? 
-                            (stats.tcp_alive === (stats.tcp_alive + stats.tcp_offline) ? '' : 
-                            (stats.tcp_alive / (stats.tcp_alive + stats.tcp_offline) >= 0.8 ? 'ok' : 
-                            stats.tcp_alive / (stats.tcp_alive + stats.tcp_offline) >= 0.5 ? 'warn' : 'err')) : ''">
-                            {{ stats.tcp_alive + stats.tcp_offline > 0 ? 
-                                ((stats.tcp_alive||0) / (stats.tcp_alive + stats.tcp_offline) * 100).toFixed(1) + '%' : '-' }}
-                            </span>
-                            <span class="scn-desc" style="font-size:.68rem;">
-                                {{ t('stats.faultLabel') }}: {{ stats.tcp_offline || 0 }} / {{ stats.tcp_total||0 }}
-                            </span>
+                        <!-- 大数字：在线 | 总数 -->
+                        <div style="display:flex;width:100%;">
+                            <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
+                                <span class="ok" style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.tcp_alive||0 }}</span>
+                            </div>
+                            <div style="flex:1;text-align:center;">
+                                <span style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.tcp_total||0 }}</span>
+                            </div>
+                        </div>
+                        <!-- 可用率% | 空 -->
+                        <div style="display:flex;width:100%;">
+                            <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
+                                <span style="font-size:.82rem;font-weight:700;"
+                                    :class="stats.tcp_alive + stats.tcp_offline > 0 ?
+                                    (stats.tcp_alive === (stats.tcp_alive + stats.tcp_offline) ? '' :
+                                    (stats.tcp_alive / (stats.tcp_alive + stats.tcp_offline) >= 0.8 ? 'ok' :
+                                    stats.tcp_alive / (stats.tcp_alive + stats.tcp_offline) >= 0.5 ? 'warn' : 'err')) : ''">
+                                    {{ stats.tcp_alive + stats.tcp_offline > 0 ?
+                                        ((stats.tcp_alive||0) / (stats.tcp_alive + stats.tcp_offline) * 100).toFixed(1) + '%' : '-' }}
+                                </span>
+                            </div>
+                            <div style="flex:1;"></div>
+                        </div>
+                        <!-- 故障/未知 标签+数字 -->
+                        <div style="border-top:1px solid var(--glass-border);padding-top:3px;">
+                            <div style="display:flex;width:100%;">
+                                <div style="flex:1;text-align:center;font-size:.65rem;color:var(--muted);border-right:1px solid var(--glass-border);">{{ t('stats.faultLabel') }}</div>
+                                <div style="flex:1;text-align:center;font-size:.65rem;color:var(--muted);">{{ t('stats.unknownLabel') }}</div>
+                            </div>
+                            <div style="display:flex;width:100%;">
+                                <div style="flex:1;text-align:center;font-size:.8rem;font-weight:600;border-right:1px solid var(--glass-border);" :class="(stats.tcp_offline||0)>0?'err':''">{{ stats.tcp_offline||0 }}</div>
+                                <div style="flex:1;text-align:center;font-size:.8rem;font-weight:600;" :style="{ color: stats.tcp_unknown ? 'var(--warn)' : '' }">{{ stats.tcp_unknown||0 }}</div>
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 <!-- 卡6：UDP -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
-                    <div class="stat-card-new card">
-                        <div class="scn-label">UDP</div>
-                        <!-- 在线/未知/总数 -->
-                        <div class="scn-main" style="display:flex;align-items:baseline;gap:4px;flex-wrap:wrap;">
-                            <span class="ok" style="font-size:2rem;">{{ stats.udp_alive||0 }}</span>
-                            <span style="font-size:1.2rem;font-weight:400;">/</span>
-                            <span :style="{ color: stats.udp_unknown ? 'var(--warn)' : '' }" style="font-size:1.5rem;">{{ stats.udp_unknown||0 }}</span>
-                            <span style="font-size:1.2rem;font-weight:400;">/</span>
-                            <span style="font-size:2rem;">{{ stats.udp_total||0 }}</span>
+                    <div class="stat-card-new card" style="justify-content:space-between;">
+                        <!-- 标题 -->
+                        <div style="text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;border-bottom:1px solid var(--glass-border);padding-bottom:4px;">
+                            UDP
                         </div>
-                        <div class="scn-sub" style="flex-direction:column;align-items:flex-start;gap:2px;">
-                            <!-- 在线率（基于在线+离线） -->
-                            <span style="font-size:.8rem;font-weight:700;"
-                                :class="stats.udp_alive + stats.udp_offline > 0 ? 
-                                (stats.udp_alive === (stats.udp_alive + stats.udp_offline) ? '' : 
-                                (stats.udp_alive / (stats.udp_alive + stats.udp_offline) >= 0.8 ? 'ok' : 
-                                stats.udp_alive / (stats.udp_alive + stats.udp_offline) >= 0.5 ? 'warn' : 'err')) : ''">
-                                {{ stats.udp_alive + stats.udp_offline > 0 ? 
-                                    ((stats.udp_alive||0) / (stats.udp_alive + stats.udp_offline) * 100).toFixed(1) + '%' : '-' }}
-                            </span>
-                            <span class="scn-desc" style="font-size:.68rem;">
-                                {{ t('stats.faultLabel') }}: {{ stats.udp_offline || 0 }} / {{ stats.udp_total||0 }}
-                            </span>
-                        </div>                        
+                        <!-- 大数字：在线 | 总数 -->
+                        <div style="display:flex;width:100%;">
+                            <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
+                                <span class="ok" style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.udp_alive||0 }}</span>
+                            </div>
+                            <div style="flex:1;text-align:center;">
+                                <span style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.udp_total||0 }}</span>
+                            </div>
+                        </div>
+                        <!-- 可用率% | 空 -->
+                        <div style="display:flex;width:100%;">
+                            <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
+                                <span style="font-size:.82rem;font-weight:700;"
+                                    :class="stats.udp_alive + stats.udp_offline > 0 ?
+                                    (stats.udp_alive === (stats.udp_alive + stats.udp_offline) ? '' :
+                                    (stats.udp_alive / (stats.udp_alive + stats.udp_offline) >= 0.8 ? 'ok' :
+                                    stats.udp_alive / (stats.udp_alive + stats.udp_offline) >= 0.5 ? 'warn' : 'err')) : ''">
+                                    {{ stats.udp_alive + stats.udp_offline > 0 ?
+                                        ((stats.udp_alive||0) / (stats.udp_alive + stats.udp_offline) * 100).toFixed(1) + '%' : '-' }}
+                                </span>
+                            </div>
+                            <div style="flex:1;"></div>
+                        </div>
+                        <!-- 故障/未知 标签+数字 -->
+                        <div style="border-top:1px solid var(--glass-border);padding-top:3px;">
+                            <div style="display:flex;width:100%;">
+                                <div style="flex:1;text-align:center;font-size:.65rem;color:var(--muted);border-right:1px solid var(--glass-border);">{{ t('stats.faultLabel') }}</div>
+                                <div style="flex:1;text-align:center;font-size:.65rem;color:var(--muted);">{{ t('stats.unknownLabel') }}</div>
+                            </div>
+                            <div style="display:flex;width:100%;">
+                                <div style="flex:1;text-align:center;font-size:.8rem;font-weight:600;border-right:1px solid var(--glass-border);" :class="(stats.udp_offline||0)>0?'err':''">{{ stats.udp_offline||0 }}</div>
+                                <div style="flex:1;text-align:center;font-size:.8rem;font-weight:600;" :style="{ color: stats.udp_unknown ? 'var(--warn)' : '' }">{{ stats.udp_unknown||0 }}</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
             </div>
 
             <!-- 三栏：可用率排行 | 告警中心 | 最近错误日志 -->
-            <div class="row mb-3">
-                <!-- 可用率排行 TOP10（最差/最好切换） -->
-                <div class="col-xl-4 col-lg-5 mb-3">
-                    <div class="card h-100">
-                        <div class="card-header d-flex justify-content-between align-items-center">
-                            <span><i class="bi bi-trophy me-1" style="color:var(--warn);"></i>{{ t('dash.rankTitle') }} <span style="font-size:.72rem;opacity:.6;font-weight:400;margin-left:3px;"></span></span>
+            <!-- 整体固定高度 = card-header(42px) + card-body内：thead(28px)+10行×29px(290px)+padding(16px) ≈ 376px -->
+            <!-- 修改下方margin-bottom:-??px 可以增加或缩小 快速搜索上方的间距 -->
+            <div class="row g-0" style="margin-bottom:-12px;">
+                <!-- 可用率排行 TOP10 -->
+                <div class="col-xl-4 col-lg-5" style="padding-right:4px;">
+                    <div class="card" style="height:398px;display:flex;flex-direction:column;">
+                        <div class="card-header d-flex justify-content-between align-items-center" style="flex-shrink:0;">
+                            <span><i class="bi bi-trophy me-1" style="color:var(--warn);"></i>{{ t('dash.rankTitle') }}</span>
                             <div class="d-flex align-items-center gap-2">
                                 <div class="tab-pill">
                                     <button :class="{active:dashRankMode==='worst'}" @click="dashRankMode='worst'">{{ t('dash.worst') }}</button>
@@ -1085,7 +1223,7 @@
                                 <button class="btn btn-sm btn-outline-secondary" @click="go('ranking')" style="padding:2px 8px;font-size:.75rem;">{{ t('dash.goRanking') }}</button>
                             </div>
                         </div>
-                        <div class="card-body p-2" style="overflow-y:auto;max-height:380px;">
+                        <div class="card-body p-2" style="overflow:hidden;flex:1;">
                             <div v-if="!dashRankList.length" class="empty-st" style="padding:20px 0;"><p>暂无数据</p></div>
                             <table v-else class="table table-sm mb-0 qs-table">
                                 <thead><tr>
@@ -1122,17 +1260,17 @@
                 </div>
 
                 <!-- 告警中心 -->
-                <div class="col-xl-4 col-lg-4 mb-3">
-                    <div class="card h-100">
-                        <div class="card-header d-flex justify-content-between align-items-center">
+                <div class="col-xl-4 col-lg-4" style="padding-right:4px;padding-left:0;">
+                    <div class="card" style="height:398px;display:flex;flex-direction:column;">
+                        <div class="card-header d-flex justify-content-between align-items-center" style="flex-shrink:0;">
                             <span>
                                 <i class="bi bi-bell me-1" style="color:var(--err);"></i>{{ t('dash.alertTitle') }}
                                 <span v-if="dashAlerts.length" class="badge ms-1" style="background:var(--err);font-size:.68rem;padding:1px 5px;border-radius:10px;">{{ dashAlerts.length }}</span>
                             </span>
                             <span style="font-size:.72rem;color:#64748b;">{{ t('dash.alertThreshold') }}</span>
                         </div>
-                        <div class="card-body p-2" style="overflow-y:auto;max-height:380px;">
-                            <div v-if="!dashAlerts.length" class="empty-st" style="padding:30px 0;">
+                        <div class="card-body p-2" style="overflow-y:auto;flex:1;display:flex;flex-direction:column;">
+                            <div v-if="!dashAlerts.length" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;">
                                 <i class="bi bi-shield-check" style="font-size:2rem;color:var(--ok);"></i>
                                 <p class="mt-2" style="font-size:.85rem;">{{ t('dash.noAlerts') }}</p>
                             </div>
@@ -1168,9 +1306,9 @@
                 </div>
 
                 <!-- 最近错误日志 -->
-                <div class="col-xl-4 col-lg-3 mb-3">
-                    <div class="card h-100">
-                        <div class="card-header d-flex justify-content-between align-items-center">
+                <div class="col-xl-4 col-lg-3" style="padding-left:0;">
+                    <div class="card" style="height:398px;display:flex;flex-direction:column;">
+                        <div class="card-header d-flex justify-content-between align-items-center" style="flex-shrink:0;">
                             <span><i class="bi bi-journal-x me-1" style="color:var(--err);"></i>{{ t('dash.errorLogTitle') }}</span>
                             <div class="d-flex gap-1">
                                 <button class="btn btn-sm btn-outline-secondary" @click="exportErrorLog" style="padding:2px 8px;font-size:.75rem;" :title="'export error.log'">
@@ -1179,7 +1317,7 @@
                                 <button class="btn btn-sm btn-outline-secondary" @click="go('logs')" style="padding:2px 8px;font-size:.75rem;">{{ t('dash.viewAllLogs') }}</button>
                             </div>
                         </div>
-                        <div class="card-body p-2" style="overflow-y:auto;max-height:380px;">
+                        <div class="card-body p-2" style="overflow-y:auto;flex:1;">
                             <div v-if="!dashErrorGroups.length" class="empty-st" style="padding:20px 0;"><p>暂无错误</p></div>
                             <div v-else>
                                 <div v-for="(g,i) in dashErrorGroups" :key="i" style="padding:5px 0;border-bottom:1px solid rgba(15,52,96,.4);">
@@ -2328,13 +2466,20 @@ createApp({
             total:0, alive:0, offline:0, unknown:0,
             ipv4:0, ipv6:0,
             alive_v4:0, alive_v6:0,
+            offline_v4:0, offline_v6:0,
             unknown_v4:0, unknown_v6:0,
             tcp_total:0, tcp_alive:0, tcp_offline:0, tcp_unknown:0,
-            udp_total:0, udp_alive:0, udp_offline:0, udp_unknown:0});
+            udp_total:0, udp_alive:0, udp_offline:0, udp_unknown:0,
+            avg_latency:-1, avg_latency_v4:-1, avg_latency_v6:-1,
+            avg_latency_tcp:-1, avg_latency_udp:-1,
+            probe_details:{}});
         const expanded  = ref([]);   // 手动展开的域名（≥5 IP）
         const collapsed = ref([]);   // 手动折叠的域名（< 5 IP 默认展开，加入此集合后收起）
         const searchQ = ref('');
         const showAdd = ref(false);
+        const showProbeTooltip = ref(false);
+        const probeTooltipX = ref(0);
+        const probeTooltipY = ref(0);
         const addUrl = ref('');
         const adding = ref(false);
         const addMsg = ref(null);
@@ -3491,27 +3636,6 @@ createApp({
         };
 
         // ── 仪表盘统计卡额外 computed ──
-        const dashAvgLatency = computed(() => {
-            const lats = [];
-            for (const tr of Object.values(trackers.value)) {
-                for (const ip of (tr.ips||[])) {
-                    if (ip.status==='online' && !ip.removed && ip.latency>=0) lats.push(ip.latency);
-                }
-            }
-            return lats.length ? Math.round(lats.reduce((a,b)=>a+b,0)/lats.length) : -1;
-        });
-
-        const dashP95Latency = computed(() => {
-            const lats = [];
-            for (const tr of Object.values(trackers.value)) {
-                for (const ip of (tr.ips||[])) {
-                    if (ip.status==='online' && !ip.removed && ip.latency>=0) lats.push(ip.latency);
-                }
-            }
-            if (!lats.length) return -1;
-            lats.sort((a,b)=>a-b);
-            return lats[Math.floor(lats.length * 0.95)];
-        });
 
         // 统计卡趋势：比较各tracker当前可用率与上次刷新前的快照（用IP在线率近似）
         const statCardTrend = (type) => {
@@ -3779,7 +3903,7 @@ createApp({
         return {
             currentTab, locale, isDark, toggleTheme, layoutWidth, applyLayout, loading, trackers, stats, expanded, collapsed, expandMode, searchQ, logSearch, TAB_PATH,
             sortKey, sortDir, cycleSort, sortedTrackers,
-            showAdd, addUrl, adding, addMsg, ranking, filteredRanking, rankPeriod, showApiPanel, showQueryApiPanel, apiBase, apiExamples, queryApiExamples, apiCopiedIdx, copyApiText, filterEnabled, filterThreshold,
+            showAdd, showProbeTooltip, probeTooltipX, probeTooltipY, addUrl, adding, addMsg, ranking, filteredRanking, rankPeriod, showApiPanel, showQueryApiPanel, apiBase, apiExamples, queryApiExamples, apiCopiedIdx, copyApiText, filterEnabled, filterThreshold,
             exportRanking, exportProto, exportIpVer,
             logs, logLvl, cfg, refreshMs,
             filteredTrackers, filteredLogs,
@@ -3793,7 +3917,7 @@ createApp({
             uptime, uptimeCls, stCls, stIcon, stTxt, latCls, latW,
             fmtTime, fmtFullTime, fmtShortTime, fmtLogTime, flag, resetRefresh, clearRemovedIps, clearHistory, clearHistoryMsg, toast, showToast,
             dashRankMode, dashRankList, dashAlerts, dashErrorGroups, dashErrorLogs,
-            dashAvgLatency, dashP95Latency, statCardTrend,
+            statCardTrend,
             qsSearch, qsFilterDomain, qsPage, qsSelected, qsSelectAll, rankFilterDomain,
             qsAllResults, qsResults, qsPagedResults, qsTotalPages,
             expandState, cycleExpandAll,

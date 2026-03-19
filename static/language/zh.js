@@ -12,7 +12,7 @@ window.__i18n_zh = {
     userMgmt: '用户管理'
   },
   stats: {
-    total: '总监控IP',
+    total: '所有IP',
     alive: '在线IP',
     ipv4: 'IPv4',
     ipv6: 'IPv6',
@@ -34,6 +34,7 @@ window.__i18n_zh = {
     offlineLabel: '故障 / 监控',
     paused: '已暂停',
     faultLabel: '故障',
+    unknownLabel: '未知',
   },
   monitor: {
     title: '监控列表',

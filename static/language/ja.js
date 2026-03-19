@@ -34,6 +34,7 @@ window.__i18n_ja = {
     offlineLabel: 'オフライン / 合計',
     paused: '一時停止',
     faultLabel: '障害',
+    unknownLabel: '不明',
   },
   monitor: {
     title: 'モニタリングリスト',

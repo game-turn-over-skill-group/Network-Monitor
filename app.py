@@ -448,12 +448,16 @@ class TrackerDB:
         total = alive = ipv4 = ipv6 = 0
         alive_v4 = alive_v6 = 0
         offline = 0        # 总离线IP数
+        offline_v4 = 0     # IPv4离线数
+        offline_v6 = 0     # IPv6离线数
         unknown = 0        # 总未知IP数
         unknown_v4 = 0     # IPv4未知数
         unknown_v6 = 0     # IPv6未知数
         paused_count = 0   # 已暂停的监控数量（域名级或IP级）
-        tcp_total = tcp_alive = tcp_offline = tcp_unknown = 0   # 新增 tcp_unknown
-        udp_total = udp_alive = udp_offline = udp_unknown = 0   # 新增 udp_unknown
+        tcp_total = tcp_alive = tcp_offline = tcp_unknown = 0
+        udp_total = udp_alive = udp_offline = udp_unknown = 0
+        # 延迟统计（只统计在线且latency>0的IP）
+        lats_all = []; lats_v4 = []; lats_v6 = []; lats_tcp = []; lats_udp = []
         for d in self.trackers.values():
             proto = d.get('protocol', 'tcp')
             is_udp = (proto == 'udp')
@@ -478,8 +482,20 @@ class TrackerDB:
                         alive_v6 += 1
                     else:
                         alive_v4 += 1
+                    # 收集延迟（只有在线且latency>0）
+                    lat = ip.get('latency', -1)
+                    if lat is not None and lat > 0:
+                        lats_all.append(lat)
+                        if is6: lats_v6.append(lat)
+                        else:   lats_v4.append(lat)
+                        if is_udp: lats_udp.append(lat)
+                        else:      lats_tcp.append(lat)
                 elif offline_ip:
                     offline += 1           # 累计离线IP
+                    if is6:
+                        offline_v6 += 1
+                    else:
+                        offline_v4 += 1
                 else:
                     unknown += 1           # 未知状态
                     if is6:
@@ -502,14 +518,21 @@ class TrackerDB:
                         tcp_offline += 1
                     else:
                         tcp_unknown += 1
+        def _avg(lst): return round(sum(lst)/len(lst)) if lst else -1
         self.stats = {
             'total': total, 'alive': alive, 'offline': offline, 'unknown': unknown,
             'ipv4': ipv4, 'ipv6': ipv6,
             'alive_v4': alive_v4, 'alive_v6': alive_v6,
-            'unknown_v4': unknown_v4, 'unknown_v6': unknown_v6,   # 新增版本未知数
+            'offline_v4': offline_v4, 'offline_v6': offline_v6,
+            'unknown_v4': unknown_v4, 'unknown_v6': unknown_v6,
             'tcp_total': tcp_total, 'tcp_alive': tcp_alive, 'tcp_offline': tcp_offline, 'tcp_unknown': tcp_unknown,
             'udp_total': udp_total, 'udp_alive': udp_alive, 'udp_offline': udp_offline, 'udp_unknown': udp_unknown,
             'paused_count': paused_count,
+            'avg_latency':     _avg(lats_all),
+            'avg_latency_v4':  _avg(lats_v4),
+            'avg_latency_v6':  _avg(lats_v6),
+            'avg_latency_tcp': _avg(lats_tcp),
+            'avg_latency_udp': _avg(lats_udp),
         }
 
     def get_trackers(self):
@@ -2002,10 +2025,11 @@ def _resolve_and_update(domain, port, protocol):
 _probe_ok   = True    # 探针当前状态（True=可达，False=不可达）
 _probe_lock = threading.Lock()
 _net_bad = False   # 网络故障标志，由 monitor_loop 每轮更新
+_probe_details = {}  # 每个探针IP的最后探测结果 {ip: True/False}
 
 def _probe_loop():
     """后台探针线程：多目标探测，任一可达即视为网络正常，全部不可达才告警。"""
-    global _probe_ok
+    global _probe_ok, _probe_details
     _warned = False
     # 多个探针目标：任一可达即认为网络正常（避免单点误判）
     PROBE_TARGETS = [
@@ -2018,18 +2042,21 @@ def _probe_loop():
         probe_interval = CONFIG.get('check_interval', 30)
         reachable = False
         hit_target = ''
+        details = {}
         for host, port in PROBE_TARGETS:
             try:
                 s = socket.create_connection((host, port), timeout=PROBE_TIMEOUT)
                 s.close()
+                details[host] = True
                 reachable = True
-                hit_target = f"{host}:{port}"
-                break
+                if not hit_target:
+                    hit_target = f"{host}:{port}"
             except Exception:
-                continue
+                details[host] = False
         with _probe_lock:
             prev = _probe_ok
             _probe_ok = reachable
+            _probe_details = details
         if not reachable and not _warned:
             targets_str = ', '.join(f"{h}:{p}" for h,p in PROBE_TARGETS)
             msg = f"[探针] 全部目标({targets_str})均不可达，本地网络可能异常"
@@ -2589,6 +2616,7 @@ def api_stats():
         net_bad = _net_bad
     s['net_probe_ok'] = probe_ok
     s['net_healthy']  = probe_ok and not net_bad
+    s['probe_details'] = _probe_details
     today = datetime.now().strftime('%Y-%m-%d')
     logs = db.get_logs(limit=5000)
     s['today_alerts'] = sum(

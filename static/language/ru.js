@@ -34,6 +34,7 @@ window.__i18n_ru = {
     offlineLabel: 'Офлайн / Всего',
     paused: 'Приостановлено',
     faultLabel: 'Сбой',
+    unknownLabel: 'Неизвестно',
   },
   monitor: {
     title: 'Список мониторинга',

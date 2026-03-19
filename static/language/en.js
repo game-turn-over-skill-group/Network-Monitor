@@ -34,6 +34,7 @@ window.__i18n_en = {
     offlineLabel: 'Offline / Total',
     paused: 'Paused',
     faultLabel: 'Offline',
+    unknownLabel: 'Unknown',
   },
   monitor: {
     title: 'Monitor List',
