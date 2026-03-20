@@ -281,6 +281,7 @@ window.__i18n_fr = {
     sortAsc: 'Croissant',
     sortDesc: 'Décroissant',
     sortOnlineFirst: 'En ligne en premier',
-    sortOfflineFirst: 'Hors ligne en premier'
+    sortOfflineFirst: 'Hors ligne en premier',
+    sortUnknownFirst: 'Inconnu en premier'
   }
 }

@@ -281,6 +281,7 @@ window.__i18n_ko = {
     sortAsc: '오름차순',
     sortDesc: '내림차순',
     sortOnlineFirst: '온라인 우선',
-    sortOfflineFirst: '오프라인 우선'
+    sortOfflineFirst: '오프라인 우선',
+    sortUnknownFirst: '알 수 없음 우선'
   }
 }

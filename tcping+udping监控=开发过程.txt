@@ -10275,15 +10275,384 @@ A：
 --------------------------------------
 
 
+//仪盘表快速搜索新增状态=未知排序
+
+能不能给 仪盘表的 快速搜索 状态排序 新增一个 未知优先的排序
+现在默认展示 离线优先 不变，随后点击状态按钮的事件
+点1下：未知优先 然后显示已暂停 然后是离线 接着是在线
+点2下：在线优先 先显示在线 然后是已暂停 未知 离线
+点3下：离线优先 （默认）就是现在这样
+//没有第4下了 就是没有还原按钮
+
+同时更新一下 多国翻译.js的词条
+
+----------------
+
+改动说明：
+所有 .js 语言文件 — 新增 sortUnknownFirst 词条：
+中文：未知优先 / 
+English: Unknown First / 
+Français: Inconnu en premier / 
+日本語: 不明優先 / 
+한국어: 알 수 없음 우선 / 
+Русский: Сначала неизвестные
+
+index.html — 状态排序三态循环：
+点击次数	图标	排序顺序
+默认/第3下	▼	离线 → 已暂停 → 未知 → 在线
+第1下		?	未知 → 已暂停 → 离线 → 在线
+第2下		▲	在线 → 已暂停 → 未知 → 离线
+
+新增 qsStatusMode ref（0=未知优先, 1=在线优先, 2=离线优先）
+cycleQsSort 改为 2→0→1→2 循环，无"还原"按钮
+qsSortIcon 状态列专用图标：▼ / ? / ▲
+列标题 tooltip 实时显示当前模式名称
+
+----------------
+
+看起来上次修改已经完成了。让我确认一下输出文件是否包含所有最新的仪表盘改动（排行榜高度、margin等），
+因为这次上传的是原始文件，需要把之前积累的所有改动也合并进去。
+
+所有改动都已在输出文件中。注意到第3605行有个小bug——paused在三种模式下都返回3，
+但应该始终排在第二位（score=3），这实际是对的。
+不过让我再检查一个细节：已暂停的IP在排序中是否正确处理了a.paused字段：
+
+结构清楚了——paused字段已经存在于每个result对象中，且status字段在paused时已设为'paused'。
+排序逻辑中rankOf(a.status, a.paused)的第二个参数a.paused其实是多余的（因为paused时status已经是'paused'了）。
+来修复这个冗余并让逻辑更清晰：
+
+输出文件已包含所有改动，顺便修复了排序逻辑的冗余。最终三态排序规则如下：
+点击		图标	顺序（从上到下）
+默认/第3下	▼	离线 → 已暂停 → 未知 → 在线
+第1下		?	未知 → 已暂停 → 离线 → 在线
+第2下		▲	在线 → 已暂停 → 未知 → 离线
+
+已暂停在所有模式中固定排第二位（紧跟"优先"类之后）。列头 tooltip 鼠标悬停时显示当前模式名称，随语言切换自动翻译。
+
+----------------
+
+现在的 默认 好像不对。。之前其实我改成了下面这样 你帮我改过来 要下面这样
+点击		图标	顺序（从上到下）
+默认/第3下	▼	离线 → 在线 → 已暂停 → 未知
+第1下		?	未知 → 已暂停 → 离线 → 在线 //其他逻辑不变
+第2下		▲	在线 → 已暂停 → 未知 → 离线 //其他逻辑不变
+
+----------------
+
+改好了。三种模式的完整排序：
+点击		图标	顺序
+默认/第3下	▼	离线 → 在线 → 已暂停 → 未知
+第1下		?	未知 → 已暂停 → 离线 → 在线
+第2下		▲	在线 → 已暂停 → 未知 → 离线
 
 
+--------------------------------------
 
 
+//修复登录系统[服务器内部错误]
+
+修复一下 这个登录错误 看看是什么原因
+ERROR:app:Unhandled exception - IP: ::1, User: ?, POST /api/auth/login, Data: {'username': 'user', 'password': 'user'}, Error: NameError("name '_login_fail' is not defined")
+Traceback (most recent call last):
+  File "C:\Users\Administrator\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\flask\app.py", line 867, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Administrator\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\flask\app.py", line 852, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "E:\Github\Network-Monitor\app.py", line 279, in wrapper
+    return f(*args, **kwargs)
+  File "E:\Github\Network-Monitor\app.py", line 2522, in api_login
+    rec = _login_fail.get(client, [0, 0, False])
+          ^^^^^^^^^^^
+NameError: name '_login_fail' is not defined. Did you mean: '_login_fail_lock'?
+  2026/3/20 09:16:44 [ERROR] Unhandled exception - IP: ::1, User: ?, POST /api/auth/login, Data: {'username': 'user', 'password': 'user'}, Error: NameError("name '_login_fail' is not defined")
+::1 - - - - [20/Mar/2026:09:16:44 +0800] "POST /api/auth/login HTTP/1.1" 500 107
+
+----------------
+
+问题很清楚——_login_fail_lock 有定义，但 _login_fail 字典本身漏掉了。
+原因很简单：_login_fail 字典定义缺失，只有锁 _login_fail_lock 被定义了，字典本身漏写了。
+修复就是在锁的上方补上一行：
+python_login_fail = {}  # {client_ip: [fail_count, locked_until, notified]}
+这个字典用于记录每个客户端IP的登录失败次数、锁定到期时间和是否已通知，是登录限流/锁定机制的核心数据结构。
+
+----------------
+
+//还有错误 再看看
+NameError: name '_login_check_and_record' is not defined
+  2026/3/20 09:42:34 [ERROR] Unhandled exception - IP: ::1, User: ?, POST /api/auth/login, Data: {'username': 'user', 'password': 'user'}, Error: NameError("name '_login_check_and_record' is not defined")
+::1 - - - - [20/Mar/2026:09:42:34 +0800] "POST /api/auth/login HTTP/1.1" 500 107
+ERROR:app:Unhandled exception - IP: ::1, User: ?, POST /api/auth/login, Data: {'username': 'rer', 'password': 'lirener22@hotmail.com'}, Error: NameError("name '_login_check_and_record' is not defined")
+Traceback (most recent call last):
+  File "C:\Users\Administrator\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\flask\app.py", line 867, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Administrator\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\flask\app.py", line 852, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "E:\Github\Network-Monitor\app.py", line 279, in wrapper
+    return f(*args, **kwargs)
+  File "E:\Github\Network-Monitor\app.py", line 2545, in api_login
+    _login_check_and_record(client, True)
+    ^^^^^^^^^^^^^^^^^^^^^^^
+NameError: name '_login_check_and_record' is not defined
+  2026/3/20 09:42:41 [ERROR] Unhandled exception - IP: ::1, User: ?, POST /api/auth/login, Data: {'username': 'rer', 'password': 'lirener22@hotmail.com'}, Error: NameError("name '_login_check_and_record' is not defined")
+::1 - - - - [20/Mar/2026:09:42:41 +0800] "POST /api/auth/login HTTP/1.1" 500 107
+
+----------------
+
+函数定义也缺失了，看看api_login里用到了哪些相关函数：
+函数 _login_check_and_record 被调用但没有定义。需要补充它，同时上次修复的 _login_fail 也要加进去：
+
+两个缺失的东西一并补上了：
+_login_fail = {} — 存储每个IP的登录失败记录，结构为 {ip: [失败次数, 锁定到期时间戳, 是否已通知]}
+_login_check_and_record(client, success) — 登录结果处理函数：
+success=True：清除该IP的失败记录
+success=False：累加失败次数，达到10次后锁定15分钟并写入日志
+
+这两个东西本应一起定义，估计是之前重构时只保留了锁而遗漏了数据结构和函数体。
+
+----------------
+
+//感觉BUG有点多 这个又是啥情况？我登录普通只读用户 测试了个 仪盘表 快速搜索的刷新按钮
+ERROR:app:Unhandled exception - IP: ::1, User: user, POST /api/tracker/check, Data: {'domain': 'bt.rer.lol', 'ip': '2408:8248:412:cf90::1'}, Error: NameError("name '_check_retry_throttle' is not defined")
+Traceback (most recent call last):
+  File "C:\Users\Administrator\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\flask\app.py", line 867, in full_dispatch_request
+    rv = self.dispatch_request()
+  File "C:\Users\Administrator\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\flask\app.py", line 852, in dispatch_request
+    return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "E:\Github\Network-Monitor\app.py", line 228, in wrapper
+    return f(*args, **kwargs)
+  File "E:\Github\Network-Monitor\app.py", line 245, in decorated_function
+    return f(*args, **kwargs)
+  File "E:\Github\Network-Monitor\app.py", line 2834, in api_check
+    if not _check_retry_throttle(1000):
+           ^^^^^^^^^^^^^^^^^^^^^
+NameError: name '_check_retry_throttle' is not defined
+  2026/3/20 09:57:38 [ERROR] Unhandled exception - IP: ::1, User: user, POST /api/tracker/check, Data: {'domain': 'bt.rer.lol', 'ip': '2408:8248:412:cf90::1'}, Error: NameError("name '_check_retry_throttle' is not defined")
+::1 - - - - [20/Mar/2026:09:57:38 +0800] "POST /api/tracker/check HTTP/1.1" 500 107
+
+----------------
+
+同样的模式——函数被调用但未定义。看看api_check里怎么用它的：
+函数用session里的用户做节流，需要基于请求时间的简单限速。实现它：
+
+这次一并补全了三个缺失的东西：
+_login_fail = {} — 登录失败记录字典
+_login_check_and_record() — 登录失败累计/锁定逻辑
+_retry_throttle = {} + _check_retry_throttle(ms) — 重试操作节流器，按用户名（或IP）记录上次操作时间，
+viewer 限制1000ms冷却，operator 限制500ms，admin 不调用此函数直接放行
+这几个函数看起来是在重构时从别处剥离出来、但忘记保留定义体的。
+建议全局搜一下 is not defined 的错误，看还有没有其他类似的漏定义。
 
 
+--------------------------------------
 
 
+//添加CSP内容安全策略HSTS响应头+配置中是否信任反代XFF的IP标头开关+协商COOKIE自动检测适配+定期清理字典参数防止内存无限制增长+限流策略加固防止被绕过
 
+我们现在弄的这个APP好像没有网站地图sitemap.xml，搜索引擎来抓过我了 没反馈回去
+是不搞呢 还是要搞的话怎么弄 生成后有没有办法上传到CF 还是添加路由来弄？
+
+----------------
+
+这个项目是私人网络监控工具，通常部署在内网或需要登录才能访问，搜索引擎抓取意义不大，而且暴露监控数据到公网也有安全风险。
+不过如果你确实想让搜索引擎索引（比如你的实例是公开的），有两种方式：
+方案A：Flask路由动态生成（推荐）
+直接在 app.py 加一个路由，简单几行：
+python@app.route('/sitemap.xml')
+def sitemap():
+    from flask import Response
+    xml = '''<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url><loc>https://你的域名/</loc><changefreq>always</changefreq><priority>1.0</priority></url>
+</urlset>'''
+    return Response(xml, mimetype='application/xml')
+方案B：静态文件
+直接放一个 sitemap.xml 文件到项目根目录，然后加静态路由或让 Nginx/CF 直接伺服。
+关于Cloudflare：
+CF 本身不需要你上传 sitemap，sitemap 是给搜索引擎用的（Google/Bing），你需要去的是：
+
+Google Search Console → 提交 https://你的域名/sitemap.xml
+Bing Webmaster Tools → 同上
+
+CF 只是CDN/代理，搜索引擎直接访问你的域名抓 /sitemap.xml 就行。
+
+我的建议：不搞。 原因：
+1、这是监控工具，核心页面都需要登录，搜索引擎抓到也是登录页
+2、暴露你监控的服务器IP列表到搜索引擎索引有安全隐患
+3、如果你在意SEO，说明这个工具是对外公开服务的，那更应该考虑是否要屏蔽爬虫（加 robots.txt 禁止抓取）
+
+如果想屏蔽爬虫，反而应该加 robots.txt：
+python@app.route('/robots.txt')
+def robots():
+    from flask import Response
+    return Response("User-agent: *\nDisallow: /\n", mimetype='text/plain')
+这样搜索引擎就不会再来骚扰了。你倾向于哪个方向？
+
+----------------
+
+Q：
+以后在搞吧 现在我确实是内网监控要 代码虽然 已经+了很多安全处理了 但是还是有点担心
+但是现在部署出去 等于告诉别人 我的监控位置在哪里 怕被黑客盯上
+你在帮我审查一下代码 看看还有没有啥安全问题的 如果给外部访问的话 哪怕有CF前端
+
+----------------
+
+A：
+安全审查报告
+整体来说代码安全基础不错，有CSRF防护、PBKDF2密码哈希、限流、权限装饰器。但有几个需要关注的问题：
+
+🔴 高危
+1. /api/count 和 /api/datas 完全无认证
+任何人无需登录即可访问，会泄露：
+
+所有被监控的域名、IP地址、端口
+每个IP的在线/离线状态、延迟
+探针目标IP（8.8.8.8等）详情
+这是你最担心的"告诉别人监控位置在哪里"的根本原因。
+
+2. /api/logs 无认证
+错误日志对外完全公开，包含内网IP、超时错误、代理地址等敏感运维信息。
+
+3. /api/ranking/export 无认证
+直接暴露全部在线tracker列表给任何人。
+修复方法 — 在这三个路由加上 @_require_role('admin','operator','viewer')：
+@app.route('/api/count')
+@_require_role('admin', 'operator', 'viewer')
+def api_stats(): ...
+
+@app.route('/api/datas')
+@_require_role('admin', 'operator', 'viewer')
+def api_trackers(): ...
+
+@app.route('/api/logs')
+@_require_role('admin', 'operator', 'viewer')
+def api_logs(): ...
+
+@app.route('/api/ranking/export')
+@_require_role('admin', 'operator', 'viewer')
+def api_ranking_export(): ...
+
+🟡 中危
+4. 默认密码是弱密码
+admin/admin、operator/operator、viewer/viewer 的SHA256哈希硬编码在源码里，任何拿到代码的人都知道默认密码。
+如果用户没改密码就暴露到公网，直接被登录。
+建议：启动时检测默认密码并强制提示修改：
+# 启动时警告
+for u in CONFIG.get('users', []):
+    if u['username'] in ('admin','operator','viewer') and not u.get('salt'):
+        print(f"⚠️  警告: 用户 {u['username']} 使用默认弱密码，请立即修改！")
+
+5. 缺少 Content-Security-Policy 和 HSTS 头
+security_headers() 里没有这两个重要响应头：
+pythonresponse.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'  # HTTPS时才加
+
+6. /api/query 用了 X-Forwarded-For 但其他地方不信任
+api_query() 第2999行直接读 X-Forwarded-For 做限流key，但主要的 _client_ip() 函数默认不信任它。不一致导致限流可以被绕过（伪造XFF头换IP）。
+
+🟢 低危/建议
+7. SESSION_COOKIE_SECURE = False 硬编码
+注释说"部署HTTPS时手动改True"，但容易忘。建议改成自动检测：
+pythonapp.config['SESSION_COOKIE_SECURE'] = os.environ.get('HTTPS_ENABLED', '0') == '1'
+
+8. _TRUST_PROXY_HEADER = False 硬编码在代码里
+通过CF访问时必须设为True才能获取真实IP，但改代码容易出错，建议改为读环境变量：
+python_TRUST_PROXY_HEADER = os.environ.get('TRUST_PROXY', '0') == '1'
+
+9. 内存中的限流数据会无限增长
+_rate_limit_store、_login_fail、_retry_throttle 这些字典只追加不清理过期数据，运行时间长了会慢慢占内存。建议定期清理。
+
+总结优先级
+优先级问题影响🔴 立刻修/api/count、/api/datas、/api/logs、/api/ranking/export 无认证泄露全部监控数据🔴 立刻修默认弱密码未改就上线直接被登录🟡 尽快修缺CSP/HSTS响应头XSS/中间人🟡 尽快修/api/query XFF不一致限流绕过🟢 建议改SECURE/TRUST_PROXY硬编码配置风险
+
+----------------
+
+Q：
+修复一下 下面说的这些（其他暂时不用修 因为以后公开用了 那些数据都是要给别人看的 以后监控的也是公共服务器tracker）：
+5、"缺少 Content-Security-Policy 和 HSTS 头"
+6、"_client_ip() 函数默认不信任它。不一致导致限流可以被绕过（伪造XFF头换IP）" //这个如果用CF的话 还能被伪造吗？要判断真实IP是否是CF网段的 对吧？
+7、"部署HTTPS时手动改True" 改成自动检测 //但是别影响到我的内网使用哦 一般我测试环境都是http的443端口 没有证书加密的http并非https
+8、"_TRUST_PROXY_HEADER = False" 这个你看看怎么弄 我测试过用CF 好像能获取到真实IP来着 现在用False 好像就是对的？
+9、"内存中的限流数据会无限增长" 这些字典是存什么数据的？定期清理设置多久合适？添加个定期清理时间的参数 到DEFAULT_CONFIG吧 做到自主可控 顺带加一下备注说明用途
+
+----------------
+
+A：
+Already completed(已完成):
+1、✅ SESSION_COOKIE_SECURE 自动检测（环境变量 HTTPS_ENABLED=1）
+2、✅ _client_ip() 改为读 config 的 trust_cf_ip，CF 场景优先读 CF-Connecting-IP
+3、✅ api_query 统一用 _client_ip()
+4、✅ _rate_limit_warned 补充定义
+5、✅ DEFAULT_CONFIG 加入 cleanup_interval 和 trust_cf_ip
+
+还需要继续完成的：
+CSP/HSTS 响应头（加到 security_headers()）
+内存清理后台线程（读 cleanup_interval 定期清理5个字典）
+
+所有修复完成，汇总说明：
+✅ 问题5 — CSP + HSTS 响应头
+新增 Content-Security-Policy：只允许同源资源加载，允许内联脚本/样式（项目需要）
+Strict-Transport-Security：只在 HTTPS_ENABLED=1 时才加，内网 http 环境完全不受影响，不会出现浏览器强制跳 https 的问题
+
+✅ 问题6 — XFF 伪造
+关于 CF 的问题：通过 CF 访问时设 trust_cf_ip=True 是安全的，原因：
+CF 会强制用 CF-Connecting-IP 头覆盖真实客户端IP，攻击者无法伪造这个头（只有 CF 的边缘节点能写入）
+源站只接收来自 CF 的IP段的连接，所以 remote_addr 永远是 CF 的IP
+_client_ip() 改为优先读 CF-Connecting-IP，降级读 XFF 最右侧可信跳
+api_query 统一用 _client_ip()，不再有不一致
+
+✅ 问题7 — SESSION_COOKIE_SECURE 自动检测
+读环境变量 HTTPS_ENABLED=1 → True，未设置 → False。内网 http 测试完全不受影响。
+
+✅ 问题8 — trust_cf_ip 配置化
+移除硬编码的 _TRUST_PROXY_HEADER = False，改为读 config['trust_cf_ip']，可在配置页面热更新，无需重启。默认 False = 内网直接用 remote_addr，正确。
+
+✅ 问题9 — 内存清理
+补全了之前漏定义的 _rate_limit_warned 和 _rate_limit_warned_lock
+新增 _memory_cleanup_loop() 后台线程，每 cleanup_interval 秒清理5个字典的过期条目
+DEFAULT_CONFIG 加入 cleanup_interval（默认3600秒）和 trust_cf_ip，均有详细注释说明用途，可在配置页面调整
+
+
+--------------------------------------
+
+
+claude，帮我根据近期app.py和html的改动 更新一下readme文档 英文翻译的文档同步更新
+
+----------------
+
+好，现在我清楚了两个文档的全貌。对比最近代码改动，需要更新的内容：
+1、仪表盘 - 6格统计卡大改（平均延迟细分、网络健康探针hover详情、TCP/UDP独立卡片）
+2、快速搜索 - 新增"未知优先"三态状态排序
+3、安全 - CSP/HSTS头、trust_cf_ip、SESSION_COOKIE_SECURE自动检测
+4、配置参数 - 新增 cleanup_interval、trust_cf_ip，修正 http_proxy_enabled/udp_proxy_enabled（原文档写的是proxy_enabled）
+5、系统 - 新增内存清理后台线程、_login_fail/_retry_throttle补全说明
+6、FAQ - 新增CF部署相关问题
+
+Changes updated in both READMEs so far:
+1、✅ Dashboard — 6-card complete rewrite (per-column split layout, latency breakdown by IPv4/IPv6/TCP/UDP, network health hover tooltip, TCP/UDP separate cards, ranking fixed height, 3-state sort)
+2、✅ Network Health — all 3 probes run simultaneously (no early exit), hover tooltip per probe IP
+3、✅ Account & Permissions — lockout 10→15 min, new security headers (CSP, HSTS, Secure Cookie auto-detect), CSRF
+4、✅ System & Ops — CF/nginx trust_cf_ip, memory cleanup thread
+5、✅ Config table — port→listen_port, rank_stat_period→dashboard_stat_period, proxy_enabled→http_proxy_enabled+udp_proxy_enabled, added cleanup_interval, trust_cf_ip, allow_private_ips, min_password_length
+6、✅ Proxy examples — proxy_enabled→udp_proxy_enabled/http_proxy_enabled
+
+中文 README.md 更新内容：
+章节		变更
+仪表盘		6格统计卡全面重写，描述新布局（对半分列、延迟细分5行、探针hover浮层、TCP/UDP独立卡）；排行榜固定高度；快速搜索新增三态状态排序说明
+网络健康检测	修正为"全部目标同时探测"（原文写"任一可达即停止"，与代码不符）；新增hover浮层说明
+账户与权限锁	定时间 10min→15min；新增 CSP/HSTS/Secure Cookie/CSRF 条目
+系统与运维	nginx→"nginx / Cloudflare"，新增 trust_cf_ip 和内存清理线程说明
+配置参数表	port→listen_port，rank_stat_period→dashboard_stat_period，proxy_enabled→拆分为 http_proxy_enabled + udp_proxy_enabled，
+		新增 cleanup_interval、trust_cf_ip、allow_private_ips、min_password_length
+代理配置示例	proxy_enabled → udp_proxy_enabled / http_proxy_enabled
+FAQ		修正 Q3 字段名；新增 Q15（CF获取真实IP）、Q16（HTTPS_ENABLED环境变量）、Q17（登录锁定机制）技术栈新增安全行（CSP/HSTS/CSRF/trust_cf_ip）
+
+英文 README_EN.md 同步所有以上变更，翻译一致。
+
+
+--------------------------------------
 
 
 

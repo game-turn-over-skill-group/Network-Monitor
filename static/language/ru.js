@@ -281,6 +281,7 @@ window.__i18n_ru = {
     sortAsc: 'По возрастанию',
     sortDesc: 'По убыванию',
     sortOnlineFirst: 'Сначала онлайн',
-    sortOfflineFirst: 'Сначала оффлайн'
+    sortOfflineFirst: 'Сначала оффлайн',
+    sortUnknownFirst: 'Сначала неизвестные'
   }
 }

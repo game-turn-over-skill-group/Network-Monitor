@@ -281,6 +281,7 @@ window.__i18n_ja = {
     sortAsc: '昇順',
     sortDesc: '降順',
     sortOnlineFirst: 'オンライン優先',
-    sortOfflineFirst: 'オフライン優先'
+    sortOfflineFirst: 'オフライン優先',
+    sortUnknownFirst: '不明優先'
   }
 }

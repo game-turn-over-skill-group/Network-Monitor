@@ -281,6 +281,7 @@ window.__i18n_zh = {
     sortAsc: '升序',
     sortDesc: '降序',
     sortOnlineFirst: 'Online优先',
-    sortOfflineFirst: 'Offline优先'
+    sortOfflineFirst: 'Offline优先',
+    sortUnknownFirst: '未知优先'
   }
 }

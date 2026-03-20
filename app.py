@@ -69,6 +69,20 @@ DEFAULT_CONFIG = {
     'allow_private_ips': False,        # 是否允许添加内网IP，默认禁止（SSRF防护）
     'min_password_length': 8,          # 用户修改密码最小长度
     'refresh_geo_on_restart': True,    # 重启时自动更新 IP 归属地
+    # ── 安全/限流内存清理 ──
+    'cleanup_interval': 3600,          # 限流内存清理间隔（秒）。各内存字典说明：
+                                       #   _rate_limit_store : 每IP的请求时间戳列表，用于通用限流（rate_limit装饰器）
+                                       #   _rate_limit_warned: 每IP最后一次限流警告时间，避免日志刷屏
+                                       #   _login_fail       : 每IP的登录失败次数+锁定到期时间，防暴力破解
+                                       #   _retry_throttle   : 每用户最后一次重试操作时间，限制重试频率
+                                       #   _query_rate       : 每IP的公开查询接口请求时间戳，独立限流
+                                       # 建议值：1800~7200（秒）。设太小会频繁清理，失去防护效果；
+                                       # 设太大内存会缓慢增长（每个唯一IP约100字节）。
+    # ── CF/反向代理 IP 信任 ──
+    'trust_cf_ip': False,              # 是否信任 CF-Connecting-IP / X-Forwarded-For 获取真实客户端IP
+                                       # 通过 Cloudflare 访问时设为 True，Flask 直接暴露公网时保持 False
+                                       # 注意：设为 True 前必须确认请求确实来自CF（否则可伪造IP绕过限流）
+                                       # 本地内网/http测试时设为 False 即可，不影响功能
     'users': [
         {"username": "admin",    "password": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", "role": "admin"},
         {"username": "operator", "password": "06e55b633481f7bb072957eabcf110c972e86691c3cfedabe088024bffe42f23", "role": "operator"},
@@ -90,7 +104,8 @@ def load_config():
                       'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                       'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                       'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','export_suffix',
-                      'show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users']:
+                      'show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
+                      'cleanup_interval','trust_cf_ip']:
                 if k in saved:
                     cfg[k] = saved[k]
             # 向后兼容：旧配置文件用 rank_stat_period，迁移到 dashboard_stat_period
@@ -113,7 +128,8 @@ def persist_config(cfg):
                                         'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                                         'dashboard_stat_period','tracker_stat_period','cache_history',
                                         'tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width',
-                                        'allow_private_ips','min_password_length','users']
+                                        'allow_private_ips','min_password_length','users',
+                                        'cleanup_interval','trust_cf_ip']
                    if k in cfg}
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(savable, f, indent=2, ensure_ascii=False)
@@ -144,10 +160,12 @@ app.secret_key = _get_secret_key()
 # Session 安全配置
 app.config['SESSION_COOKIE_HTTPONLY']  = True   # 防止 JS 读取 Cookie (XSS防护)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF 基础防护
-# 如果通过 HTTPS 访问，应设为 True；否则保持 False（本地开发）
-# 注意：SESSION_COOKIE_SECURE=True 需要 HTTPS，本地HTTP部署时不开启
-# 如果使用 HTTPS 反向代理，请手动改为 True
-app.config['SESSION_COOKIE_SECURE']   = False   # 部署到公网HTTPS时请手动改为True
+# SESSION_COOKIE_SECURE 自动检测：
+#   - 环境变量 HTTPS_ENABLED=1 → True（生产HTTPS环境，如CF代理后）
+#   - 环境变量未设置/为0 → False（本地内网/http测试，无需证书）
+#   内网http测试完全不受影响，只有显式设环境变量才会启用Secure标志
+_https_enabled = os.environ.get('HTTPS_ENABLED', '0').strip() == '1'
+app.config['SESSION_COOKIE_SECURE']   = _https_enabled
 app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7  # Session 有效期 7天
 app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024    # 请求体上限 1MB，防 DoS
 
@@ -253,8 +271,10 @@ def get_csrf_token():
 
 # ==================== 限流工具 ====================
 # 更精细的限流：使用内存存储，每个 IP 每分钟限制请求数
-_rate_limit_store = {}
+_rate_limit_store = {}        # {ip: [timestamp, ...]} 请求时间戳列表
 _rate_limit_lock = threading.Lock()
+_rate_limit_warned = {}       # {ip: last_warn_time} 限流警告去重（避免日志刷屏）
+_rate_limit_warned_lock = threading.Lock()
 
 def rate_limit(limit: int = 60, window: int = 60):
     def decorator(f):
@@ -2290,6 +2310,20 @@ def security_headers(response):
     response.headers['X-Frame-Options']        = 'SAMEORIGIN'
     response.headers['X-Content-Type-Options'] = 'nosniff'
     response.headers['Referrer-Policy']        = 'same-origin'
+    # CSP：只允许同源资源，内联脚本/样式因项目需要允许（unsafe-inline）
+    # 不加 upgrade-insecure-requests，避免内网http环境下把http资源强制升级导致加载失败
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "font-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'self'"
+    )
+    # HSTS：仅在 HTTPS 模式下添加，内网 http 环境不加（避免浏览器强制跳转https导致无法访问）
+    if _https_enabled:
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     # Server 头不暴露服务器特征，直接移除
     response.headers.remove('Server')
     path   = request.path
@@ -2511,7 +2545,104 @@ def api_trackers_export():
     return resp
 
 # ==================== API ====================
+_login_fail = {}           # {client_ip: [fail_count, locked_until, notified]}
 _login_fail_lock = threading.Lock()
+
+def _login_check_and_record(client, success):
+    """记录登录失败/成功，失败达到阈值后锁定IP一段时间。"""
+    MAX_FAIL  = 10        # 最大失败次数
+    LOCK_TIME = 15 * 60   # 锁定时长（秒）
+    with _login_fail_lock:
+        if success:
+            _login_fail.pop(client, None)
+            return
+        rec = _login_fail.get(client, [0, 0, False])
+        rec[0] += 1
+        if rec[0] >= MAX_FAIL and not rec[2]:
+            rec[1] = time.time() + LOCK_TIME
+            rec[2] = True
+            msg = f'[auth] IP {client} 登录失败 {rec[0]} 次，锁定 {LOCK_TIME//60} 分钟'
+            cprint(msg, 'error')
+            try: db.add_log(msg, 'error')
+            except Exception: pass
+        _login_fail[client] = rec
+
+# 重试操作节流：按用户session记录上次操作时间
+_retry_throttle = {}       # {username: last_check_time}
+_retry_throttle_lock = threading.Lock()
+
+def _check_retry_throttle(min_interval_ms):
+    """检查当前用户是否在冷却期内，返回True=允许，False=拒绝。"""
+    username = session.get('username') or _client_ip()
+    now = time.time()
+    min_interval = min_interval_ms / 1000.0
+    with _retry_throttle_lock:
+        last = _retry_throttle.get(username, 0)
+        if now - last < min_interval:
+            return False
+        _retry_throttle[username] = now
+        return True
+
+def _memory_cleanup_loop():
+    """后台定期清理限流/登录失败等内存字典中的过期条目，防止长时间运行内存缓慢增长。
+    清理间隔由 config['cleanup_interval'] 控制，默认3600秒（1小时）。
+    各字典清理策略：
+      _rate_limit_store  : 删除所有时间戳列表为空的IP条目（时间戳已在每次请求时滚动清理）
+      _rate_limit_warned : 删除上次警告时间超过2倍cleanup_interval的IP
+      _login_fail        : 删除锁定已到期 且 失败次数已重置 的IP条目
+      _retry_throttle    : 删除上次操作时间超过1小时的用户
+      _query_rate        : 删除所有时间戳列表为空的IP条目
+    """
+    while True:
+        interval = CONFIG.get('cleanup_interval', 3600)
+        time.sleep(interval)
+        now = time.time()
+        cleaned = {}
+
+        # 清理 _rate_limit_store：删除空列表条目
+        with _rate_limit_lock:
+            before = len(_rate_limit_store)
+            expired = [ip for ip, ts in _rate_limit_store.items() if not ts]
+            for ip in expired:
+                del _rate_limit_store[ip]
+            cleaned['rate_limit_store'] = before - len(_rate_limit_store)
+
+        # 清理 _rate_limit_warned：超过2倍间隔未再触发的IP
+        with _rate_limit_warned_lock:
+            before = len(_rate_limit_warned)
+            expired = [ip for ip, t in _rate_limit_warned.items() if now - t > interval * 2]
+            for ip in expired:
+                del _rate_limit_warned[ip]
+            cleaned['rate_limit_warned'] = before - len(_rate_limit_warned)
+
+        # 清理 _login_fail：锁定已到期的条目
+        with _login_fail_lock:
+            before = len(_login_fail)
+            expired = [ip for ip, rec in _login_fail.items()
+                       if rec[1] < now and now - rec[1] > interval]
+            for ip in expired:
+                del _login_fail[ip]
+            cleaned['login_fail'] = before - len(_login_fail)
+
+        # 清理 _retry_throttle：超过1小时未操作的用户
+        with _retry_throttle_lock:
+            before = len(_retry_throttle)
+            expired = [u for u, t in _retry_throttle.items() if now - t > 3600]
+            for u in expired:
+                del _retry_throttle[u]
+            cleaned['retry_throttle'] = before - len(_retry_throttle)
+
+        # 清理 _query_rate：删除空列表条目
+        with _query_rate_lock:
+            before = len(_query_rate)
+            expired = [ip for ip, ts in _query_rate.items() if not ts]
+            for ip in expired:
+                del _query_rate[ip]
+            cleaned['query_rate'] = before - len(_query_rate)
+
+        total = sum(cleaned.values())
+        if total > 0:
+            cprint(f"[cleanup] 限流内存清理完成，共清除 {total} 条过期记录: {cleaned}", 'info')
 # ── 认证 ──
 @app.route('/api/auth/login', methods=['POST'])
 @rate_limit(limit=10, window=60)  # 登录限流
@@ -2904,17 +3035,27 @@ def api_ranking_export():
     response.headers['X-Content-Type-Options'] = 'nosniff'
     return response
 
-# 是否信任反向代理的 X-Forwarded-For 头（直接暴露到公网时务必关闭，否则可伪造IP）
-# 仅在本机有反向代理（nginx/caddy 等）时设为 True
-_TRUST_PROXY_HEADER = False
+# CF/反向代理 IP 信任：读取 config，运行时可热更新，无需重启
+# 关于 CF 是否能被伪造：
+#   直接访问源站时：攻击者可伪造 CF-Connecting-IP / X-Forwarded-For → 设 False
+#   流量经过 CF 时：CF 会覆盖 CF-Connecting-IP 为真实客户端IP，且源站只收到来自
+#   CF CIDR 的连接，所以此时信任 CF-Connecting-IP 是安全的 → 设 True
+#   本地内网/http测试：remote_addr 就是真实IP，设 False 完全够用
 
 def _client_ip():
-    """获取客户端IP。默认只信任 remote_addr，不信任 X-Forwarded-For（防伪造）。
-    仅在 _TRUST_PROXY_HEADER=True 且有反向代理时才读取该头。"""
-    if _TRUST_PROXY_HEADER:
+    """获取客户端真实IP。
+    trust_cf_ip=True：优先读 CF-Connecting-IP（CF会覆盖，不可伪造），
+                      其次读 X-Forwarded-For 最右侧可信跳。
+    trust_cf_ip=False（默认/内网）：直接用 remote_addr，不信任任何代理头。
+    """
+    if CONFIG.get('trust_cf_ip', False):
+        # CF 专用头，CF 会强制覆盖此值为真实客户端IP
+        cf_ip = request.headers.get('CF-Connecting-IP', '').strip()
+        if cf_ip:
+            return cf_ip
+        # 无CF头时降级：取 XFF 链最后一个（最靠近服务器的可信跳）
         fwd = request.headers.get('X-Forwarded-For', '')
         if fwd:
-            # 取最后一个可信跳（防止 XFF 链伪造）
             return fwd.split(',')[-1].strip()
     return request.remote_addr
 
@@ -2960,7 +3101,7 @@ def api_query():
         &type=json|txt  (可选；只带host时默认txt，带list时默认json，显式指定优先)
     速率限制: 同IP每分钟66次
     """
-    client_ip = request.headers.get('X-Forwarded-For', request.remote_addr or '').split(',')[0].strip()
+    client_ip = _client_ip()
     if not _query_rate_limit(client_ip):
         type_arg = request.args.get('type', '').lower()
         if type_arg == 'json':
@@ -3175,7 +3316,8 @@ def api_config():
                 'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                 'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
-                'export_suffix','show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users']
+                'export_suffix','show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
+                'cleanup_interval','trust_cf_ip']
         labels = {
             'check_interval':        '监控间隔',
             'timeout':               '连接超时',
@@ -3215,6 +3357,8 @@ def api_config():
             'allow_private_ips':     '允许内网IP',
             'min_password_length':   '最小密码长度',
             'users':                 '用户账户',
+            'cleanup_interval':      '限流内存清理间隔',
+            'trust_cf_ip':           'CF/代理IP信任',
         }
         suffixes = {
             'check_interval': 's', 'timeout': 's', 'retry_interval': 's',
@@ -3258,7 +3402,7 @@ def api_config():
                 'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
                 'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width',
-                'allow_private_ips','min_password_length']
+                'allow_private_ips','min_password_length','cleanup_interval','trust_cf_ip']
     return jsonify({k: CONFIG.get(k) for k in all_keys})
 
 @app.route('/api/users', methods=['GET'])
@@ -3432,6 +3576,9 @@ if __name__ == '__main__':
 
     probe_t = threading.Thread(target=_probe_loop, daemon=True)
     probe_t.start()
+
+    cleanup_t = threading.Thread(target=_memory_cleanup_loop, daemon=True)
+    cleanup_t.start()
 
     # 显示启动信息（略，但需要更新端口显示）
     port = CONFIG['listen_port']  # 使用新的端口配置

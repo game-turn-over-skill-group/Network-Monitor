@@ -31,12 +31,22 @@ A full-featured BitTorrent Tracker monitoring tool with TCP/UDP ping, multi-IP m
 - ✅ Latency bar colors: green ≤500ms, yellow 500–1500ms, red >1500ms or timeout
 
 ### Dashboard
-- ✅ 6-card live stats: Total IPs / Online IPs / Offline IPs / Avg Latency (with P95) / IPv4÷IPv6 / Active Alerts
-- ✅ Uptime Ranking TOP10 (toggle Worst / Best)
+- ✅ 6-card live stats, fully redesigned with a symmetric split-column layout:
+  - **Card 1 Online/Total**: online count + online rate %, per-IPv4/IPv6 breakdown at the bottom
+  - **Card 2 Offline/Unknown**: offline + unknown counts, per-IPv4/IPv6 breakdown; paused count shown in right column
+  - **Card 3 Avg Latency**: five rows — Total / IPv4 / IPv6 / TCP / UDP — online IPs only (offline/timeout/paused excluded)
+  - **Card 4 Net Health**: ✔/✗ centered; **hover to reveal probe detail tooltip** (8.8.8.8 / 1.1.1.1 / 114.114.114.114 each color-coded reachable/timeout)
+  - **Card 5 TCP http/https**: Online / Total / Uptime% / Offline / Unknown
+  - **Card 6 UDP**: Online / Total / Uptime% / Offline / Unknown
+- ✅ Uptime Ranking TOP10 (toggle Worst / Best), fixed height precisely fitting 10 rows
 - ✅ Alert Center: auto-triggers after ≥5 consecutive failures, shows IP location, ISP, current status
 - ✅ Error log aggregation: deduplication with first occurrence time, count, and IP geolocation
 - ✅ Quick Search (global): displays all monitored entries by default, paginated (10/page); click a domain to filter and show all its IPs
 - ✅ Quick Search supports: domain / IP / ISP / country / status / protocol (http/https/udp)
+- ✅ Quick Search status column **3-state sort** (cycles, no reset button):
+  - `▼` Offline first (default): Offline → Online → Paused → Unknown
+  - `?` Unknown first: Unknown → Paused → Offline → Online
+  - `▲` Online first: Online → Paused → Unknown → Offline
 
 ### Proxy Support
 - ✅ HTTP CONNECT proxy for HTTP/HTTPS Trackers
@@ -145,9 +155,11 @@ curl "http://host/api/query?host=bt.rer.lol&type=json"
 ```
 
 ### Network Health Detection
-- ✅ Multi-target probes (8.8.8.8 / 1.1.1.1 / 114.114.114.114 :53) — any reachable = network OK
+- ✅ Multi-target probes (8.8.8.8 / 1.1.1.1 / 114.114.114.114 :53) — **all targets probed simultaneously** (no early exit), each result recorded independently
+- ✅ Any reachable = network OK; all unreachable = alert
 - ✅ Dual safeguard: probe status + per-round failure rate (≥90% failures = local network issue)
 - ✅ When network is unhealthy, round history is excluded from stats to prevent mass false data
+- ✅ Dashboard card hover reveals a live tooltip showing the last probe result per IP (green = reachable, red = timeout)
 
 ### IP Geolocation
 - ✅ Automatic country and ISP lookup via ip-api.com (locally cached)
@@ -171,10 +183,14 @@ curl "http://host/api/query?host=bt.rer.lol&type=json"
   - `viewer`: read-only, retry (1s cooldown)
 - ✅ Password storage upgraded to PBKDF2-HMAC-SHA256 with random salt (200,000 rounds); backward-compatible with legacy SHA256 format (auto-migrated on next login)
 - ✅ Config auto-refreshes on login — no manual F5 needed
-- ✅ Login failure rate limiting (10 failures → 10-minute lockout) to prevent brute-force attacks
+- ✅ Login failure rate limiting (10 failures → 15-minute IP lockout) to prevent brute-force attacks
 - ✅ Signed Session Cookie (`session_secret.key`), persists across restarts
 - ✅ Unauthenticated users only receive the minimal public config fields — no operational details exposed
 - ✅ Admin audit log: pause/resume operations record operator username + masked IP (Web shows `1.*.*.4`, console retains full IP)
+- ✅ Security headers: `X-Frame-Options` / `X-Content-Type-Options` / `Referrer-Policy` / `Content-Security-Policy`
+- ✅ HSTS (`Strict-Transport-Security`): auto-enabled only when `HTTPS_ENABLED=1` env var is set — LAN HTTP deployments unaffected
+- ✅ `SESSION_COOKIE_SECURE` auto-detection via `HTTPS_ENABLED=1` env var — no code changes needed
+- ✅ CSRF double-verification (Header `X-CSRFToken` + Session comparison)
 
 ### System & Operations
 - ✅ Waitress production server (no Flask dev-mode warnings)
@@ -184,7 +200,8 @@ curl "http://host/api/query?host=bt.rer.lol&type=json"
 - ✅ Per-level log limits: Info / Success / Error each have independent caps — trimming one level does not affect others
 - ✅ Config change logs only show actually-changed fields (with human-readable labels and units)
 - ✅ Optional disk logging: `error.log` (error entries) + `access.log` (nginx-format access log)
-- ✅ nginx reverse proxy friendly: reads `X-Real-IP` / `X-Forwarded-For` for real client IP
+- ✅ nginx / Cloudflare reverse proxy friendly: `trust_cf_ip` config controls whether `CF-Connecting-IP` / `X-Forwarded-For` is trusted for real client IP
+- ✅ Rate-limit memory auto-cleanup: background thread periodically purges expired entries from `_rate_limit_store` / `_login_fail` / `_retry_throttle` dictionaries to prevent gradual memory growth; interval configurable via `cleanup_interval`
 
 ---
 
@@ -288,7 +305,7 @@ All settings are changed through the web config page and **automatically saved**
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `port` | `443` | Web server port (443 requires admin/root) |
+| `listen_port` | `443` | Web server port (443 requires admin/root) |
 | `check_interval` | `30` | Monitoring interval in seconds |
 | `timeout` | `5` | TCP/UDP connection timeout (seconds) |
 | `retry_mode` | `polling` | Retry mode: `polling` (5→15→30→60s) or fixed seconds |
@@ -301,7 +318,7 @@ All settings are changed through the web config page and **automatically saved**
 | `dns_mode` | `system` | DNS mode: `system` / `dnspython` / `custom` |
 | `dns_custom` | empty | Custom DNS server(s), comma-separated |
 | `tracker_stat_period` | `24h` | Uptime window for monitor list: `24h` / `7d` / `30d` |
-| `rank_stat_period` | `24h` | Default tab when opening ranking page (can be switched manually) |
+| `dashboard_stat_period` | `24h` | Default uptime period for dashboard ranking (can be switched manually) |
 | `cache_history` | `true` | Persist uptime history to `history.json` across restarts |
 | `show_removed_ips` | `true` | Show removed historical IPs (translucent gray) |
 | `default_layout_width` | `1700` | Default page zoom width (px); Cookie takes priority |
@@ -314,8 +331,13 @@ All settings are changed through the web config page and **automatically saved**
 | `page_refresh_ms` | `30000` | Frontend data refresh interval (ms), 0 = disabled |
 | `tab_switch_refresh` | `true` | Auto-refresh data when switching to dashboard/monitor tab |
 | `http_proxy` | empty | HTTP/TCP proxy address |
+| `http_proxy_enabled` | `false` | Enable HTTP proxy |
 | `udp_proxy` | empty | UDP proxy address (SOCKS5 only) |
-| `proxy_enabled` | `false` | Enable proxy |
+| `udp_proxy_enabled` | `false` | Enable UDP proxy |
+| `allow_private_ips` | `false` | Allow adding private/LAN IPs (SSRF protection, disabled by default) |
+| `min_password_length` | `8` | Minimum password length for user password changes |
+| `cleanup_interval` | `3600` | Memory cleanup interval in seconds. Periodically purges expired entries from rate-limit and login-fail dictionaries to prevent gradual memory growth. Recommended: 1800–7200 |
+| `trust_cf_ip` | `false` | Trust `CF-Connecting-IP` / `X-Forwarded-For` for real client IP. Set to `true` when deployed behind Cloudflare; keep `false` when directly exposed (prevents IP spoofing). LAN HTTP deployments work fine with `false` |
 
 ---
 
@@ -348,7 +370,7 @@ UDP Tracker probing is forwarded via SOCKS5 UDP Associate, fully implementing RF
 ```json
 {
   "udp_proxy": "socks5://127.0.0.1:1080",
-  "proxy_enabled": true
+  "udp_proxy_enabled": true
 }
 ```
 
@@ -365,7 +387,7 @@ UDP Tracker probing is forwarded via SOCKS5 UDP Associate, fully implementing RF
 ```json
 {
   "http_proxy": "http://127.0.0.1:7890",
-  "proxy_enabled": true
+  "http_proxy_enabled": true
 }
 ```
 
@@ -394,7 +416,7 @@ pip install Flask flask-cors dnspython requests waitress
 Make sure `index.html` is in the same directory as `app.py`, or inside a `templates/` subdirectory.
 
 **3. Port already in use?**
-Edit `config.json` and change the `port` field, or change `DEFAULT_CONFIG['port']` in `app.py`.
+Edit `config.json` and change the `listen_port` field, or change `DEFAULT_CONFIG['listen_port']` in `app.py`.
 
 **4. Rankings page is empty?**
 Rankings require accumulated history. Newly added trackers need a few check cycles before appearing. Enable "Cache Uptime Stats" to retain history across restarts.
@@ -432,6 +454,15 @@ Yes. History is stored as timestamped records in `history.json` and recalculated
 **14. Will `history.json` grow indefinitely?**
 No. The app runs an automatic GC every hour, removing records older than 30 days. When a domain is manually deleted, all its history is immediately purged as well.
 
+**15. How do I get real client IPs when deployed behind Cloudflare?**
+Set `trust_cf_ip` to `true` in the config page or `config.json`. When enabled, the app reads `CF-Connecting-IP`, which Cloudflare always overwrites with the real client IP — it cannot be spoofed by the client. Keep it `false` when the server is directly exposed to the internet (prevents IP header forgery to bypass rate limiting). LAN/HTTP deployments work fine with `false`.
+
+**16. How do I enable Secure Cookie and HSTS when behind HTTPS / Cloudflare?**
+Set the environment variable `HTTPS_ENABLED=1` before starting the app. The app will automatically set `SESSION_COOKIE_SECURE=True` and add the `Strict-Transport-Security` header to all responses. No code changes are needed. When this variable is not set (default), the app runs normally over plain HTTP — useful for local testing without certificates.
+
+**17. How many failed logins trigger a lockout?**
+10 consecutive failed login attempts from the same IP trigger a 15-minute lockout. During lockout, all login requests from that IP return 429. The lockout expires automatically after 15 minutes, or resets if the app is restarted.
+
 ---
 
 ## 🛠️ Tech Stack
@@ -445,6 +476,7 @@ No. The app runs an automatic GC every hour, removing records older than 30 days
 | Proxy | Manual SOCKS5 UDP Associate (RFC 1928), fixed source port + tid multiplexing |
 | Persistence | `config.json` (settings) + `data.json` (current state summaries) + `history.json` (timestamp uptime history) |
 | Auth | Flask Session (signed Cookie, PBKDF2+salt password storage, `session_secret.key` persisted locally) |
+| Security | CSP / HSTS / `SESSION_COOKIE_SECURE` auto-detection, CSRF double-verify, login lockout, `trust_cf_ip` CF-aware IP resolution |
 | Compression | gzip response + ETag negotiation cache (304 Not Modified) |
 | Access Logging | nginx-format `access.log` (when disk logging enabled) + leveled console output |
 

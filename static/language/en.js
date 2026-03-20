@@ -281,6 +281,7 @@ window.__i18n_en = {
     sortAsc: 'Asc',
     sortDesc: 'Desc',
     sortOnlineFirst: 'Online First',
-    sortOfflineFirst: 'Offline First'
+    sortOfflineFirst: 'Offline First',
+    sortUnknownFirst: 'Unknown First'
   }
 }
