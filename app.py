@@ -2951,9 +2951,13 @@ def api_change_password():
 @app.route('/api/auth/whoami')
 def api_whoami():
     role = session.get('role')
+    token = generate_csrf_token()
     if not role:
-        return jsonify({'logged_in': False, 'role': None, 'username': None})
-    return jsonify({'logged_in': True, 'role': role, 'username': session.get('username')})
+        resp = jsonify({'logged_in': False, 'role': None, 'username': None})
+    else:
+        resp = jsonify({'logged_in': True, 'role': role, 'username': session.get('username')})
+    resp.set_cookie('csrf_token', token, httponly=False, samesite='Lax', secure=app.config['SESSION_COOKIE_SECURE'])
+    return resp
 
 # ── 统计 ──
 @app.route('/api/count')
@@ -3154,7 +3158,6 @@ def api_pause():
 
 @app.route('/api/tracker/check', methods=['POST'])
 @_require_role('admin', 'operator', 'viewer')
-@csrf_protect
 def api_check():
     role = _current_role()
     # viewer: 限速 1000ms；operator: 限速 500ms；admin: 不限
