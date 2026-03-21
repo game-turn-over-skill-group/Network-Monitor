@@ -9,7 +9,12 @@ window.__i18n_ru = {
     toggleTheme: 'Сменить тему',
     lightMode: 'Светлая тема',
     darkMode: 'Темная тема',
-    userMgmt: 'Управление пользователями'
+    userMgmt: 'Управление пользователями',
+    themeBlue: '🌊 Синяя',
+    themeGreen: '🍵 Тёмно-зелёная',
+    themePurple: '✨ Звёздный фиолетовый',
+    themeOrange: '🌅 Солнечный оранжевый',
+    themeLight: '☀️ Дневной режим'
   },
   stats: {
     total: 'Всего IP',

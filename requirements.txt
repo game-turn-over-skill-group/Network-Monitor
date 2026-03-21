@@ -5,8 +5,9 @@
 # 3. 运行: python app.py
 # 4. 浏览器访问: http://localhost:8080
 
-Flask==3.0.0
-flask-cors==4.0.0
-dnspython==2.4.2
+Flask==3.0.3
+flask-cors==4.0.1
+dnspython==2.6.1
 geoip2==4.8.0
-requests==2.31.0
+requests==2.32.3
+waitress==2.1.2

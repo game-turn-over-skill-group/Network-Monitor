@@ -84,7 +84,7 @@
         @font-face { font-family:'Inter'; font-style:normal; font-weight:700; font-display:swap; src:url('static/fonts/inter-700.woff2') format('woff2'); }
 
         /* ══════════════════════════════════════════
-           夜间模式 (默认) — 蓝黑玻璃特效
+           蓝色主题 (默认) — 蓝黑玻璃特效
         ══════════════════════════════════════════ */
         :root {
             --bg-from: #0a0f1e;
@@ -108,27 +108,116 @@
         }
 
         /* ══════════════════════════════════════════
-           日间模式 — 白灰玻璃特效
+           绿色主题 — 墨绿茶绿玻璃特效
+        ══════════════════════════════════════════ */
+        body.green-theme {
+            --bg-from: #0a1810;
+            --bg-to:   #0e2218;
+            --glass:   rgba(14, 38, 24, 0.58);
+            --glass-border: rgba(70, 130, 90, 0.22);
+            --glass-nav:   rgba(10, 28, 18, 0.80);
+            --glass-header: rgba(16, 40, 26, 0.65);
+            --glass-card:   rgba(12, 32, 20, 0.58);
+            --text:    #d8ede0;
+            --muted:   #6a9e7e;
+            --accent:  rgba(40, 100, 65, 0.35);
+            --ok:      #4ade80;
+            --err:     #f87171;
+            --warn:    #fbbf24;
+            --input-bg: rgba(10, 28, 18, 0.65);
+            --shadow:  0 8px 32px rgba(0,0,0,0.5);
+            --row-hover: rgba(70,130,90,0.09);
+            --border-subtle: rgba(70,130,90,0.16);
+        }
+
+        /* ══════════════════════════════════════════
+           紫色主题 — 星空紫玻璃特效
+        ══════════════════════════════════════════ */
+        body.purple-theme {
+            --bg-from: #0d0818;
+            --bg-to:   #150d28;
+            --glass:   rgba(35, 18, 65, 0.58);
+            --glass-border: rgba(180, 120, 255, 0.22);
+            --glass-nav:   rgba(20, 10, 45, 0.82);
+            --glass-header: rgba(45, 25, 85, 0.62);
+            --glass-card:   rgba(30, 15, 58, 0.58);
+            --text:    #f2eaff;
+            --muted:   #a87fd4;
+            --accent:  rgba(150, 80, 255, 0.32);
+            --ok:      #a78bfa;
+            --err:     #f87171;
+            --warn:    #fbbf24;
+            --input-bg: rgba(20, 10, 45, 0.65);
+            --shadow:  0 8px 36px rgba(80,20,180,0.35);
+            --row-hover: rgba(180,120,255,0.09);
+            --border-subtle: rgba(180,120,255,0.16);
+        }
+
+        /* ══════════════════════════════════════════
+           橙色主题 — 阳光橙玻璃特效
+        ══════════════════════════════════════════ */
+        body.orange-theme {
+            --bg-from: #1a1006;
+            --bg-to:   #26180a;
+            --glass:   rgba(48, 30, 8, 0.58);
+            --glass-border: rgba(255, 175, 60, 0.22);
+            --glass-nav:   rgba(32, 18, 4, 0.82);
+            --glass-header: rgba(58, 36, 10, 0.65);
+            --glass-card:   rgba(44, 26, 6, 0.58);
+            --text:    #fff3e0;
+            --muted:   #c49a55;
+            --accent:  rgba(240, 150, 40, 0.32);
+            --ok:      #fb923c;
+            --err:     #f87171;
+            --warn:    #fbbf24;
+            --input-bg: rgba(32, 18, 4, 0.65);
+            --shadow:  0 8px 36px rgba(160,80,0,0.3);
+            --row-hover: rgba(255,175,60,0.09);
+            --border-subtle: rgba(255,175,60,0.16);
+        }
+
+        /* ══════════════════════════════════════════
+           日间模式 — 明亮玻璃特效
         ══════════════════════════════════════════ */
         body.light-mode {
-            --bg-from: #b8c8de;
-            --bg-to:   #cad8ee;
-            --glass:   rgba(255,255,255,0.45);
-            --glass-border: rgba(140,170,230,0.5);
-            --glass-nav:   rgba(230,238,255,0.78);
-            --glass-header: rgba(220,232,255,0.62);
-            --glass-card:   rgba(255,255,255,0.42);
+            --bg-from: #dce8f5;
+            --bg-to:   #eaf2fc;
+            --glass:   rgba(255,255,255,0.62);
+            --glass-border: rgba(140,175,230,0.32);
+            --glass-nav:   rgba(50,85,160,0.88);
+            --glass-header: rgba(245,250,255,0.82);
+            --glass-card:   rgba(255,255,255,0.62);
             --text:    #1a2540;
             --muted:   #5a6f96;
             --accent:  rgba(160,190,240,0.45);
             --ok:      #059669;
             --err:     #dc2626;
             --warn:    #d97706;
-            --input-bg: rgba(255,255,255,0.55);
-            --shadow:  0 6px 28px rgba(80,110,180,0.22);
+            --input-bg: rgba(255,255,255,0.75);
+            --shadow:  0 6px 28px rgba(80,110,180,0.14);
             --row-hover: rgba(100,150,255,0.08);
-            --border-subtle: rgba(140,170,230,0.35);
+            --border-subtle: rgba(130,165,220,0.32);
+            --probe-tooltip-bg: rgba(255,255,255,0.97);
+            --probe-tooltip-shadow: 0 6px 24px rgba(80,110,180,0.25);
         }
+        
+        /* 日间模式状态栏文字调整 */
+        body.light-mode .tl-ip-status .ip-status-dot.dot-on  {
+            color: #047857;
+            font-weight: 700;
+        }
+        body.light-mode .tl-ip-status .ip-status-dot.dot-off {
+            color: #b91c1c;
+            font-weight: 700;
+        }
+        body.light-mode .tl-ip-status .ip-status-dot.dot-unk {
+            color: #475569;
+            font-weight: 700;
+        }
+        /* 日间模式 badge 可读性 */
+        body.light-mode .up-green  { color: #065f46 !important; background: rgba(5,150,105,.14) !important; border-color: rgba(5,150,105,.3) !important; }
+        body.light-mode .up-yellow { color: #92400e !important; background: rgba(217,119,6,.14) !important; border-color: rgba(217,119,6,.3) !important; }
+        body.light-mode .up-red    { color: #c0392b !important; background: rgba(220,38,38,.08) !important; border-color: rgba(220,38,38,.2) !important; }
 
         /* ── 全局基础 ── */
         * { box-sizing: border-box; }
@@ -139,16 +228,82 @@
             font-family: 'Inter', 'Segoe UI', sans-serif;
             font-size: 14px;
             min-height: 100vh;
-            transition: background .3s, color .3s;
+            overflow-x: hidden;
+            transition: background .5s ease-in-out, color .5s ease-in-out;
+        }
+        
+        /* 平滑过渡所有使用CSS变量的元素 */
+        .card, .card-header, .navbar, .modal-content, .form-control, .form-select, .btn, .stat-card-new, .tl-domain-row, .tl-ip-row, .rank-api-ep, .rank-api-ex {
+            transition: all .3s ease-in-out;
+            will-change: box-shadow, border-color;
+        }
+        
+        /* 主题切换时的背景效果 */
+        body::before {
+            transition: all .7s ease-in-out;
+        }
+        
+        /* 修复监控列表状态栏位置：让卡片允许sticky子元素 */
+        .card-header.tl-sticky-toolbar {
+            position: sticky !important;
+            top: 56px !important;
+            z-index: 100 !important;
+            background: var(--glass-header) !important;
+            backdrop-filter: blur(16px) !important;
+            -webkit-backdrop-filter: blur(16px) !important;
+            border-bottom: 1px solid var(--border-subtle) !important;
+            margin-bottom: 0 !important;
+            padding: 10px 16px !important;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.15) !important;
+        }
+        /* 包含sticky工具栏的卡片必须不能clip overflow */
+        .card:has(.tl-sticky-toolbar) {
+            overflow: visible !important;
+        }
+        /* 列标题行也吸顶，紧贴工具栏下方 */
+        .tracker-list-wrap .tl-col-header {
+            position: sticky !important;
+            top: calc(56px + 50px) !important;
+            z-index: 99 !important;
+        }
+        /* 确保卡片内容不会被状态栏遮挡 */
+        .card-body.tracker-list-wrap {
+            margin-top: 0 !important;
+            padding-top: 0 !important;
         }
 
         /* 夜间模式：动态背景粒子感 */
-        body:not(.light-mode)::before {
+        body:not(.light-mode):not(.purple-theme):not(.green-theme):not(.orange-theme)::before {
             content:'';
             position:fixed; inset:0; pointer-events:none; z-index:0;
             background:
                 radial-gradient(ellipse 60% 40% at 20% 30%, rgba(30,80,200,0.13) 0%, transparent 70%),
                 radial-gradient(ellipse 50% 60% at 80% 70%, rgba(10,50,160,0.12) 0%, transparent 70%);
+        }
+        /* 星空紫：聚光灯效果，中心亮紫 */
+        body.purple-theme::before {
+            content:'';
+            position:fixed; inset:0; pointer-events:none; z-index:0;
+            background:
+                radial-gradient(ellipse 55% 55% at 50% 40%, rgba(160,80,255,0.18) 0%, transparent 65%),
+                radial-gradient(ellipse 40% 30% at 80% 15%, rgba(200,120,255,0.12) 0%, transparent 60%),
+                radial-gradient(ellipse 35% 40% at 15% 80%, rgba(100,40,220,0.10) 0%, transparent 60%);
+        }
+        /* 墨绿：深林光感 */
+        body.green-theme::before {
+            content:'';
+            position:fixed; inset:0; pointer-events:none; z-index:0;
+            background:
+                radial-gradient(ellipse 60% 45% at 25% 35%, rgba(30,100,55,0.16) 0%, transparent 70%),
+                radial-gradient(ellipse 45% 55% at 75% 70%, rgba(20,80,40,0.12) 0%, transparent 70%);
+        }
+        /* 阳光橙：暖光晕 */
+        body.orange-theme::before {
+            content:'';
+            position:fixed; inset:0; pointer-events:none; z-index:0;
+            background:
+                radial-gradient(ellipse 65% 45% at 30% 25%, rgba(220,120,20,0.15) 0%, transparent 65%),
+                radial-gradient(ellipse 45% 55% at 75% 75%, rgba(180,80,10,0.10) 0%, transparent 65%);
         }
 
         /* 日间模式：深色蓝灰光晕 + 噪点质感 */
@@ -218,6 +373,10 @@
         .ok  { color:var(--ok); }
         .err { color:var(--err); }
         .warn{ color:var(--warn); }
+        /* 状态图标固定色：不跟主题 --ok/--err 走，始终绿/红 */
+        .st-online { color: #34d399; }
+        .st-offline { color: #f87171; }
+        .st-warn { color: var(--warn); }
 
         /* ── 表格 — 智能自适应宽度 ── */
         .tracker-row { cursor:pointer; transition:background .15s; }
@@ -274,14 +433,121 @@
         .tracker-smart-table .col-lastchk { min-width: 130px; max-width: 155px; white-space:nowrap; }
         .tracker-smart-table .col-actions { width: 80px; min-width:70px; max-width:90px; text-align:center; }
 
-        /* 手机端：隐藏次要列 */
+        /* 响应式设计：移动端优化 */
         @media (max-width: 768px) {
+            /* 导航栏优化 */
+            .navbar-brand {
+                font-size: 1rem;
+            }
+            .navbar .nav-link {
+                font-size: 0.85rem;
+                padding: 0.5rem 0.75rem;
+            }
+            
+            /* 统计卡片优化 */
+            .stat-card-new {
+                padding: 10px 12px;
+                min-height: 100px;
+            }
+            .scn-main {
+                font-size: 1.5rem;
+            }
+            .scn-label {
+                font-size: 0.7rem;
+            }
+            
+            /* 表格列优化 */
             .tracker-smart-table .col-added,
-            .tracker-smart-table .col-isp { display: none; }
+            .tracker-smart-table .col-isp {
+                display: none;
+            }
+            
+            /* 快速搜索优化 */
+            .qs-search-input {
+                width: 100%;
+                max-width: 200px;
+            }
         }
+        
         @media (max-width: 540px) {
+            /* 导航栏进一步优化 */
+            .navbar-brand {
+                font-size: 0.9rem;
+            }
+            .navbar .nav-link {
+                font-size: 0.75rem;
+                padding: 0.4rem 0.6rem;
+            }
+            
+            /* 统计卡片进一步优化 */
+            .stat-card-new {
+                padding: 8px 10px;
+                min-height: 90px;
+            }
+            .scn-main {
+                font-size: 1.2rem;
+            }
+            
+            /* 表格列进一步优化 */
             .tracker-smart-table .col-country,
-            .tracker-smart-table .col-lastchk { display: none; }
+            .tracker-smart-table .col-lastchk {
+                display: none;
+            }
+            .tracker-smart-table .col-domain {
+                min-width: 120px;
+                max-width: 180px;
+            }
+            
+            /* 快速搜索进一步优化 */
+            .qs-search-input {
+                max-width: 150px;
+                font-size: 0.75rem;
+            }
+            
+            /* 主题选择器优化 */
+            .theme-btn {
+                padding: 2px 8px;
+                font-size: 0.75rem;
+            }
+            .theme-btn .d-none.d-md-inline {
+                display: none !important;
+            }
+        }
+        
+        @media (max-width: 400px) {
+            /* 导航栏极简模式 */
+            .navbar-brand {
+                font-size: 0.8rem;
+            }
+            .navbar .nav-link {
+                font-size: 0.7rem;
+                padding: 0.3rem 0.5rem;
+            }
+            
+            /* 统计卡片极简模式 */
+            .stat-card-new {
+                padding: 6px 8px;
+                min-height: 80px;
+            }
+            .scn-main {
+                font-size: 1rem;
+            }
+            .scn-label {
+                font-size: 0.65rem;
+            }
+            
+            /* 表格列极简模式 */
+            .tracker-smart-table .col-proto,
+            .tracker-smart-table .col-latency {
+                display: none;
+            }
+            
+            /* 快速搜索极简模式 */
+            .qs-search-input {
+                max-width: 120px;
+                font-size: 0.7rem;
+                padding: 4px 24px 4px 8px;
+            }
         }
 
         /* ══ 新版监控列表样式 ══ */
@@ -391,6 +657,14 @@
         body.light-mode .tl-btn-resume { color: #92400e !important; border-color: rgba(146,64,14,.4) !important; background: rgba(251,191,36,.15) !important; }
         body.light-mode .tl-ip-status .ip-status-dot.dot-on  { color: #059669; }
         body.light-mode .tl-ip-status .ip-status-dot.dot-off { color: #dc2626; }
+        /* 日间模式 快速搜索/IP行 状态文字/图标颜色加深 */
+        body.light-mode .st-text-online  { color: #059669 !important; }
+        body.light-mode .st-text-offline { color: #dc2626 !important; }
+        body.light-mode .st-text-paused  { color: #b45309 !important; }
+        body.light-mode .st-online  { color: #059669 !important; }
+        body.light-mode .st-offline { color: #dc2626 !important; }
+        body.light-mode .alert-status-online  { color: #059669 !important; }
+        body.light-mode .alert-status-offline { color: #dc2626 !important; }
 
         /* ── 列表操作按钮（小号统一样式）── */
         .tl-action-btn {
@@ -415,7 +689,7 @@
             -webkit-backdrop-filter: blur(16px);
             border-bottom: 1px solid var(--border-subtle) !important;
         }
-        body.light-mode .tl-sticky-toolbar { background: rgba(220,232,255,.92) !important; }
+        body.light-mode .tl-sticky-toolbar { background: rgba(245,249,255,.95) !important; border-bottom-color: rgba(130,165,220,0.35) !important; }
 
         /* 工具栏下拉选择统一样式 */
         .tl-sel {
@@ -437,9 +711,9 @@
 
         /* badge */
         .badge-up { padding:2px 7px; border-radius:5px; font-size:.76rem; font-weight:600; }
-        .up-green   { background:rgba(52,211,153,.15);  color:var(--ok);  border:1px solid rgba(52,211,153,.25); }
+        .up-green   { background:rgba(52,211,153,.15);  color:#34d399;  border:1px solid rgba(52,211,153,.25); }
         .up-yellow  { background:rgba(251,191,36,.15);  color:var(--warn);border:1px solid rgba(251,191,36,.25); }
-        .up-red     { background:rgba(248,113,113,.15); color:var(--err); border:1px solid rgba(248,113,113,.25); }
+        .up-red     { background:rgba(248,113,113,.15); color:#f87171; border:1px solid rgba(248,113,113,.25); }
         .up-unknown { background:rgba(100,116,139,.12); color:#64748b;    border:1px solid rgba(100,116,139,.2); }
 
         /* port / proto tags */
@@ -501,6 +775,33 @@
         .form-text { color:var(--muted); font-size:.78rem; }
 
         /* ── 按钮 ── */
+        .btn {
+            transition: all .3s ease-in-out;
+            position: relative;
+            overflow: hidden;
+        }
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            transform: translate(-50%, -50%);
+            transition: width .6s, height .6s;
+            z-index: 0;
+            pointer-events: none;
+        }
+        .btn:hover::before {
+            width: 300px;
+            height: 300px;
+        }
+        .btn > * {
+            position: relative;
+            z-index: 1;
+        }
         .btn-primary {
             background: linear-gradient(135deg, rgba(60,120,240,.8), rgba(40,90,200,.9));
             border: 1px solid rgba(80,140,255,.4);
@@ -509,8 +810,80 @@
         .btn-primary:hover {
             background: linear-gradient(135deg, rgba(80,140,255,.9), rgba(60,110,220,1));
             border-color: rgba(100,160,255,.5);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(80,140,255,.3);
         }
-        .btn-close { filter:invert(1); }
+        .btn-primary:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 8px rgba(80,140,255,.3);
+        }
+        .btn-outline-secondary {
+            transition: all .3s ease-in-out;
+        }
+        .btn-outline-secondary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(100,116,139,.3);
+        }
+        .btn-close { 
+            filter:invert(1);
+            transition: all .3s ease-in-out;
+        }
+        .btn-close:hover {
+            transform: scale(1.1);
+        }
+        
+        /* ── 卡片交互效果 ── */
+        .card {
+            transition: box-shadow .3s ease-in-out, border-color .3s ease-in-out;
+        }
+        .card:hover {
+            box-shadow: 0 12px 40px rgba(0,0,0,0.35);
+            border-color: rgba(100,160,255,0.25);
+        }
+        body.light-mode .card:hover {
+            box-shadow: 0 8px 32px rgba(100,140,220,0.25);
+        }
+        
+        /* ── 表格行交互效果 ── */
+        .tracker-row {
+            transition: background .15s;
+        }
+        .ip-row {
+            transition: background .15s;
+        }
+        
+        /* ── 表单元素交互效果 ── */
+        .form-control,
+        .form-select {
+            transition: all .3s ease-in-out;
+        }
+        .form-control:focus,
+        .form-select:focus {
+            transform: translateY(-1px);
+            box-shadow: 0 0 0 3px rgba(80,140,255,.2);
+        }
+        
+        /* ── 导航链接交互效果 ── */
+        .navbar .nav-link {
+            transition: all .3s ease-in-out;
+            position: relative;
+        }
+        .navbar .nav-link::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 0;
+            height: 2px;
+            background: var(--text);
+            transition: width .3s ease-in-out;
+        }
+        .navbar .nav-link:hover::after {
+            width: 100%;
+        }
+        .navbar .nav-link.active::after {
+            width: 100%;
+        }
 
         /* ── 模态框 ── */
         .modal-content {
@@ -600,8 +973,8 @@
         .alert-card.warn { border-left-color:var(--warn); background:rgba(245,158,11,.06); }
         .alert-card-title { font-size:.88rem; font-weight:600; margin-bottom:2px; }
         .alert-card-sub { font-size:.77rem; color:#94a3b8; }
-        .alert-status-online  { color:var(--ok);  font-size:.75rem; font-weight:600; }
-        .alert-status-offline { color:var(--err); font-size:.75rem; font-weight:600; }
+        .alert-status-online  { color: #34d399;  font-size:.75rem; font-weight:600; }
+        .alert-status-offline { color: #f87171; font-size:.75rem; font-weight:600; }
         .tab-pill { display:inline-flex; border-radius:8px; overflow:hidden; border:1px solid var(--glass-border); backdrop-filter:blur(8px); }
         .tab-pill button { background:transparent; border:none; color:#94a3b8; padding:3px 12px; font-size:.78rem; cursor:pointer; transition:all .15s; }
         .tab-pill button.active { background:rgba(80,140,255,.18); color:var(--text); }
@@ -620,24 +993,100 @@
         /* ── 统计卡（新版）── */
         .stat-card-new {
             padding: 14px 16px; margin-bottom: 0;
-            background: var(--glass-card);
+            background: linear-gradient(135deg, var(--glass-card), rgba(255,255,255,0.1));
             backdrop-filter: blur(14px);
             -webkit-backdrop-filter: blur(14px);
             border: 1px solid var(--glass-border);
             border-radius: 12px;
-            box-shadow: var(--shadow);
-            transition: box-shadow .2s, border-color .2s;
+            box-shadow: var(--shadow), 0 0 30px rgba(80,140,255,0.1);
+            transition: all .3s ease-in-out;
             height: 100%;          /* 等高：撑满父容器 */
             min-height: 120px;     /* 最小高度保底 */
             display: flex;
             flex-direction: column;
             justify-content: space-between;
+            position: relative;
+            overflow: hidden;
+        }
+        .stat-card-new::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+            transition: left .6s ease-in-out;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .stat-card-new:hover::before {
+            left: 100%;
         }
         .stat-card-new:hover {
-            box-shadow: 0 8px 30px rgba(0,0,0,.3);
-            border-color: rgba(100,160,255,.28);
+            box-shadow: 0 12px 40px rgba(0,0,0,.35), 0 0 40px rgba(80,140,255,0.15);
+            border-color: rgba(100,160,255,.35);
+            transform: translateY(-3px);
         }
-        body.light-mode .stat-card-new:hover { box-shadow: 0 4px 20px rgba(100,140,220,.2); }
+        body.light-mode .stat-card-new:hover {
+            box-shadow: 0 8px 32px rgba(100,140,220,.25), 0 0 40px rgba(100,140,220,0.1);
+        }
+        
+        /* ── 导航栏现代化效果 ── */
+        .navbar {
+            background: linear-gradient(135deg, var(--glass-nav), rgba(255,255,255,0.05)) !important;
+            backdrop-filter: blur(12px) saturate(1.1) !important;
+            -webkit-backdrop-filter: blur(12px) saturate(1.1) !important;
+            border-bottom: 1px solid var(--glass-border) !important;
+            box-shadow: 0 2px 20px rgba(0,0,0,0.2), 0 0 20px rgba(80,140,255,0.08);
+            position: sticky; top:0; z-index: 1000;
+        }
+        body.light-mode .navbar {
+            box-shadow: 0 2px 16px rgba(100,140,220,0.15), 0 0 20px rgba(100,140,220,0.06);
+        }
+        
+        /* ── 卡片现代化效果 ── */
+        .card {
+            background: linear-gradient(135deg, var(--glass-card), rgba(255,255,255,0.05));
+            backdrop-filter: blur(calc(var(--blur) * 0.8));
+            -webkit-backdrop-filter: blur(calc(var(--blur) * 0.8));
+            border: 1px solid var(--glass-border);
+            border-radius: 14px;
+            box-shadow: var(--shadow), 0 0 20px rgba(80,140,255,0.08);
+            margin-bottom: 20px;
+            transition: all .3s ease-in-out;
+            position: relative;
+            /* overflow: hidden 移除以支持 sticky 工具栏吸顶 */
+        }
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+            transition: left .6s ease-in-out;
+            pointer-events: none;
+            z-index: 0;
+        }
+        .card:hover::before {
+            left: 100%;
+        }
+        
+        /* ── 模态框现代化效果 ── */
+        .modal-content {
+            background: linear-gradient(135deg, var(--glass), rgba(255,255,255,0.1));
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 40px rgba(80,140,255,0.15);
+        }
+        body.light-mode .modal-content {
+            background: linear-gradient(135deg, rgba(255,255,255,0.85), rgba(255,255,255,0.95));
+            box-shadow: 0 20px 60px rgba(100,140,220,0.2), 0 0 40px rgba(100,140,220,0.1);
+        }
         .scn-label { font-size:.77rem; color:var(--muted); margin-bottom:4px; letter-spacing:.3px; text-transform:uppercase; }
         .scn-main  { font-size:2rem; font-weight:700; line-height:1.2; }
         .scn-sub   { display:flex; align-items:center; gap:6px; margin-top:4px; flex-wrap:wrap; }
@@ -663,9 +1112,15 @@
             transition: color .15s;
         }
         .navbar .nav-link:hover { color: #fff !important; }
-        body.light-mode .navbar .nav-link { color: rgba(30,50,100,0.75) !important; }
+        body.light-mode .navbar .nav-link { color: rgba(220,235,255,0.82) !important; }
         body.light-mode .navbar .nav-link:hover,
-        body.light-mode .navbar .nav-link.active { color: #1a2550 !important; }
+        body.light-mode .navbar .nav-link.active { color: #fff !important; }
+        body.light-mode .navbar .navbar-brand { color: #fff !important; }
+        body.light-mode .theme-btn { color: rgba(220,235,255,0.9) !important; border-color: rgba(160,190,255,0.3) !important; }
+        body.light-mode .nav-btn-add   { color: #0d9668 !important; background: rgba(52,211,153,.22) !important; border-color: rgba(52,211,153,.55) !important; }
+        body.light-mode .nav-btn-add:hover { color: #0d9668 !important; background: rgba(52,211,153,.35) !important; border-color: rgba(52,211,153,.75) !important; }
+        body.light-mode .nav-btn-pause { color: #c47a0a !important; background: rgba(251,191,36,.22) !important; border-color: rgba(251,191,36,.55) !important; }
+        body.light-mode .nav-btn-pause:hover { color: #c47a0a !important; background: rgba(251,191,36,.35) !important; border-color: rgba(251,191,36,.75) !important; }
 
         /* ── Ranking API 面板 ─────────────────────────────────── */
         .rank-api-panel {
@@ -811,11 +1266,21 @@
                     </li>
                 </ul>
                 <div class="d-flex align-items-center gap-2">
-                    <!-- 主题切换按钮 -->
-                    <button class="theme-btn" @click="toggleTheme" :title="isDark ? t('nav.lightMode') : t('nav.darkMode')">
-                        <i class="bi" :class="isDark ? 'bi-sun-fill' : 'bi-moon-fill'"></i>
-                        <span class="d-none d-md-inline ms-1">{{ isDark ? t('nav.lightMode') : t('nav.darkMode') }}</span>
-                    </button>
+                    <!-- 主题选择下拉菜单 -->
+                    <div class="dropdown">
+                        <button class="theme-btn dropdown-toggle" type="button" id="themeDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi" :class="currentTheme === 'light' ? 'bi-sun-fill' : 'bi-moon-fill'"></i>
+                            <span class="d-none d-md-inline ms-1">{{ t(themeNames[currentTheme]) }}</span>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="themeDropdown" style="background: var(--glass-nav); border: 1px solid var(--glass-border); backdrop-filter: blur(12px);">
+                            <li><a class="dropdown-item" @click="setTheme('blue')" :class="{active: currentTheme === 'blue'}" style="color: var(--text);">{{ t('nav.themeBlue') }}</a></li>
+                            <li><a class="dropdown-item" @click="setTheme('green')" :class="{active: currentTheme === 'green'}" style="color: var(--text);">{{ t('nav.themeGreen') }}</a></li>
+                            <li><a class="dropdown-item" @click="setTheme('purple')" :class="{active: currentTheme === 'purple'}" style="color: var(--text);">{{ t('nav.themePurple') }}</a></li>
+                            <li><a class="dropdown-item" @click="setTheme('orange')" :class="{active: currentTheme === 'orange'}" style="color: var(--text);">{{ t('nav.themeOrange') }}</a></li>
+                            <li><hr class="dropdown-divider" style="border-color: var(--glass-border);"></li>
+                            <li><a class="dropdown-item" @click="setTheme('light')" :class="{active: currentTheme === 'light'}" style="color: var(--text);">{{ t('nav.themeLight') }}</a></li>
+                        </ul>
+                    </div>
                     <!-- 视野宽度选择器 -->
                     <select class="form-select form-select-sm" v-model="layoutWidth" @change="applyLayout" style="width:78px;font-size:.78rem;" title="页面视野宽度">
                         <option value="1500">50%</option>
@@ -1101,9 +1566,9 @@
                 <teleport to="body">
                     <div v-if="showProbeTooltip"
                          :style="{ position:'fixed', left:(probeTooltipX+14)+'px', top:(probeTooltipY+14)+'px', zIndex:99999,
-                                   background:'var(--glass-nav)', border:'1px solid var(--glass-border)',
+                                   background:'var(--probe-tooltip-bg, var(--glass-nav))', border:'1px solid var(--glass-border)',
                                    borderRadius:'8px', padding:'8px 14px', minWidth:'160px',
-                                   backdropFilter:'blur(14px)', boxShadow:'0 6px 24px rgba(0,0,0,.5)',
+                                   backdropFilter:'blur(14px)', boxShadow:'var(--probe-tooltip-shadow, 0 6px 24px rgba(0,0,0,.5))',
                                    whiteSpace:'nowrap', pointerEvents:'none' }">
                         <div style="font-size:.65rem;color:var(--muted);margin-bottom:4px;font-weight:600;letter-spacing:.3px;">
                             {{ t('stats.probe') }}
@@ -1449,12 +1914,12 @@
                                     <td style="white-space:nowrap;">
                                         <template v-if="row.paused">
                                             <span style="font-size:.88rem;color:#fbbf24;"><i class="bi bi-pause-circle-fill"></i></span>
-                                            <span style="font-size:.72rem;color:#fbbf24;margin-left:3px;opacity:.9;">{{ t('monitor.statusPaused') }}</span>
+                                            <span class="st-text-paused" style="font-size:.72rem;color:#fbbf24;margin-left:3px;opacity:.9;">{{ t('monitor.statusPaused') }}</span>
                                         </template>
                                         <template v-else>
-                                            <span :class="stCls(row.status)" style="font-size:.88rem;"><i class="bi" :class="stIcon(row.status)"></i></span>
-                                            <span v-if="row.status==='online'" style="font-size:.72rem;color:#4ade80;margin-left:3px;opacity:.85;">Online</span>
-                                            <span v-else-if="row.status==='offline'" style="font-size:.72rem;color:#f87171;margin-left:3px;opacity:.85;">Offline</span>
+                                            <span :class="row.status==='online'?'st-online':row.status==='offline'?'st-offline':'warn'" style="font-size:.88rem;"><i class="bi" :class="stIcon(row.status)"></i></span>
+                                            <span v-if="row.status==='online'" class="st-text-online" style="font-size:.72rem;color:#4ade80;margin-left:3px;opacity:.85;">Online</span>
+                                            <span v-else-if="row.status==='offline'" class="st-text-offline" style="font-size:.72rem;color:#f87171;margin-left:3px;opacity:.85;">Offline</span>
                                             <span v-else style="font-size:.72rem;color:#64748b;margin-left:3px;">-</span>
                                         </template>
                                     </td>
@@ -1720,8 +2185,8 @@
                                                   :class="ip.status==='offline'?'up-red':ip.ip_uptime>=80?'up-green':ip.ip_uptime>=50?'up-yellow':'up-red'"
                                                   style="font-size:.72rem;">{{ ip.ip_uptime.toFixed(1) }}%</span>
                                             <span v-else class="badge-up up-unknown" style="font-size:.72rem;">?</span>
-                                            <span v-if="ip.status==='online'" style="font-size:.72rem;color:#4ade80;margin-left:3px;">Online</span>
-                                            <span v-else-if="ip.status==='offline'" style="font-size:.72rem;color:#f87171;margin-left:3px;">Offline</span>
+                                            <span v-if="ip.status==='online'" class="st-text-online" style="font-size:.72rem;color:#4ade80;margin-left:3px;">Online</span>
+                                            <span v-else-if="ip.status==='offline'" class="st-text-offline" style="font-size:.72rem;color:#f87171;margin-left:3px;">Offline</span>
                                         </template>
                                     </div>
                                     <!-- 延迟 -->
@@ -2454,7 +2919,15 @@ createApp({
     setup() {
         const currentTab = ref('dashboard');
         const locale = i18n.global.locale;  // 直接引用 i18n 内部 locale ref，v-model 改它即切换语言
-        const isDark = ref(true); // 默认夜间模式
+        const currentTheme = ref('blue'); // 默认蓝色主题
+        // themeNames 存 i18n key，模板中通过 t(themeNames[currentTheme]) 渲染
+        const themeNames = {
+            blue:   'nav.themeBlue',
+            green:  'nav.themeGreen',
+            purple: 'nav.themePurple',
+            orange: 'nav.themeOrange',
+            light:  'nav.themeLight'
+        };
         const layoutWidth = ref('1700'); // 默认70%，优先级：cookie > 配置 > 此默认值
 
         const applyLayout = () => {
@@ -3257,14 +3730,17 @@ createApp({
             // locale 已是 i18n.global.locale 本身，赋值即切换，无需额外操作
         };
 
-        const toggleTheme = () => {
-            isDark.value = !isDark.value;
-            if (isDark.value) {
-                document.body.classList.remove('light-mode');
+        const setTheme = (theme) => {
+            currentTheme.value = theme;
+            // 移除所有主题类
+            document.body.classList.remove('blue-theme', 'green-theme', 'purple-theme', 'orange-theme', 'light-mode');
+            // 添加当前主题类
+            if (theme !== 'light') {
+                document.body.classList.add(`${theme}-theme`);
             } else {
                 document.body.classList.add('light-mode');
             }
-            document.cookie = `theme=${isDark.value?'dark':'light'};path=/;max-age=31536000`;
+            document.cookie = `theme=${theme};path=/;max-age=31536000`;
         };
 
         // 根据 tracker_stat_period 选取域名级可用率
@@ -3702,13 +4178,54 @@ createApp({
         };
 
         const CHART_DEFAULTS = {
-            color: { grid:'rgba(100,116,139,.15)', text:'#94a3b8', ok:'#10b981', warn:'#f59e0b', err:'#ef4444', blue:'#3b82f6', purple:'#8b5cf6' }
+            color: { 
+                grid:'rgba(100,116,139,.15)', 
+                text:'#94a3b8', 
+                ok:'#10b981', 
+                warn:'#f59e0b', 
+                err:'#ef4444', 
+                blue:'#3b82f6', 
+                purple:'#8b5cf6',
+                green:'#10b981',
+                orange:'#f97316',
+                pink:'#ec4899'
+            }
         };
 
         const buildCharts = () => {
             if (typeof Chart === 'undefined') return;
             const C = CHART_DEFAULTS.color;
-            const chartOpts = { responsive:true, maintainAspectRatio:false, animation:{duration:0} };
+            const chartOpts = { 
+                responsive: true, 
+                maintainAspectRatio: false, 
+                animation: { 
+                    duration: 1000, 
+                    easing: 'easeOutQuart' 
+                },
+                plugins: {
+                    legend: {
+                        labels: {
+                            padding: 20,
+                            font: {
+                                size: 12
+                            }
+                        }
+                    },
+                    tooltip: {
+                        backgroundColor: 'rgba(16, 28, 60, 0.9)',
+                        borderColor: 'rgba(80, 140, 255, 0.3)',
+                        borderWidth: 1,
+                        padding: 12,
+                        boxPadding: 6,
+                        usePointStyle: true,
+                        callbacks: {
+                            label: function(context) {
+                                return `${context.label}: ${context.raw}`;
+                            }
+                        }
+                    }
+                }
+            };
 
             // 2. IPv4/IPv6 饼图：用 update('none') 代替 destroy/recreate，彻底消除刷新闪烁
             const buildPie = () => {
@@ -3716,18 +4233,56 @@ createApp({
                 const v4 = stats.value.ipv4||0, v6 = stats.value.ipv6||0;
                 if (_chartInstances.pie) {
                     _chartInstances.pie.data.datasets[0].data = [v4, v6];
-                    _chartInstances.pie.update('none');
+                    _chartInstances.pie.update();
                     return;
                 }
                 _chartInstances.pie = new Chart(el, {
                     type:'doughnut',
                     data:{
                         labels:['IPv4','IPv6'],
-                        datasets:[{data:[v4,v6], backgroundColor:[C.blue,C.purple], borderWidth:0}]
+                        datasets:[{
+                            data:[v4, v6], 
+                            backgroundColor:[C.blue, C.purple], 
+                            borderWidth: 0,
+                            hoverOffset: 10,
+                            animation: {
+                                animateScale: true,
+                                animateRotate: true
+                            }
+                        }]
                     },
-                    options:{responsive:true, maintainAspectRatio:true, animation:{duration:0},
-                        plugins:{legend:{position:'bottom',labels:{color:C.text,boxWidth:12,padding:10}},
-                        tooltip:{callbacks:{label:c=>`${c.label}: ${c.raw}`}}}}
+                    options:{
+                        responsive: true, 
+                        maintainAspectRatio: true, 
+                        animation: {
+                            duration: 1000,
+                            easing: 'easeOutQuart'
+                        },
+                        plugins:{
+                            legend:{
+                                position:'bottom',
+                                labels:{
+                                    color: C.text,
+                                    boxWidth: 16,
+                                    padding: 20,
+                                    font: {
+                                        size: 13
+                                    }
+                                }
+                            },
+                            tooltip:{
+                                backgroundColor: 'rgba(16, 28, 60, 0.9)',
+                                borderColor: 'rgba(80, 140, 255, 0.3)',
+                                borderWidth: 1,
+                                padding: 12,
+                                boxPadding: 6,
+                                usePointStyle: true,
+                                callbacks:{
+                                    label: c => `${c.label}: ${c.raw}`
+                                }
+                            }
+                        }
+                    }
                 });
             };
 
@@ -3754,13 +4309,54 @@ createApp({
                 if (_chartInstances.uptimeDist) _chartInstances.uptimeDist.destroy();
                 _chartInstances.uptimeDist = new Chart(el, {
                     type:'bar',
-                    data:{labels, datasets:[{label:'域名数', data:counts, backgroundColor:colors, borderRadius:4}]},
-                    options:{...chartOpts, scales:{
-                        x:{ticks:{color:C.text}, grid:{display:false}},
-                        y:{ticks:{color:C.text,stepSize:1}, grid:{color:C.grid}}
-                    }, plugins:{legend:{display:false}, tooltip:{callbacks:{
-                        label: c => `${c.raw} 个 (${total?Math.round(c.raw/total*100):'0'}%)`
-                    }}}}
+                    data:{
+                        labels: labels,
+                        datasets:[
+                            {
+                                label: '域名数', 
+                                data: counts, 
+                                backgroundColor: colors,
+                                borderRadius: 8,
+                                borderWidth: 0,
+                                barThickness: 30,
+                                maxBarThickness: 40
+                            }
+                        ]
+                    },
+                    options:{
+                        ...chartOpts, 
+                        scales:{
+                            x:{
+                                ticks:{
+                                    color: C.text,
+                                    font: {
+                                        size: 12
+                                    }
+                                }, 
+                                grid:{display: false}
+                            },
+                            y:{
+                                ticks:{
+                                    color: C.text,
+                                    stepSize: 1,
+                                    font: {
+                                        size: 12
+                                    }
+                                }, 
+                                grid:{
+                                    color: C.grid
+                                }
+                            }
+                        }, 
+                        plugins:{
+                            legend:{display: false}, 
+                            tooltip:{
+                                callbacks:{
+                                    label: c => `${c.raw} 个 (${total?Math.round(c.raw/total*100):'0'}%)`
+                                }
+                            }
+                        }
+                    }
                 });
             };
 
@@ -3784,17 +4380,58 @@ createApp({
                 if (_chartInstances.latDist) _chartInstances.latDist.destroy();
                 _chartInstances.latDist = new Chart(el, {
                     type:'bar',
-                    data:{labels:Object.keys(bins), datasets:[{label:'IP数', data:Object.values(bins), backgroundColor:colors, borderRadius:4}]},
-                    options:{...chartOpts, scales:{
-                        x:{ticks:{color:C.text,font:{size:11}}, grid:{display:false}},
-                        y:{ticks:{color:C.text,stepSize:1}, grid:{color:C.grid}}
-                    }, plugins:{legend:{display:false}, tooltip:{callbacks:{
-                        label: (c) => {
-                            const total = c.dataset.data.reduce((a,b)=>a+b,0);
-                            const pct = total ? (c.raw/total*100).toFixed(1) : 0;
-                            return ` ${c.raw} 个  (${pct}%)`;
+                    data:{
+                        labels: Object.keys(bins),
+                        datasets:[
+                            {
+                                label: 'IP数', 
+                                data: Object.values(bins), 
+                                backgroundColor: colors,
+                                borderRadius: 8,
+                                borderWidth: 0,
+                                barThickness: 30,
+                                maxBarThickness: 40
+                            }
+                        ]
+                    },
+                    options:{
+                        ...chartOpts, 
+                        scales:{
+                            x:{
+                                ticks:{
+                                    color: C.text,
+                                    font: {
+                                        size: 11
+                                    }
+                                }, 
+                                grid:{display: false}
+                            },
+                            y:{
+                                ticks:{
+                                    color: C.text,
+                                    stepSize: 1,
+                                    font: {
+                                        size: 12
+                                    }
+                                }, 
+                                grid:{
+                                    color: C.grid
+                                }
+                            }
+                        }, 
+                        plugins:{
+                            legend:{display: false}, 
+                            tooltip:{
+                                callbacks:{
+                                    label: (c) => {
+                                        const total = c.dataset.data.reduce((a,b)=>a+b,0);
+                                        const pct = total ? (c.raw/total*100).toFixed(1) : 0;
+                                        return ` ${c.raw} 个  (${pct}%)`;
+                                    }
+                                }
+                            }
                         }
-                    }}}}
+                    }
                 });
             };
 
@@ -3875,13 +4512,17 @@ createApp({
                 const k = parts[0], v = parts[1];
                 if (k==='locale'&&v) { locale.value=v; }  // 同一 ref，赋值即切换 i18n
                 if (k==='theme') {
-                    isDark.value = v !== 'light';
-                    if (v === 'light') document.body.classList.add('light-mode');
+                    const validThemes = ['blue', 'green', 'purple', 'orange', 'light'];
+                    if (validThemes.includes(v)) {
+                        currentTheme.value = v;
+                    }
                 }
                 if (k==='layoutWidth' && v && ['1500','1600','1700','1800','1900','2000'].includes(v)) {
                     layoutWidth.value = v;
                 }
             }
+            // 应用主题
+            setTheme(currentTheme.value);
             readHash();
             window.addEventListener('popstate', readHash);
             loading.value = true;
@@ -3920,7 +4561,7 @@ createApp({
         });
 
         return {
-            currentTab, locale, isDark, toggleTheme, layoutWidth, applyLayout, loading, trackers, stats, expanded, collapsed, expandMode, searchQ, logSearch, TAB_PATH,
+            currentTab, locale, currentTheme, themeNames, setTheme, layoutWidth, applyLayout, loading, trackers, stats, expanded, collapsed, expandMode, searchQ, logSearch, TAB_PATH,
             sortKey, sortDir, cycleSort, sortedTrackers,
             showAdd, showProbeTooltip, probeTooltipX, probeTooltipY, addUrl, adding, addMsg, ranking, filteredRanking, rankPeriod, showApiPanel, showQueryApiPanel, apiBase, apiExamples, queryApiExamples, apiCopiedIdx, copyApiText, filterEnabled, filterThreshold,
             exportRanking, exportProto, exportIpVer,

@@ -9,7 +9,12 @@ window.__i18n_fr = {
     toggleTheme: 'Changer le thème',
     lightMode: 'Mode clair',
     darkMode: 'Mode sombre',
-    userMgmt: 'Gestion des utilisateurs'
+    userMgmt: 'Gestion des utilisateurs',
+    themeBlue: '🌊 Bleu',
+    themeGreen: '🍵 Vert encre',
+    themePurple: '✨ Violet étoilé',
+    themeOrange: '🌅 Orange soleil',
+    themeLight: '☀️ Mode jour'
   },
   stats: {
     total: 'Total des IP',

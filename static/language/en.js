@@ -9,7 +9,12 @@ window.__i18n_en = {
     toggleTheme: 'Toggle Theme',
     lightMode: 'Light Mode',
     darkMode: 'Dark Mode',
-    userMgmt: 'User Management'
+    userMgmt: 'User Management',
+    themeBlue: '🌊 Blue',
+    themeGreen: '🍵 Ink Green',
+    themePurple: '✨ Starlight Purple',
+    themeOrange: '🌅 Sunshine Orange',
+    themeLight: '☀️ Day Mode'
   },
   stats: {
     total: 'Total IPs',

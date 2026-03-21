@@ -9,7 +9,12 @@ window.__i18n_ko = {
     toggleTheme: '테마 전환',
     lightMode: '라이트 모드',
     darkMode: '다크 모드',
-    userMgmt: '사용자 관리'
+    userMgmt: '사용자 관리',
+    themeBlue: '🌊 블루',
+    themeGreen: '🍵 먹 초록',
+    themePurple: '✨ 별빛 퍼플',
+    themeOrange: '🌅 선샤인 오렌지',
+    themeLight: '☀️ 낮 모드'
   },
   stats: {
     total: '총 IP 수',

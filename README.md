@@ -255,6 +255,24 @@ python app.py
 pause
 ```
 
+### 5. HTTPS 支持
+
+项目支持通过环境变量启用 HTTPS：
+
+```bash
+# Windows
+set HTTPS_ENABLED=1 && python app.py
+
+# Linux/macOS
+export HTTPS_ENABLED=1 && python app.py
+```
+
+- 首次启用 HTTPS 时，系统会自动生成自签名证书（`cert.pem` 和 `key.pem`）
+- 浏览器会显示安全警告，但数据传输仍然是加密的
+- 可通过环境变量自定义证书文件路径：
+  - `HTTPS_CERT`：证书文件路径（默认：`cert.pem`）
+  - `HTTPS_KEY`：私钥文件路径（默认：`key.pem`）
+
 ---
 
 ## ⚠️ 安全注意事项
@@ -489,4 +507,4 @@ MIT License
 ---
 
 ##### 项目发起人：rer
-##### 项目协作者：minimaxi、Claude、豆包、grok、deepseek
+##### 项目协作者：minimaxi、Claude、豆包、grok、deepseek、Trae(solo)

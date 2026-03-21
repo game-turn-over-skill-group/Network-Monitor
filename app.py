@@ -377,8 +377,48 @@ def get_requests_session():
         s.proxies.update(proxies)
     return s
 
+# ==================== 缓存工具 ====================
+class LRUCache:
+    """LRU缓存实现，限制缓存大小"""
+    def __init__(self, capacity: int):
+        self.capacity = capacity
+        self.cache = {}
+        self.order = []
+        self.lock = threading.RLock()
+    
+    def get(self, key):
+        with self.lock:
+            if key in self.cache:
+                # 移动到最前面（最近使用）
+                self.order.remove(key)
+                self.order.insert(0, key)
+                return self.cache[key]
+            return None
+    
+    def put(self, key, value):
+        with self.lock:
+            if key in self.cache:
+                # 移动到最前面（最近使用）
+                self.order.remove(key)
+                self.order.insert(0, key)
+                self.cache[key] = value
+            else:
+                # 检查容量
+                if len(self.cache) >= self.capacity:
+                    # 移除最久未使用的
+                    oldest = self.order.pop()
+                    del self.cache[oldest]
+                # 添加新项
+                self.order.insert(0, key)
+                self.cache[key] = value
+    
+    def clear(self):
+        with self.lock:
+            self.cache.clear()
+            self.order.clear()
+
 # ==================== 数据库 ====================
-_geo_cache_lock = threading.Lock()
+_geo_cache_lock = threading.RLock()
 class TrackerDB:
     def __init__(self):
         self.lock  = threading.RLock()
@@ -386,7 +426,7 @@ class TrackerDB:
         self.logs  = []
         self.stats = {'total': 0, 'alive': 0, 'ipv4': 0, 'ipv6': 0}
         # 可用率缓存
-        self.uptime_cache = {}
+        self.uptime_cache = LRUCache(1000)  # 限制缓存大小
         self.cache_lock = threading.RLock()
         self.cache_ttl = 30  # 秒
         # 异步保存线程池（单线程）
@@ -395,24 +435,33 @@ class TrackerDB:
 
     def _get_uptime_cached(self, domain, period):
         """从缓存获取域名可用率，如果缓存有效则返回，否则 None"""
-        with self.cache_lock:
-            entry = self.uptime_cache.get((domain, period))
-            if entry and time.time() - entry['time'] < self.cache_ttl:
-                return entry['value']
+        entry = self.uptime_cache.get((domain, period))
+        if entry and time.time() - entry['time'] < self.cache_ttl:
+            return entry['value']
         return None
 
     def _set_uptime_cache(self, domain, period, value):
-        with self.cache_lock:
-            self.uptime_cache[(domain, period)] = {'value': value, 'time': time.time()}
+        self.uptime_cache.put((domain, period), {'value': value, 'time': time.time()})
 
     def _clear_uptime_cache(self, domain=None):
-        with self.cache_lock:
-            if domain:
-                keys_to_delete = [k for k in self.uptime_cache if k[0] == domain]
-                for k in keys_to_delete:
-                    del self.uptime_cache[k]
-            else:
-                self.uptime_cache.clear()
+        if domain:
+            # 由于LRU缓存不支持按前缀删除，这里我们遍历所有键并删除匹配的
+            # 注意：这会遍历整个缓存，对于大缓存可能效率不高
+            # 但考虑到缓存大小限制为1000，这是可以接受的
+            keys_to_remove = []
+            with self.cache_lock:
+                # 注意：这里需要访问LRUCache的内部数据结构，这不是最佳实践
+                # 但为了保持兼容性，暂时这样实现
+                for key in list(self.uptime_cache.cache.keys()):
+                    if isinstance(key, tuple) and len(key) == 2 and key[0] == domain:
+                        keys_to_remove.append(key)
+                for key in keys_to_remove:
+                    if key in self.uptime_cache.cache:
+                        del self.uptime_cache.cache[key]
+                        if key in self.uptime_cache.order:
+                            self.uptime_cache.order.remove(key)
+        else:
+            self.uptime_cache.clear()
 
     # ---------- tracker 管理 ----------
     def add_tracker(self, domain, port, protocol, ip_list=None):
@@ -819,14 +868,13 @@ class TrackerDB:
                 self._recalc()
             # 预热 geo 缓存
             warmed = 0
-            with _geo_cache_lock:
-                for td in self.trackers.values():
-                    for ip_obj in td.get('ips', []):
-                        ip  = ip_obj.get('ip', '')
-                        geo = ip_obj.get('country')
-                        if ip and geo and geo.get('country_code','XX') != 'XX' and ip not in _geo_cache:
-                            _geo_cache[ip] = geo
-                            warmed += 1
+            for td in self.trackers.values():
+                for ip_obj in td.get('ips', []):
+                    ip  = ip_obj.get('ip', '')
+                    geo = ip_obj.get('country')
+                    if ip and geo and geo.get('country_code','XX') != 'XX' and _geo_cache.get(ip) is None:
+                        _geo_cache.put(ip, geo)
+                        warmed += 1
             if warmed:
                 cprint(f"[geo] 预热归属地缓存 {warmed} 条", 'info')
             return True
@@ -1008,6 +1056,8 @@ class Socks5ProxySession:
         self.af          = af
         self.timeout     = timeout
         self.valid       = True
+        self.created_at  = time.time()
+        self.last_used   = time.time()
 
         # 共享 UDP socket（固定源端口）
         self._udp        = socket.socket(af, socket.SOCK_DGRAM)
@@ -1085,6 +1135,13 @@ class Socks5ProxySession:
         发送 UDP tracker 包并等待对应 tid 的回包。
         返回 payload bytes；超时抛 socket.timeout；session 失效抛 OSError。
         """
+        # 更新最后使用时间
+        self.last_used = time.time()
+        
+        # 验证数据包大小
+        if len(packet) > 1024 * 64:  # 64KB 限制
+            raise OSError("数据包过大")
+        
         tid = packet[12:16]
         q   = queue.Queue()
 
@@ -1108,6 +1165,9 @@ class Socks5ProxySession:
                     continue
                 if data is None:
                     raise OSError("SOCKS5 session 已失效")
+                # 验证响应包大小
+                if len(data) > 1024 * 64:  # 64KB 限制
+                    raise OSError("响应包过大")
                 return data
         finally:
             with self._pend_lock:
@@ -1131,6 +1191,7 @@ class Socks5ProxyPool:
     健康状态机：连续建连失败进入冷却期，期间快速失败不堆积。
     """
     _COOLDOWN = 30
+    _SESSION_TIMEOUT = 3600  # 会话超时时间（秒）
 
     def __init__(self):
         self._lock           = threading.Lock()
@@ -1159,13 +1220,14 @@ class Socks5ProxyPool:
         """
         获取有效 session。若无有效 session 则在锁外建连。
         同时只允许一个线程建连，其他线程等待结果。
-        等待超时抛 _WaitTimeout（不计入代理失败计数）。
+        等待超时抛 _ProxyConnectError（不计入代理失败计数）。
         """
-        # 快路径：session 有效直接返回
+        # 快路径：session 有效且未超时直接返回
         with self._lock:
             if (self._session and self._session.valid
                     and self._proxy == proxy_url
-                    and self._timeout == timeout):
+                    and self._timeout == timeout
+                    and (time.time() - self._session.last_used) < self._SESSION_TIMEOUT):
                 return self._session
             if self._building:
                 building = True
@@ -1188,6 +1250,10 @@ class Socks5ProxyPool:
 
         # 本线程负责建连（锁外执行网络IO，不持锁）
         try:
+            # 验证代理地址
+            if not validate_proxy_url(proxy_url):
+                raise _ProxyConnectError("代理地址格式无效")
+            
             proxy_host, proxy_port = parse_proxy_addr(proxy_url)
             session = self._do_connect(proxy_host, proxy_port, timeout)
             with self._lock:
@@ -1500,9 +1566,10 @@ class Socks5UdpSocket:
 
 
 # ==================== 网络工具 ====================
-# GEO缓存：key=IP, value=geo dict。进程生命周期内永久缓存，重启自动清空。
-_geo_cache: dict = {}
-_geo_cache_lock = threading.Lock()
+# GEO缓存：key=IP, value=geo dict。使用LRU缓存，限制大小
+_GEO_CACHE_CAPACITY = 10000  # 缓存容量
+_geo_cache = LRUCache(_GEO_CACHE_CAPACITY)
+_geo_cache_lock = threading.RLock()
 
 def _is_safe_public_ip(ip: str) -> bool:
     """校验 IP 是否为可公开查询的公网地址（排除内网/回环/链路本地）"""
@@ -1527,15 +1594,13 @@ def is_private_ip(ip: str) -> bool:
 
 def get_geo(ip: str) -> dict:
     # 先查缓存，命中直接返回，不发网络请求
-    with _geo_cache_lock:
-        cached = _geo_cache.get(ip)
-        if cached and cached.get('country_code','XX') != 'XX':
-            return cached   # 只用成功的缓存；XX 表示之前失败，允许重试
+    cached = _geo_cache.get(ip)
+    if cached and cached.get('country_code','XX') != 'XX':
+        return cached   # 只用成功的缓存；XX 表示之前失败，允许重试
     result = {'country':'Unknown','country_code':'XX','isp':'Unknown'}
     # SSRF防护：仅对公网IP发起查询，私有/回环地址直接返回Unknown
     if not _is_safe_public_ip(ip):
-        with _geo_cache_lock:
-            _geo_cache[ip] = result
+        _geo_cache.put(ip, result)
         return result
     try:
         s = get_requests_session()
@@ -1548,8 +1613,7 @@ def get_geo(ip: str) -> dict:
                 result = {'country': d.get('country','Unknown'),
                           'country_code': d.get('countryCode','XX'),
                           'isp': d.get('isp','Unknown')}
-                with _geo_cache_lock:
-                    _geo_cache[ip] = result
+                _geo_cache.put(ip, result)
                 return result
     except Exception:
         pass
@@ -1783,31 +1847,164 @@ def parse_proxy_addr(proxy_url: str):
     return addr, 1080
 
 
+def validate_proxy_url(proxy_url: str) -> bool:
+    """验证代理地址格式是否合法"""
+    if not proxy_url:
+        return True  # 空代理地址视为合法（未启用）
+    
+    # 支持的代理协议
+    valid_schemes = ['http', 'https', 'socks5', 'socks4']
+    
+    # 解析代理地址
+    try:
+        # 提取协议
+        scheme = None
+        for s in valid_schemes:
+            if proxy_url.lower().startswith(f'{s}://'):
+                scheme = s
+                break
+        
+        if not scheme:
+            return False
+        
+        # 提取主机和端口
+        addr = proxy_url[len(f'{scheme}://'):]
+        
+        # 验证IPv6格式
+        if '[' in addr and ']' in addr:
+            m = re.match(r'^\[([0-9a-fA-F:]+)\]:(\d+)$', addr)
+            if m:
+                # 验证IPv6地址
+                try:
+                    socket.inet_pton(socket.AF_INET6, m.group(1))
+                    # 验证端口
+                    port = int(m.group(2))
+                    return 1 <= port <= 65535
+                except:
+                    return False
+        else:
+            # 验证IPv4或域名格式
+            m = re.match(r'^([^:]+):(\d+)$', addr)
+            if m:
+                host = m.group(1)
+                port = int(m.group(2))
+                
+                # 验证端口
+                if not (1 <= port <= 65535):
+                    return False
+                
+                # 验证主机（IPv4或域名）
+                try:
+                    # 尝试解析为IPv4
+                    socket.inet_pton(socket.AF_INET, host)
+                    return True
+                except:
+                    # 尝试解析为域名
+                    try:
+                        socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                        return True
+                    except:
+                        return False
+        return False
+    except:
+        return False
+
+def validate_config(config: dict) -> list:
+    """验证配置参数的合法性，返回错误列表"""
+    errors = []
+    
+    # 验证端口
+    if 'listen_port' in config:
+        port = config['listen_port']
+        if not isinstance(port, int) or port < 1 or port > 65535:
+            errors.append('监听端口必须是1-65535之间的整数')
+    
+    # 验证线程数
+    if 'monitor_workers' in config:
+        workers = config['monitor_workers']
+        if not isinstance(workers, int) or workers < 1 or workers > 1000:
+            errors.append('并发检测线程数必须是1-1000之间的整数')
+    
+    # 验证代理地址
+    if 'http_proxy' in config:
+        if config.get('http_proxy_enabled') and config['http_proxy']:
+            if not validate_proxy_url(config['http_proxy']):
+                errors.append('HTTP代理地址格式无效')
+    
+    if 'udp_proxy' in config:
+        if config.get('udp_proxy_enabled') and config['udp_proxy']:
+            if not validate_proxy_url(config['udp_proxy']):
+                errors.append('UDP代理地址格式无效')
+    
+    # 验证密码长度
+    if 'min_password_length' in config:
+        min_len = config['min_password_length']
+        if not isinstance(min_len, int) or min_len < 6 or min_len > 128:
+            errors.append('密码最小长度必须是6-128之间的整数')
+    
+    return errors
+
 def parse_url(url: str):
     """解析 tracker URL，支持 IPv4/IPv6/域名，支持方括号 IPv6 格式"""
     url = url.strip()
+    
+    # 验证URL长度
+    if len(url) > 1000:
+        return None, None, None
+    
     # 纯 IPv4:port  例: 1.2.3.4:6969
     m = re.match(r'^(\d{1,3}(?:\.\d{1,3}){3}):(\d+)$', url)
     if m:
-        return 'tcp', m.group(1), int(m.group(2))
+        ip = m.group(1)
+        port = int(m.group(2))
+        # 验证IPv4地址
+        try:
+            socket.inet_pton(socket.AF_INET, ip)
+            # 验证端口
+            if 1 <= port <= 65535:
+                return 'tcp', ip, port
+        except:
+            pass
+    
     # 纯 [IPv6]:port  例: [2001:db8::1]:6969
     m = re.match(r'^\[([0-9a-fA-F:]+)\]:(\d+)$', url)
     if m:
-        return 'tcp', m.group(1), int(m.group(2))
+        ip = m.group(1)
+        port = int(m.group(2))
+        # 验证IPv6地址
+        try:
+            socket.inet_pton(socket.AF_INET6, ip)
+            # 验证端口
+            if 1 <= port <= 65535:
+                return 'tcp', ip, port
+        except:
+            pass
+    
     # scheme://[IPv6]:port/path  例: http://[2c0f:f4c0::108]:80/announce
     m = re.match(r'^(udp|http|https)://\[([0-9a-fA-F:]+)\](?::(\d+))?(/.*)?$', url, re.IGNORECASE)
     if m:
         scheme = m.group(1).lower()
-        host   = m.group(2)
-        port   = int(m.group(3)) if m.group(3) else (443 if scheme == 'https' else 80)
-        return scheme, host, port
+        host = m.group(2)
+        port = int(m.group(3)) if m.group(3) else (443 if scheme == 'https' else 80)
+        # 验证IPv6地址
+        try:
+            socket.inet_pton(socket.AF_INET6, host)
+            # 验证端口
+            if 1 <= port <= 65535:
+                return scheme, host, port
+        except:
+            pass
+    
     # scheme://hostname:port/path
     m = re.match(r'^(udp|http|https)://([^:/\s\[\]]+)(?::(\d+))?(?:/.*)?$', url, re.IGNORECASE)
     if m:
         scheme = m.group(1).lower()
-        host   = m.group(2)
-        port   = int(m.group(3)) if m.group(3) else (443 if scheme == 'https' else 80)
-        return scheme, host, port
+        host = m.group(2)
+        port = int(m.group(3)) if m.group(3) else (443 if scheme == 'https' else 80)
+        # 验证端口
+        if 1 <= port <= 65535:
+            return scheme, host, port
+    
     return None, None, None
 
 
@@ -1821,24 +2018,44 @@ def _udp_tracker_packet():
 
 def _socks5_sendto(udp_sock: socket.socket, data: bytes,
                    dst: tuple, relay_addr: tuple):
-    """封装 SOCKS5 UDP 头并发往 relay，支持 IPv4/IPv6 目标"""
-    dst_host, dst_port = dst
+    """封装 SOCKS5 UDP 头并发往 relay，支持 IPv4/IPv6 目标，添加安全检查"""
     try:
-        socket.inet_pton(socket.AF_INET6, dst_host)
-        hdr = (b'\x00\x00\x00\x04'
-               + socket.inet_pton(socket.AF_INET6, dst_host)
-               + struct.pack('!H', dst_port))
-    except OSError:
+        # 验证目标地址
+        dst_host, dst_port = dst
+        if is_private_ip(dst_host) and not CONFIG.get('allow_private_ips'):
+            raise OSError("禁止访问内网地址")
+        
+        # 验证端口
+        if not (1 <= dst_port <= 65535):
+            raise OSError("无效的端口号")
+        
+        # 验证数据包大小
+        if len(data) > 1024 * 64:  # 64KB 限制
+            raise OSError("数据包过大")
+        
+        # 封装SOCKS5 UDP头
         try:
-            socket.inet_pton(socket.AF_INET, dst_host)
-            hdr = (b'\x00\x00\x00\x01'
-                   + socket.inet_pton(socket.AF_INET, dst_host)
+            socket.inet_pton(socket.AF_INET6, dst_host)
+            hdr = (b'\x00\x00\x00\x04'
+                   + socket.inet_pton(socket.AF_INET6, dst_host)
                    + struct.pack('!H', dst_port))
         except OSError:
-            hb  = dst_host.encode()
-            hdr = (b'\x00\x00\x00\x03' + bytes([len(hb)]) + hb
-                   + struct.pack('!H', dst_port))
-    udp_sock.sendto(hdr + data, relay_addr)
+            try:
+                socket.inet_pton(socket.AF_INET, dst_host)
+                hdr = (b'\x00\x00\x00\x01'
+                       + socket.inet_pton(socket.AF_INET, dst_host)
+                       + struct.pack('!H', dst_port))
+            except OSError:
+                hb  = dst_host.encode()
+                if len(hb) > 255:
+                    raise OSError("域名过长")
+                hdr = (b'\x00\x00\x00\x03' + bytes([len(hb)]) + hb
+                       + struct.pack('!H', dst_port))
+        
+        # 发送数据
+        udp_sock.sendto(hdr + data, relay_addr)
+    except Exception as e:
+        raise OSError(f"SOCKS5发送失败: {e}")
 
 
 def _socks5_strip(raw: bytes) -> bytes | None:
@@ -3310,6 +3527,11 @@ def api_config():
         if not request.headers.get('X-CSRFToken') or request.headers.get('X-CSRFToken') != session.get('csrf_token'):
             return jsonify({'error': 'CSRF token invalid'}), 403
         data = request.json or {}
+        
+        # 验证配置参数
+        errors = validate_config(data)
+        if errors:
+            return jsonify({'error': '配置参数无效', 'details': errors}), 400
         keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
                 'log_to_disk','log_level','console_log_level','http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
@@ -3628,10 +3850,163 @@ if __name__ == '__main__':
     print(f"    viewer   - 只读，重试限速1000ms")
     print(f"{'='*58}\n")
 
+    def generate_self_signed_cert(cert_file, key_file):
+        """生成自签名证书"""
+        try:
+            from cryptography import x509
+            from cryptography.x509.oid import NameOID
+            from cryptography.hazmat.primitives import hashes
+            from cryptography.hazmat.primitives.asymmetric import rsa
+            from cryptography.hazmat.backends import default_backend
+            from cryptography.hazmat.primitives import serialization
+            
+            # 生成私钥
+            private_key = rsa.generate_private_key(
+                public_exponent=65537,
+                key_size=2048,
+                backend=default_backend()
+            )
+            
+            # 生成证书
+            subject = issuer = x509.Name([
+                x509.NameAttribute(NameOID.COUNTRY_NAME, "CN"),
+                x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "Beijing"),
+                x509.NameAttribute(NameOID.LOCALITY_NAME, "Beijing"),
+                x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Network Monitor"),
+                x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
+            ])
+            
+            certificate = x509.CertificateBuilder().subject_name(
+                subject
+            ).issuer_name(
+                issuer
+            ).public_key(
+                private_key.public_key()
+            ).serial_number(
+                x509.random_serial_number()
+            ).not_valid_before(
+                datetime.utcnow()
+            ).not_valid_after(
+                # 证书有效期1年
+                datetime.utcnow() + timedelta(days=365)
+            ).add_extension(
+                x509.SubjectAlternativeName([x509.DNSName("localhost")]),
+                critical=False,
+            ).sign(private_key, hashes.SHA256(), default_backend())
+            
+            # 保存证书和私钥
+            with open(cert_file, "wb") as f:
+                f.write(certificate.public_bytes(serialization.Encoding.PEM))
+            
+            with open(key_file, "wb") as f:
+                f.write(private_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.TraditionalOpenSSL,
+                    encryption_algorithm=serialization.NoEncryption()
+                ))
+            
+            cprint(f"自签名证书生成成功: {cert_file}, {key_file}", 'info')
+        except ImportError:
+            cprint("缺少cryptography库，无法生成自签名证书", 'error')
+        except Exception as e:
+            cprint(f"生成自签名证书失败: {e}", 'error')
+    
+    # 读取HTTPS配置
+    https_enabled = os.environ.get('HTTPS_ENABLED', '0').strip() == '1'
+    cert_file = os.environ.get('HTTPS_CERT', 'cert.pem')
+    key_file = os.environ.get('HTTPS_KEY', 'key.pem')
+    
     try:
         from waitress import serve
         print("  使用 waitress 生产服务器\n")
-        # 构建监听地址列表
+        
+        if https_enabled:
+            # 检查证书文件是否存在
+            if not (os.path.exists(cert_file) and os.path.exists(key_file)):
+                cprint("HTTPS启用但证书文件不存在，将使用自签名证书", 'info')
+                # 生成自签名证书
+                generate_self_signed_cert(cert_file, key_file)
+            
+            # 构建HTTPS监听地址列表
+            listen_addrs = []
+            # IPv4 地址处理
+            if ipv4_mode == 'global':
+                listen_addrs.append(f'https://0.0.0.0:{port}')
+            elif ipv4_mode == 'local':
+                listen_addrs.append(f'https://127.0.0.1:{port}')
+            elif ipv4_mode == 'custom':
+                if ipv4_custom:
+                    listen_addrs.append(f'https://{ipv4_custom}:{port}')
+                else:
+                    print("警告: IPv4 自定义地址为空，将不监听 IPv4")
+            # IPv6 地址处理
+            if ipv6_mode == 'global':
+                listen_addrs.append(f'https://[::]:{port}')
+            elif ipv6_mode == 'local':
+                listen_addrs.append(f'https://[::1]:{port}')
+            elif ipv6_mode == 'custom':
+                if ipv6_custom:
+                    # 如果自定义 IPv6 地址不含方括号，添加方括号
+                    if ':' in ipv6_custom and not ipv6_custom.startswith('['):
+                        ipv6_custom = f'[{ipv6_custom}]'
+                    listen_addrs.append(f'https://{ipv6_custom}:{port}')
+                else:
+                    print("警告: IPv6 自定义地址为空，将不监听 IPv6")
+            
+            if not listen_addrs:
+                print("错误：至少需要监听一个地址", file=sys.stderr)
+                sys.exit(1)
+            
+            cprint(f"HTTPS服务器启动在 {listen_addrs[0]}", 'info')
+            serve(app, listen=listen_addrs, threads=8, ident='', certfile=cert_file, keyfile=key_file)
+        else:
+            # 构建HTTP监听地址列表
+            listen_addrs = []
+            # IPv4 地址处理
+            if ipv4_mode == 'global':
+                listen_addrs.append(f'0.0.0.0:{port}')
+            elif ipv4_mode == 'local':
+                listen_addrs.append(f'127.0.0.1:{port}')
+            elif ipv4_mode == 'custom':
+                if ipv4_custom:
+                    listen_addrs.append(f'{ipv4_custom}:{port}')
+                else:
+                    print("警告: IPv4 自定义地址为空，将不监听 IPv4")
+            # IPv6 地址处理
+            if ipv6_mode == 'global':
+                listen_addrs.append(f'[::]:{port}')
+            elif ipv6_mode == 'local':
+                listen_addrs.append(f'[::1]:{port}')
+            elif ipv6_mode == 'custom':
+                if ipv6_custom:
+                    # 如果自定义 IPv6 地址不含方括号，添加方括号
+                    if ':' in ipv6_custom and not ipv6_custom.startswith('['):
+                        ipv6_custom = f'[{ipv6_custom}]'
+                    listen_addrs.append(f'{ipv6_custom}:{port}')
+                else:
+                    print("警告: IPv6 自定义地址为空，将不监听 IPv6")
+            
+            if not listen_addrs:
+                print("错误：至少需要监听一个地址", file=sys.stderr)
+                sys.exit(1)
+            
+            cprint(f"HTTP服务器启动在 http://localhost:{port}", 'info')
+            serve(app, listen=listen_addrs, threads=8, ident='')
+    except ImportError:
+        print("  警告: waitress 未安装，将使用 Flask 开发服务器（不推荐用于生产）")
+        print("  建议执行: pip install waitress")
+        try:
+            ans = input("是否继续使用开发服务器？(y/N): ").strip().lower()
+            if ans != 'y':
+                print("已取消启动。")
+                sys.exit(0)
+        except EOFError:
+            pass
+        # 使用 Flask 内置服务器（仅用于开发，不支持同时监听多地址）
+        # 这里简化：如果同时监听了多个地址，使用第一个 IPv4 地址；如果只监听 IPv6 则使用 IPv6
+        import socket
+        host = None
+        # 构建监听地址列表（与waitress相同）
         listen_addrs = []
         # IPv4 地址处理
         if ipv4_mode == 'global':
@@ -3656,24 +4031,7 @@ if __name__ == '__main__':
                 listen_addrs.append(f'{ipv6_custom}:{port}')
             else:
                 print("警告: IPv6 自定义地址为空，将不监听 IPv6")
-        if not listen_addrs:
-            print("错误：至少需要监听一个地址", file=sys.stderr)
-            sys.exit(1)
-        serve(app, listen=listen_addrs, threads=8, ident='')
-    except ImportError:
-        print("  警告: waitress 未安装，将使用 Flask 开发服务器（不推荐用于生产）")
-        print("  建议执行: pip install waitress")
-        try:
-            ans = input("是否继续使用开发服务器？(y/N): ").strip().lower()
-            if ans != 'y':
-                print("已取消启动。")
-                sys.exit(0)
-        except EOFError:
-            pass
-        # 使用 Flask 内置服务器（仅用于开发，不支持同时监听多地址）
-        # 这里简化：如果同时监听了多个地址，使用第一个 IPv4 地址；如果只监听 IPv6 则使用 IPv6
-        import socket
-        host = None
+        
         if listen_addrs:
             first = listen_addrs[0]
             if '[' in first:
@@ -3682,4 +4040,5 @@ if __name__ == '__main__':
                 host = first.split(':')[0]
         else:
             host = '127.0.0.1'
+        print(f"  启动 Flask 开发服务器在 {host}:{port}")
         app.run(host=host, port=port, debug=False)

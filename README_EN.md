@@ -255,6 +255,24 @@ python app.py
 pause
 ```
 
+### 5. HTTPS Support
+
+The project supports enabling HTTPS via environment variables:
+
+```bash
+# Windows
+set HTTPS_ENABLED=1 && python app.py
+
+# Linux/macOS
+export HTTPS_ENABLED=1 && python app.py
+```
+
+- When HTTPS is enabled for the first time, the system will automatically generate self-signed certificates (`cert.pem` and `key.pem`)
+- Browsers will show a security warning, but data transmission is still encrypted
+- You can customize the certificate file paths via environment variables:
+  - `HTTPS_CERT`: Certificate file path (default: `cert.pem`)
+  - `HTTPS_KEY`: Private key file path (default: `key.pem`)
+
 ---
 
 ## ⚠️ Security Notes
@@ -489,4 +507,4 @@ MIT License
 ---
 
 ##### Project founder: rer
-##### Contributors: minimaxi, Claude, Doubao、grok、deepseek
+##### Contributors: minimaxi, Claude, Doubao、grok、deepseek、Trae(solo)

@@ -9,7 +9,12 @@ window.__i18n_ja = {
     toggleTheme: 'テーマ切り替え',
     lightMode: 'ライトモード',
     darkMode: 'ダークモード',
-    userMgmt: 'ユーザー管理'
+    userMgmt: 'ユーザー管理',
+    themeBlue: '🌊 ブルー',
+    themeGreen: '🍵 墨緑',
+    themePurple: '✨ 星空パープル',
+    themeOrange: '🌅 サンシャインオレンジ',
+    themeLight: '☀️ デイモード'
   },
   stats: {
     total: 'IP総数',

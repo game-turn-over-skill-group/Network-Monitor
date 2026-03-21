@@ -9,7 +9,12 @@ window.__i18n_zh = {
     toggleTheme: '切换主题',
     lightMode: '日间模式',
     darkMode: '夜间模式',
-    userMgmt: '用户管理'
+    userMgmt: '用户管理',
+    themeBlue: '🌊 蓝色主题',
+    themeGreen: '🍵 墨绿主题',
+    themePurple: '✨ 星空紫',
+    themeOrange: '🌅 阳光橙',
+    themeLight: '☀️ 日间模式'
   },
   stats: {
     total: '所有IP',
