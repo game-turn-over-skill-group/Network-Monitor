@@ -160,14 +160,26 @@ app.secret_key = _get_secret_key()
 # Session 安全配置
 app.config['SESSION_COOKIE_HTTPONLY']  = True   # 防止 JS 读取 Cookie (XSS防护)
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF 基础防护
-# SESSION_COOKIE_SECURE 自动检测：
-#   - 环境变量 HTTPS_ENABLED=1 → True（生产HTTPS环境，如CF代理后）
-#   - 环境变量未设置/为0 → False（本地内网/http测试，无需证书）
-#   内网http测试完全不受影响，只有显式设环境变量才会启用Secure标志
+app.config['SESSION_COOKIE_SECURE']   = True   # CF 代理 HTTPS，必须带 Secure 标志
 _https_enabled = os.environ.get('HTTPS_ENABLED', '0').strip() == '1'
-app.config['SESSION_COOKIE_SECURE']   = _https_enabled
-app.config['PERMANENT_SESSION_LIFETIME'] = 86400 * 7  # Session 有效期 7天
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)
 app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024    # 请求体上限 1MB，防 DoS
+
+def _is_https_request():
+    """判断当前请求是否来自 HTTPS（兼容 CF/Nginx 反代）"""
+    if _https_enabled:
+        return True
+    # Cloudflare: CF-Visitor: {"scheme":"https"}
+    cf_visitor = request.headers.get('CF-Visitor', '')
+    if '"https"' in cf_visitor:
+        return True
+    # 标准反代头
+    if request.headers.get('X-Forwarded-Proto', '').lower() == 'https':
+        return True
+    # Nginx proxy_pass 常用
+    if request.headers.get('X-Scheme', '').lower() == 'https':
+        return True
+    return False
 
 # 关闭 werkzeug 自带的 request log，我们自己处理
 log = logging.getLogger('werkzeug')
@@ -306,7 +318,7 @@ def rate_limit(limit: int = 60, window: int = 60):
 LEVEL_ORDER = {'none': 0, 'info': 1, 'error': 2, 'debug': 3}
 # 完全静默的路径（前端内部轮询/导航，不是真实用户请求）
 _log_write_lock = threading.Lock()   # 新增：定义锁
-_NOISY_PATHS = {'/api/auth/whoami', '/api/nav'}
+_NOISY_PATHS = {'/api/nav'}
 _ACCESS_LOG_FILE = 'access.log'
 
 def cprint(msg: str, level: str = 'info', raw: bool = False):
@@ -2545,6 +2557,10 @@ def security_headers(response):
     response.headers.remove('Server')
     path   = request.path
     method = request.method
+    # ── API whoami响应禁止缓存（防止 CF/CDN 缓存认证状态等动态内容）──
+    if path.startswith('/api/auth/whoami'):
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+        response.headers['Pragma'] = 'no-cache'
     # ── 调试模式判断（控制 304 是否静默） ──
     is_debug_mode = CONFIG.get('log_level') == 'debug' or getattr(app, 'debug', False)
     # ── 静态资源（/static/）缓存策略 ──
@@ -2562,9 +2578,12 @@ def security_headers(response):
         # 200 继续往下，正常记录日志
     # ── JSON API gzip 压缩（浏览器支持时，响应 >1KB 才压缩）──
     # 文件下载（Content-Disposition）跳过，避免对已压缩内容二次压缩
+    # 重要：含 Set-Cookie 的响应（登录等）跳过 gzip，防止 set_data() 破坏 session cookie
     ct = response.content_type or ''
+    has_set_cookie = bool(response.headers.get('Set-Cookie'))
     if ('application/json' in ct or 'text/plain' in ct) \
-            and not response.headers.get('Content-Disposition'):
+            and not response.headers.get('Content-Disposition') \
+            and not has_set_cookie:
         accept_enc = request.headers.get('Accept-Encoding', '')
         if 'gzip' in accept_enc and not response.headers.get('Content-Encoding'):
             try:
@@ -2578,9 +2597,23 @@ def security_headers(response):
             except Exception:
                 pass
     # 保留此逻辑，因为这些请求每秒几十次，完全无调试价值
-    # 静默路径（前端内部轮询/导航）：不打印日志 = 始终静默（即使 debug 模式也不输出）──
+    # 静默路径（前端内部轮询/导航）：不打印日志
     if path.split('?')[0].rstrip('/') in _NOISY_PATHS:
         return response
+    # whoami 去重日志：正常200每IP每分钟只打印一次，429/异常状态始终打印
+    if path == '/api/auth/whoami':
+        real_ip = request.headers.get('CF-Connecting-IP') or request.headers.get('X-Real-IP') or request.remote_addr
+        now_t = time.time()
+        _wkey = f'whoami:{real_ip}'
+        with _rate_limit_warned_lock:
+            last_t = _rate_limit_warned.get(_wkey, 0)
+            is_anomaly = response.status_code != 200
+            if is_anomaly or (now_t - last_t >= 60):
+                _rate_limit_warned[_wkey] = now_t
+                # 打印日志（异常完整记录，正常只记一条去重摘要）
+                pass  # 继续走下方统一日志逻辑
+            else:
+                return response  # 正常请求1分钟内静默
     # HTML 页面的 304（ETag命中/CF回源验证）静默：非调试模式下隐藏:0字节请求（不刷控制台、不写 access.log）
     # 只有调试模式才放行，让正常日志流程输出
     _HTML_PATHS = {'/', '/home', '/stats', '/ranking', '/logs', '/config'}
@@ -2610,7 +2643,7 @@ def security_headers(response):
     cprint(line, 'info', raw=True)
     _write_access_log(line)   # 写盘（log_to_disk=True 时）
 
-    # ===== 新增：为 GET 页面请求设置 CSRF cookie =====
+    # ===== 为 GET 页面请求设置 CSRF cookie =====
     if request.method == 'GET' and not request.path.startswith('/api/'):
         token = generate_csrf_token()
         response.set_cookie('csrf_token', token, httponly=False, samesite='Lax', secure=app.config['SESSION_COOKIE_SECURE'])
@@ -2949,14 +2982,11 @@ def api_change_password():
     return jsonify({'success': True})
 
 @app.route('/api/auth/whoami')
+@rate_limit(limit=30, window=60)   # 每IP每分钟最多30次，防刷
 def api_whoami():
     role = session.get('role')
-    token = generate_csrf_token()
-    if not role:
-        resp = jsonify({'logged_in': False, 'role': None, 'username': None})
-    else:
-        resp = jsonify({'logged_in': True, 'role': role, 'username': session.get('username')})
-    resp.set_cookie('csrf_token', token, httponly=False, samesite='Lax', secure=app.config['SESSION_COOKIE_SECURE'])
+    resp = jsonify({'logged_in': bool(role), 'role': role, 'username': session.get('username') if role else None})
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
     return resp
 
 # ── 统计 ──
@@ -3684,37 +3714,45 @@ def api_users_get():
 @_require_role('admin')
 @csrf_protect
 def api_users_save():
-    """批量保存用户配置，支持新增/修改/删除"""
+    """批量保存用户配置，支持新增/修改/删除。管理员设置初始密码无最小长度限制。"""
     data = request.json or {}
     new_users = data.get('users', [])
     result = []
+    errors = []
     existing = {u['username']: u for u in CONFIG.get('users', [])}
-    min_len = CONFIG.get('min_password_length', 8)
+    import re as _re
     for u in new_users:
         uname = (u.get('username','') or '').strip()
         role  = u.get('role','viewer')
-        import re as _re
-        # 用户名只允许字母数字下划线连字符，1-32字符
         if not uname or not _re.match(r'^[a-zA-Z0-9_-]{1,32}$', uname):
+            errors.append(f'用户名 "{uname}" 不合法（只允许字母数字下划线连字符，1-32字符）')
             continue
         if role not in ('admin','operator','viewer'):
+            errors.append(f'用户 "{uname}" 角色不合法')
             continue
         pw_plain = (u.get('password','') or '').strip()
         if pw_plain:
-            if len(pw_plain) < min_len:
-                # 不通过，但可跳过或报错，这里选择跳过（不保存该用户）
-                continue  # 密码太短，拒绝保存
+            # 管理员在后台设置密码无最小长度限制，只限最大长度
+            if len(pw_plain) > 256:
+                errors.append(f'用户 "{uname}" 密码过长（最多256位）')
+                continue
             pw_hash, pw_salt = _hash_pw(pw_plain)
             result.append({'username': uname, 'role': role, 'password': pw_hash, 'salt': pw_salt})
         elif uname in existing:
-            # 保留旧密码哈希 + 盐（包含旧版兼容格式）
+            # 密码为空：保留旧密码哈希+盐
             old_u = existing[uname]
             entry = {'username': uname, 'role': role, 'password': old_u['password']}
             if 'salt' in old_u:
                 entry['salt'] = old_u['salt']
             result.append(entry)
         else:
-            continue  # 新用户必须设密码
+            errors.append(f'新用户 "{uname}" 必须设置密码')
+            continue
+    if errors:
+        return jsonify({'success': False, 'errors': errors}), 400
+    # 确保至少保留一个 admin
+    if not any(u.get('role') == 'admin' for u in result):
+        return jsonify({'success': False, 'errors': ['至少需要保留一个 admin 账户']}), 400
     CONFIG['users'] = result
     persist_config(CONFIG)
     g.access_note = f"users updated ({len(result)} users)"

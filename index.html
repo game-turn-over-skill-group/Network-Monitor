@@ -2801,7 +2801,16 @@
                         <tbody>
                             <tr v-for="(u, idx) in userRows" :key="idx">
                                 <td><input class="form-control form-control-sm" v-model="u.username" placeholder="username"></td>
-                                <td><input class="form-control form-control-sm" type="password" v-model="u.password" placeholder="(blank=keep)"></td>
+                                <td>
+                                    <div class="position-relative">
+                                        <input class="form-control form-control-sm pe-4" :type="u.showPw ? 'text' : 'password'" v-model="u.password" placeholder="(blank=keep)" autocomplete="new-password">
+                                        <span @click="u.showPw = !u.showPw"
+                                              style="position:absolute;right:7px;top:50%;transform:translateY(-50%);cursor:pointer;color:#64748b;font-size:.85rem;line-height:1;"
+                                              :title="u.showPw ? '隐藏密码' : '显示密码'">
+                                            <i class="bi" :class="u.showPw ? 'bi-eye-slash' : 'bi-eye'"></i>
+                                        </span>
+                                    </div>
+                                </td>
                                 <td>
                                     <select class="form-select form-select-sm" v-model="u.role">
                                         <option value="admin">admin</option>
@@ -3268,21 +3277,24 @@ createApp({
         const loadUsers = async () => {
             try {
                 const r = await axios.get('/api/users');
-                userRows.value = r.data.map(u => ({username: u.username, role: u.role, password: ''}));
+                userRows.value = r.data.map(u => ({username: u.username, role: u.role, password: '', showPw: false}));
             } catch(e){}
         };
 
-        const addUserRow = () => userRows.value.push({username:'', role:'viewer', password:''});
+        const addUserRow = () => userRows.value.push({username:'', role:'viewer', password:'', showPw: false});
         const removeUserRow = (idx) => userRows.value.splice(idx, 1);
 
         const saveUsers = async () => {
             userSaving.value = true; userSaveMsg.value = null;
             try {
-                await axios.post('/api/users', {users: userRows.value});
-                userSaveMsg.value = {ok:true, text:'✓ 已保存'};
+                const r = await axios.post('/api/users', {users: userRows.value});
+                userSaveMsg.value = {ok:true, text:`✓ 已保存（共 ${r.data.count} 个用户）`};
+                await loadUsers();
                 setTimeout(()=>{ userSaveMsg.value=null; }, 3000);
             } catch(e) {
-                userSaveMsg.value = {ok:false, text: e.response?.data?.error || '保存失败'};
+                const errs = e.response?.data?.errors;
+                const msg  = errs ? errs.join('；') : (e.response?.data?.error || '保存失败');
+                userSaveMsg.value = {ok:false, text: msg};
             } finally {
                 userSaving.value = false;
             }
