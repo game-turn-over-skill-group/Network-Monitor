@@ -54,6 +54,7 @@ DEFAULT_CONFIG = {
     'udp_proxy': '',
     'dns_mode': 'system',              # system | dnspython | custom
     'dns_custom': '8.8.8.8',           # 自定义DNS时使用，支持多个用逗号分隔
+    'dns_use_tcp': False,              # 自定义/dnspython 模式下强制使用 TCP 53（国内UDP丢包时开启）
     'max_log_entries': 1000,           # 日志最大条目数（兼容旧版，以下三项优先）
     'max_log_info': 1000,              # Info 级日志最大条目数
     'max_log_success': 1000,           # Success 级日志最大条目数
@@ -102,7 +103,7 @@ def load_config():
                       'log_to_disk','log_level','console_log_level',
                       'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                       'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
-                      'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                      'dns_mode','dns_custom','dns_use_tcp','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                       'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','export_suffix',
                       'show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
                       'cleanup_interval','trust_cf_ip']:
@@ -125,7 +126,7 @@ def persist_config(cfg):
                                         'log_to_disk','log_level',
                                         'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                                         'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
-                                        'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                                        'dns_mode','dns_custom','dns_use_tcp','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                                         'dashboard_stat_period','tracker_stat_period','cache_history',
                                         'tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width',
                                         'allow_private_ips','min_password_length','users',
@@ -1654,12 +1655,13 @@ def _resolve_dnspython(domain: str):
     """模式2: dnspython 内置解析器（走 /etc/resolv.conf 或 Windows注册表DNS）"""
     ips = []
     seen = set()
+    use_tcp = CONFIG.get('dns_use_tcp', False)
     for rtype, ver in [('A', 'ipv4'), ('AAAA', 'ipv6')]:
         try:
             resolver = dns.resolver.Resolver()
             resolver.timeout  = CONFIG['timeout']
             resolver.lifetime = CONFIG['timeout']
-            for rdata in resolver.resolve(domain, rtype):
+            for rdata in resolver.resolve(domain, rtype, tcp=use_tcp):
                 ip = str(rdata)
                 if ip not in seen:
                     seen.add(ip)
@@ -1671,20 +1673,38 @@ def _resolve_dnspython(domain: str):
     return ips
 
 def _resolve_custom(domain: str):
-    """模式3: 自定义DNS服务器（支持多个，逗号分隔，如 8.8.8.8,8.8.4.4）"""
+    """模式3: 自定义DNS服务器（支持多个，逗号分隔）
+    支持格式：
+      8.8.8.8            → UDP 53
+      tcp://8.8.8.8      → TCP 53（单独指定）
+    全局 dns_use_tcp=True 时，所有服务器强制走 TCP 53。
+    """
     servers_raw = CONFIG.get('dns_custom', '8.8.8.8').strip()
-    servers = [s.strip() for s in servers_raw.replace('，', ',').split(',') if s.strip()]
-    if not servers:
-        servers = ['8.8.8.8']
+    use_tcp = CONFIG.get('dns_use_tcp', False)
+
+    # 解析服务器列表，支持 tcp:// 前缀覆盖全局开关
+    raw_list = [s.strip() for s in servers_raw.replace('，', ',').split(',') if s.strip()]
+    if not raw_list:
+        raw_list = ['8.8.8.8']
+
+    servers = []
+    for s in raw_list:
+        if s.lower().startswith('tcp://'):
+            servers.append((s[6:], True))   # 单独指定 TCP
+        else:
+            servers.append((s, use_tcp))    # 跟随全局开关
+
     ips = []
     seen = set()
     for rtype, ver in [('A', 'ipv4'), ('AAAA', 'ipv6')]:
         try:
             resolver = dns.resolver.Resolver(configure=False)
-            resolver.nameservers = servers
+            resolver.nameservers = [ip for ip, _ in servers]
             resolver.timeout     = CONFIG['timeout']
             resolver.lifetime    = CONFIG['timeout']
-            for rdata in resolver.resolve(domain, rtype):
+            # 只要列表中任意一个服务器指定了 TCP，或全局开关开启，就用 TCP
+            tcp_flag = any(t for _, t in servers)
+            for rdata in resolver.resolve(domain, rtype, tcp=tcp_flag):
                 ip = str(rdata)
                 if ip not in seen:
                     seen.add(ip)
@@ -1692,8 +1712,27 @@ def _resolve_custom(domain: str):
         except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
             pass
         except Exception as e:
-            db.add_log(f"[custom:{','.join(servers)}] DNS {rtype} {domain}: {type(e).__name__}: {e}", 'debug')
+            srv_str = ','.join(ip for ip, _ in servers)
+            db.add_log(f"[custom:{srv_str}] DNS {rtype} {domain}: {type(e).__name__}: {e}", 'debug')
     return ips
+
+# 已记录过DNS失败的域名集合（应用生命周期内只报一次，避免控制台/web日志刷屏）
+# 重启应用后集合清空，会重新提醒一次，方便感知配置变更后的效果。
+_dns_fail_logged: set = set()
+_dns_fail_lock = threading.Lock()
+
+def _dns_fail_once(domain: str) -> bool:
+    """返回 True 表示首次失败，应记录日志；False 表示已记录过，静默跳过。"""
+    with _dns_fail_lock:
+        if domain in _dns_fail_logged:
+            return False
+        _dns_fail_logged.add(domain)
+        return True
+
+def _dns_fail_clear(domain: str):
+    """DNS 解析恢复时清除静默标记，下次失败重新提醒。"""
+    with _dns_fail_lock:
+        _dns_fail_logged.discard(domain)
 
 def resolve(domain: str):
     """根据 CONFIG['dns_mode'] 选择 DNS 解析策略"""
@@ -1706,12 +1745,17 @@ def resolve(domain: str):
         else:
             ips = _resolve_system(domain)
     except Exception as e:
-        cprint(f"DNS解析异常 {domain}: {e}", 'error')
-        db.add_log(f"DNS解析异常 {domain}: {e}", 'error')
+        if _dns_fail_once(domain):
+            cprint(f"DNS解析异常 {domain}: {e}", 'error')
+            db.add_log(f"DNS解析异常 {domain}: {e}", 'error')
         return []
     if not ips:
-        db.add_log(f"DNS解析失败 {domain} [模式:{mode}]: 无结果", 'error')
-        cprint(f"DNS解析失败 {domain} [模式:{mode}]", 'error')
+        if _dns_fail_once(domain):
+            db.add_log(f"DNS解析失败 {domain} [模式:{mode}]: 无结果", 'error')
+            cprint(f"DNS解析失败 {domain} [模式:{mode}]", 'error')
+    else:
+        # 解析成功，清除静默标记（下次再失败时重新提醒）
+        _dns_fail_clear(domain)
     return ips
 
 
@@ -2260,11 +2304,12 @@ def _resolve_and_update(domain, port, protocol):
         if new_ips:
             cprint(f"DNS刷新 {domain}: {len(new_ips)}个IP", 'debug')
         else:
-            cprint(f"DNS刷新失败 {domain}: 无结果，保留缓存IP", 'error')
-            db.add_log(f"DNS解析失败 {domain}: 保留缓存IP继续检测", 'error')
+            # 无结果时日志已在 resolve() 内通过 _dns_fail_once 去重，此处不重复打印
+            pass
     except Exception as e:
         db.update_ips(domain, [], dns_error=True)
-        cprint(f"DNS刷新异常 {domain}: {e}", 'error')
+        # 异常日志同样由 resolve() 内去重处理，此处静默
+        pass
 
 # ==================== 网络探针 ====================
 # 双重网络健康判断：
@@ -3612,7 +3657,7 @@ def api_config():
                 'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
                 'log_to_disk','log_level','console_log_level','http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                 'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
-                'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                'dns_mode','dns_custom','dns_use_tcp','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
                 'export_suffix','show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
                 'cleanup_interval','trust_cf_ip']
@@ -3640,6 +3685,7 @@ def api_config():
             'listen_ipv6_custom':    '自定义ipv6监听',
             'dns_mode':              'DNS模式',
             'dns_custom':            '自定义DNS',
+            'dns_use_tcp':           'DNS强制TCP',
             'max_log_entries':       '最大日志条数',
             'max_log_info':          'Info日志最大条数',
             'max_log_success':       'Success日志最大条数',
@@ -3697,7 +3743,7 @@ def api_config():
         return jsonify({k: CONFIG.get(k) for k in public_keys})
     all_keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'log_to_disk','log_level','http_proxy','udp_proxy','http_proxy_enabled','udp_proxy_enabled',
-                'dns_mode','dns_custom','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                'dns_mode','dns_custom','dns_use_tcp','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
                 'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width',
                 'allow_private_ips','min_password_length','cleanup_interval','trust_cf_ip']
@@ -3902,6 +3948,8 @@ if __name__ == '__main__':
     print(f"  监控间隔       : {CONFIG['check_interval']}秒")
     print(f"  超时时间       : {CONFIG['timeout']}秒")
     dns_desc = {'system':'系统DNS','dnspython':'dnspython','custom':f"自定义({CONFIG.get('dns_custom','8.8.8.8')})"}.get(CONFIG.get('dns_mode','system'),'系统DNS')
+    if CONFIG.get('dns_use_tcp') and CONFIG.get('dns_mode') != 'system':
+        dns_desc += ' [TCP]'
     print(f"  DNS解析模式    : {dns_desc}")
     print(f"  日志最大条目   : Info={CONFIG.get('max_log_info',1000)} / Success={CONFIG.get('max_log_success',1000)} / Error={CONFIG.get('max_log_error',1000)}条")
     print(f"  重试模式       : {CONFIG['retry_mode']}")

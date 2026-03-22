@@ -12042,6 +12042,151 @@ CF那边必须配 Cache Rule = Bypass，这是根本，后端的 no-store 头只
 --------------------------------------
 
 
+//新增tcpDNS查询
+
+  2026/3/22 19:27:13 [ERROR] DNS解析失败 retracker.lanta.me [模式:custom]
+  2026/3/22 19:27:13 [ERROR] DNS刷新失败 retracker.lanta.me: 无结果，保留缓存IP
+  2026/3/22 19:27:16 [ERROR] DNS解析失败 tracker.cubonegro.org [模式:custom]
+  2026/3/22 19:27:16 [ERROR] DNS刷新失败 tracker.cubonegro.org: 无结果，保留缓存IP
+  2026/3/22 19:27:18 [ERROR] DNS解析失败 tracker.waaa.moe [模式:custom]
+  2026/3/22 19:27:18 [ERROR] DNS刷新失败 tracker.waaa.moe: 无结果，保留缓存IP
+  2026/3/22 19:27:18 [ERROR] DNS解析失败 tr4ck3r.duckdns.org [模式:custom]
+  2026/3/22 19:27:19 [ERROR] DNS刷新失败 tr4ck3r.duckdns.org: 无结果，保留缓存IP
+
+CN国内 网络环境 用谷歌udp的DNS 丢包率太高了 想用tcp 53端口的谷歌DNS
+能不能让web支持修改？需要填写什么格式DNS？
+
+----------------
+
+现在我已经完全理解了代码结构。问题很清楚：_resolve_custom 函数里，
+resolver.nameservers 直接赋值 IP 列表，dnspython 默认走 UDP 53 端口，没有 TCP 选项。
+要支持 TCP 53，需要在后端代码加 use_tcp=True 参数，
+并且在前端 Web 界面提供一个 "TCP模式" 开关。我来同时修改 app.py 和 index.html：
+
+现在我完全了解了整个代码结构。需要：
+1、app.py：在 DEFAULT_CONFIG 加 dns_use_tcp: False，修改 _resolve_custom（和 _resolve_dnspython）加上 use_tcp 参数，
+load/persist/save API 都要包含这个新字段
+2、index.html：DNS 配置区加一个 TCP 开关，saveCfg 里包含新字段，初始默认值补上
+
+修改总结
+app.py 修改（已完成）
+1. DEFAULT_CONFIG 新增字段（第56行后）：
+python'dns_use_tcp': False,   # 自定义/dnspython 模式下强制使用 TCP 53
+2. load_config / persist_config / api_config 的 keys 列表 —— 均已加入 'dns_use_tcp'
+3. _resolve_dnspython —— 加了 use_tcp = CONFIG.get('dns_use_tcp', False) 并传给 resolver.resolve(..., tcp=use_tcp)
+4. _resolve_custom —— 重构支持：
+全局 dns_use_tcp=True → 所有服务器走 TCP
+单独 tcp://8.8.8.8 前缀 → 仅该服务器走 TCP
+
+全部修改完成，两个文件都已更新。以下是所有改动的完整清单：
+
+app.py 共 7 处修改：
+DEFAULT_CONFIG 新增 'dns_use_tcp': False
+load_config 的 keys 列表加入 dns_use_tcp
+persist_config 的 keys 列表加入 dns_use_tcp
+_resolve_dnspython 读取 dns_use_tcp，传 tcp=use_tcp 给 resolver.resolve()
+_resolve_custom 重构，支持全局 TCP 开关和 tcp:// 单台前缀格式
+api_config POST/GET 的 keys 列表和 labels 加入 dns_use_tcp
+启动日志在 DNS 描述后追加 [TCP] 标记
+
+index.html 共 3 处修改：
+默认值对象加 dns_use_tcp: false
+saveCfg 发送的 payload 加 dns_use_tcp
+DNS 配置卡片加了 "强制使用 TCP 53 查询" 开关（system 模式时置灰不可点）
+
+使用方法： 配置页把 DNS 模式改为「自定义」，填入 8.8.8.8,8.8.4.4，勾选「强制使用 TCP 53 查询」，保存即生效。
+
+----------------
+
+Q：
+多国翻译 是不是也要加？我把这些js发你了 改下
+
+----------------
+
+A：
+全部完成。每个语言文件在 dnsCustomDesc 后面新增了3个键：
+键名用途dnsTcpLabel开关标签文字dnsTcpDesc开关下方说明文字dnsTcpTcpPrefix备用说明（tcp:// 格式提示）
+index.html 里的 TCP 开关也同步改成了 t('config.dnsTcpLabel') 和 t('config.dnsTcpDesc') 调用，切换任意语言都会正确显示对应文字。
+
+----------------
+
+Q：
+这个DNS查询结果 查询不到的 控制台老提醒 有点烦人 有没有办法解决？改成重启应用前只提醒一次？ web 日志 也一样只首次提醒
+但是在web端 仍然可以显示出来 DNS ERR 的标志 没毛病吧？
+  2026/3/22 19:53:41 [ERROR] DNS解析失败 retracker.lanta.me [模式:custom]
+  2026/3/22 19:53:41 [ERROR] DNS刷新失败 retracker.lanta.me: 无结果，保留缓存IP
+  2026/3/22 19:53:43 [ERROR] DNS解析失败 tracker.cubonegro.org [模式:custom]
+  2026/3/22 19:53:43 [ERROR] DNS刷新失败 tracker.cubonegro.org: 无结果，保留缓存IP
+
+----------------
+
+A：
+思路很清晰：在内存里维护一个"已经报过一次"的集合，相同域名的 DNS 失败只打印/写日志一次，但 web 端的 dns_error 标志仍然正常更新。
+
+现在完全清楚了，需要改4处日志调用。方案：加一个全局集合 _dns_fail_logged，
+相同域名只在第一次失败时打印控制台+写web日志，之后静默。dns_error 标志照常更新，不受影响。
+
+完成。改动逻辑如下：
+新增3个函数（~1721行）：
+_dns_fail_logged — 内存集合，存放已报过的域名
+_dns_fail_once(domain) — 首次返回 True 并记录，之后返回 False 静默
+_dns_fail_clear(domain) — DNS 恢复成功时移除，下次失败重新提醒
+
+resolve() 改动：
+解析异常 / 无结果 → 走 _dns_fail_once() 判断，首次才打印控制台+写 web 日志
+解析成功 → 调 _dns_fail_clear()，若之后再失败会重新提醒（说明是新问题）
+
+_resolve_and_update() 改动：
+原来重复打印的 DNS刷新失败 和 DNS刷新异常 两条日志改为 pass，因为 resolve() 内已经去重处理过了
+
+结果：
+控制台 / web 日志：同一域名只报一次，重启清零
+web 端 dns_error 红色标志：每轮照常通过 update_ips(dns_error=True) 更新，完全不受影响
+
+
+--------------------------------------
+
+
+更新一下ReadMe文档：
+中文版补充（英文同理）：
+DNS 解析 → 新增 TCP 53 强制模式条目
+配置参数表 → 新增 dns_use_tcp、listen_ipv4/ipv6、refresh_geo_on_restart
+常见问题 → 新增 DNS UDP 丢包 FAQ
+网络设置 → 补充 IPv4/IPv6 监听模式说明
+
+----------------
+
+两份文档都更新完毕，中英文同步。改动汇总：
+功能特性 · DNS 解析（新增3条）
+
+TCP 53 强制模式说明（dns_use_tcp）
+单台服务器 tcp:// 前缀格式
+DNS 失败日志去重机制说明
+
+新增章节：🌐 网络监听设置（置于安全注意事项之前）
+
+IPv4/IPv6 四种模式对照表（global / local / custom / disabled）
+四种典型配置 JSON 示例
+
+配置参数表（新增6行）
+
+dns_use_tcp — TCP 53 开关
+listen_ipv4 / listen_ipv4_custom — IPv4 监听
+listen_ipv6 / listen_ipv6_custom — IPv6 监听
+refresh_geo_on_restart — 启动补查归属地
+
+常见问题（新增 Q18、Q19）
+
+Q18：DNS 刷屏问题说明 + nslookup 测试命令
+Q19：中国大陆 UDP DNS 丢包解决方案（步骤 + 原理
+
+
+--------------------------------------
+
+
+
+
+
 
 
 

@@ -66,6 +66,9 @@ A full-featured BitTorrent Tracker monitoring tool with TCP/UDP ping, multi-IP m
 - ✅ Local hosts file support (via getaddrinfo native behavior)
 - ✅ Re-resolves every check cycle — automatically detects IP changes
 - ✅ Falls back to cached IPs on DNS failure — monitoring never stops
+- ✅ **Force TCP port 53 mode**: enable `dns_use_tcp` in dnspython/custom mode to send all DNS queries over TCP instead of UDP — fixes high packet loss on UDP DNS common in mainland China
+- ✅ Per-server TCP override in custom DNS: prefix individual servers with `tcp://8.8.8.8` to force TCP, mixable with plain IPs
+- ✅ DNS failure log deduplication: console and Web log output only once per failing domain; clears automatically on recovery — no log flooding
 
 ### Monitor List
 - ✅ Card-style layout showing port, protocol (TCP/UDP), IP count, and added time
@@ -275,6 +278,40 @@ export HTTPS_ENABLED=1 && python app.py
 
 ---
 
+## 🌐 Network Listen Settings
+
+Changes to `listen_port`, `listen_ipv4`, or `listen_ipv6` require an **app restart** to take effect.
+
+### IPv4 / IPv6 Listen Modes
+
+| Mode | IPv4 Address | IPv6 Address | Use Case |
+|------|-------------|-------------|----------|
+| `global` | `0.0.0.0` | `[::]` | All interfaces (default — accessible from LAN and internet) |
+| `local` | `127.0.0.1` | `[::1]` | Localhost only (use with a reverse proxy) |
+| `custom` | set `listen_ipv4_custom` | set `listen_ipv6_custom` | Bind to a specific network interface IP |
+| `disabled` | not bound | not bound | Disable one protocol stack for pure IPv4 or IPv6 deployments |
+
+**Typical configuration examples:**
+
+```json
+// Standard public deployment — dual-stack, all interfaces (default)
+{ "listen_ipv4": "global", "listen_ipv6": "global" }
+
+// Localhost only + nginx reverse proxy
+{ "listen_ipv4": "local", "listen_ipv6": "disabled" }
+
+// IPv6-only public
+{ "listen_ipv4": "disabled", "listen_ipv6": "global" }
+
+// Specific LAN interface
+{ "listen_ipv4": "custom", "listen_ipv4_custom": "192.168.1.10",
+  "listen_ipv6": "disabled" }
+```
+
+> ⚠️ In `global` mode the service is exposed on all interfaces. Pair with a firewall rule or set `trust_cf_ip` appropriately.
+
+---
+
 ## ⚠️ Security Notes
 
 ### `session_secret.key`
@@ -335,6 +372,12 @@ All settings are changed through the web config page and **automatically saved**
 | `stagger_delay_direct` | `100` | Delay between batches in direct mode (ms) |
 | `dns_mode` | `system` | DNS mode: `system` / `dnspython` / `custom` |
 | `dns_custom` | empty | Custom DNS server(s), comma-separated |
+| `dns_use_tcp` | `false` | Force DNS queries over TCP port 53 (applies to `dnspython` and `custom` modes; no effect on system DNS mode) |
+| `listen_ipv4` | `global` | IPv4 listen mode: `global` (0.0.0.0) / `local` (127.0.0.1) / `custom` (specific address) / `disabled` |
+| `listen_ipv4_custom` | empty | Custom IPv4 address when `listen_ipv4=custom` |
+| `listen_ipv6` | `global` | IPv6 listen mode: `global` ([::]) / `local` ([::1]) / `custom` (specific address) / `disabled` |
+| `listen_ipv6_custom` | empty | Custom IPv6 address when `listen_ipv6=custom` |
+| `refresh_geo_on_restart` | `true` | Auto-repair unknown IP geolocations on startup (background thread, starts after 10s, rate-limited to 0.5s/IP) |
 | `tracker_stat_period` | `24h` | Uptime window for monitor list: `24h` / `7d` / `30d` |
 | `dashboard_stat_period` | `24h` | Default uptime period for dashboard ranking (can be switched manually) |
 | `cache_history` | `true` | Persist uptime history to `history.json` across restarts |
@@ -480,6 +523,24 @@ Set the environment variable `HTTPS_ENABLED=1` before starting the app. The app 
 
 **17. How many failed logins trigger a lockout?**
 10 consecutive failed login attempts from the same IP trigger a 15-minute lockout. During lockout, all login requests from that IP return 429. The lockout expires automatically after 15 minutes, or resets if the app is restarted.
+
+**18. DNS keeps failing and flooding the console — what can I do?**
+The app has built-in log deduplication: if the same domain fails DNS resolution, the error is only printed **once** to the console and Web log. Subsequent polling rounds are silently skipped. The `DNS ERR` badge in the Web UI still updates normally. Once the domain resolves successfully, the suppression is cleared — the next failure will be reported again. To test DNS reachability manually:
+```bash
+# Test over UDP (default)
+nslookup retracker.lanta.me 8.8.8.8
+
+# Test over TCP port 53 (matches behavior when dns_use_tcp is enabled)
+nslookup retracker.lanta.me 8.8.8.8 -vc
+```
+
+**19. UDP DNS packet loss is high in mainland China — how do I fix it?**
+In Config → DNS Settings:
+1. Set **Resolve Mode** to **Custom**
+2. Enter your DNS servers, e.g. `8.8.8.8,8.8.4.4`
+3. Check **Force TCP port 53 queries**
+
+TCP port 53 is far more reliable than UDP in China's network environment — GFW interference frequently drops UDP DNS packets. Switching to TCP typically resolves resolution failures immediately. You can also force TCP for individual servers only using the `tcp://8.8.8.8` prefix format (effective when the global toggle is off).
 
 ---
 

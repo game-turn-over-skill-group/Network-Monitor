@@ -2690,6 +2690,20 @@
                                    @blur="saveCfg">
                             <div class="form-text">{{ t('config.dnsCustomDesc') }}</div>
                         </div>
+                        <!-- DNS TCP 模式开关 -->
+                        <div class="col-md-12">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox"
+                                       v-model="cfg.dns_use_tcp"
+                                       :disabled="cfg.dns_mode === 'system'"
+                                       @change="saveCfg"
+                                       id="dnsTcpSwitch">
+                                <label class="form-check-label" for="dnsTcpSwitch">
+                                    {{ t('config.dnsTcpLabel') }}
+                                </label>
+                            </div>
+                            <div class="form-text">{{ t('config.dnsTcpDesc') }}</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3067,6 +3081,7 @@ createApp({
             udp_proxy: '',
             dns_mode: 'system',
             dns_custom: '8.8.8.8',
+            dns_use_tcp: false,
             max_log_entries: 1000,
             max_log_info: 1000,
             max_log_success: 1000,
@@ -3701,6 +3716,7 @@ createApp({
                     udp_proxy:cfg.value.udp_proxy,
                     dns_mode:cfg.value.dns_mode,
                     dns_custom:cfg.value.dns_custom,
+                    dns_use_tcp:cfg.value.dns_use_tcp||false,
                     max_log_entries:cfg.value.max_log_entries,max_log_info:cfg.value.max_log_info,max_log_success:cfg.value.max_log_success,max_log_error:cfg.value.max_log_error,
                     page_refresh_ms:cfg.value.page_refresh_ms,
                     tracker_stat_period:cfg.value.tracker_stat_period,
