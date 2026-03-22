@@ -1728,38 +1728,62 @@ def _query_single_server(domain: str, rtype: str, srv_ip: str, use_tcp: bool, ti
         )
         return None  # 告知调用方此服务器本次失败，继续尝试其他服务器
 
+# ── DNS 轮询状态（全局，所有 domain 共用，线程安全） ─────────────────────
+# 记录"当前轮到哪台服务器"的游标，原子递增取模实现 Round-Robin。
+# 各 domain 的每次查询都从同一个游标出发，天然分散请求到不同服务器，
+# 不会像 Racing 那样同时向所有服务器发包，大幅减少对运营商 TCP 53 的并发冲击。
+_dns_rr_index  = 0
+_dns_rr_lock   = threading.Lock()
+
+def _dns_rr_next(count: int) -> int:
+    """返回本次查询的起始服务器下标（Round-Robin），线程安全。"""
+    global _dns_rr_index
+    with _dns_rr_lock:
+        idx = _dns_rr_index % count
+        _dns_rr_index = (_dns_rr_index + 1) % count
+        return idx
+
 def _resolve_custom(domain: str):
-    """模式3: 自定义DNS服务器 —— Racing 并发模式。
-    对每台服务器同时发起查询（A 和 AAAA 各自独立 race），取最快成功返回的结果。
-    某台服务器超时不影响其他服务器，整体延迟 = 最快那台的延迟，而非所有之和。
+    """模式3: 自定义DNS服务器 —— 轮询负载均衡 + 顺序故障转移。
+
+    策略说明：
+      1. 每次查询从 Round-Robin 游标选出"本轮首选"服务器，只向它发一次请求。
+      2. 若首选服务器超时/失败，依次尝试列表中的其余服务器（故障转移）。
+      3. 遇到 NXDOMAIN/NoAnswer 视为"域名不存在的确定答案"，直接停止不再尝试。
+      4. 全部服务器均失败时返回空列表，由上层 resolve() 处理日志和 dns_error 标记。
+
+    相比 Racing 模式的优势：
+      - 每次只向 1 台服务器发包，不会因并发请求触发运营商对 TCP 53 的限速/丢包。
+      - Round-Robin 让请求均匀分散到各服务器，单台压力低，国内/国外混用时效果好。
+      - 某台挂掉后自动切换，不影响整体可用性。
     """
-    servers  = _parse_dns_servers()
-    timeout  = float(CONFIG.get('timeout', 5))
-    ips      = []
-    seen     = set()
+    servers = _parse_dns_servers()
+    timeout = float(CONFIG.get('timeout', 5))
+    count   = len(servers)
+    ips     = []
+    seen    = set()
 
     for rtype, ver in [('A', 'ipv4'), ('AAAA', 'ipv6')]:
-        result_ips = None   # None=还没赢家, []=NXDOMAIN/NoAnswer, [str,...]=成功
+        start = _dns_rr_next(count)          # Round-Robin 起始下标
+        result_ips = None
 
-        with ThreadPoolExecutor(max_workers=len(servers)) as ex:
-            future_to_srv = {
-                ex.submit(_query_single_server, domain, rtype, srv, tcp, timeout): srv
-                for srv, tcp in servers
-            }
-            for fut in as_completed(future_to_srv, timeout=timeout + 0.5):
-                res = fut.result()
-                if res is None:
-                    # 此服务器超时/失败，继续等其他服务器
-                    continue
-                if res:
-                    # 有结果，赢了
-                    result_ips = res
-                    break
-                else:
-                    # NXDOMAIN/NoAnswer，也是一种确定答案（域名不存在）
-                    if result_ips is None:
-                        result_ips = []
-                    # 不 break，继续等——万一其他服务器能解析出来
+        for i in range(count):
+            srv_ip, use_tcp = servers[(start + i) % count]
+            res = _query_single_server(domain, rtype, srv_ip, use_tcp, timeout)
+
+            if res is None:
+                # 此服务器超时/网络错误，日志已在 _query_single_server 里记录
+                # 继续尝试下一台（故障转移）
+                continue
+
+            if res:
+                # 查询成功，有 IP 记录
+                result_ips = res
+                break
+
+            # res == []：NXDOMAIN / NoAnswer —— 域名不存在，确定性结果，无需再问其他服务器
+            result_ips = []
+            break
 
         if result_ips:
             for ip in result_ips:
