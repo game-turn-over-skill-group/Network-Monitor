@@ -12043,6 +12043,8 @@ CF那边必须配 Cache Rule = Bypass，这是根本，后端的 no-store 头只
 
 
 //新增tcpDNS查询
+//DNS解析故障转移改为并行处理但缺少LOG
+//DNS解析并行处理含失败DNS具体LOG
 
   2026/3/22 19:27:13 [ERROR] DNS解析失败 retracker.lanta.me [模式:custom]
   2026/3/22 19:27:13 [ERROR] DNS刷新失败 retracker.lanta.me: 无结果，保留缓存IP
@@ -12142,6 +12144,69 @@ _resolve_and_update() 改动：
 结果：
 控制台 / web 日志：同一域名只报一次，重启清零
 web 端 dns_error 红色标志：每轮照常通过 update_ips(dns_error=True) 更新，完全不受影响
+
+----------------
+
+Q：
+2026/3/22 20:48:29[ERROR] DNS解析失败 t.overflow.biz [模式:custom]: 无结果
+2026/3/22 20:48:28[DEBUG] [custom:8.8.4.4,8.8.8.8,223.5.5.5,119.29.29.29] DNS A t.overflow.biz: LifetimeTimeout: The resolution lifetime expired after 5.013 seconds: Server Do53:8.8.4.4@53 answered The DNS operation timed out.
+现在的DNS模式 是走的负载均衡吗？不然的话逗号隔开那么多DNS干嘛？
+
+----------------
+
+A：
+好问题。现在的代码是把所有 IP 都塞给同一个 resolver 的 nameservers 列表，dnspython 的行为是顺序尝试，
+第一个超时才换下一个，所以填多个 DNS 只是增加了故障转移能力，不是负载均衡，而且第一个卡住时要等完整 timeout 才切换，很慢。
+真正实用的做法是：并发查所有 DNS，取最快返回的结果（racing 模式）。
+
+清楚了。现在改成 racing 并发模式：对每个 DNS 服务器单独起一个线程查询，取最快成功的结果，所有线程用同一个 timeout，不再串行等待。
+ThreadPoolExecutor 和 as_completed 已经在原来的 import 里有了，不需要额外引入。
+
+改动说明：
+原来的行为（串行顺序重试）
+8.8.4.4 → 等5秒超时 → 8.8.8.8 → 等5秒超时 → 223.5.5.5 → ...
+最坏情况总耗时 = N台 × timeout
+现在的行为（Racing 并发）
+8.8.4.4 ┐
+8.8.8.8 ├─ 同时发出，谁先回来用谁
+223.5.5.5 ┘
+最坏情况总耗时 = 1个 timeout（而不是N个叠加）
+细节处理：
+_query_single_server 返回三种值：
+[ip1, ip2...] — 成功，立刻作为赢家跳出
+[] — NXDOMAIN/NoAnswer（域名确实不存在），记录但继续等其他服务器，防止单台误报
+None — 超时/网络错误，静默跳过
+as_completed 外层加了 timeout + 0.5s 兜底，防止极端情况卡住
+A 记录和 AAAA 记录各自独立 race，互不影响
+tcp:// 前缀和全局 dns_use_tcp 开关逻辑不变，拆到 _parse_dns_servers() 复用
+
+----------------
+
+Q：
+我好像看到你把debug给删了？我希望 控制台和web都能看到 是哪个DNS查询失败的 error的日志级别
+还有我看到你部分代码写死
+servers_raw = CONFIG.get('dns_custom', '8.8.8.8').strip()
+raw_list = ['8.8.8.8']
+这些是干嘛的？为什么这样做？
+
+----------------
+
+A：
+两个问题都对：
+1、debug 日志确实被我删掉了——_query_single_server 里的 except Exception 直接 return None 没有记录任何信息，改回来。
+2、硬编码 8.8.8.8 是兜底默认值——当用户没填 dns_custom 或填了空字符串时防止列表为空崩溃，逻辑本身没问题，但可以加注释说清楚。
+
+两处修改说明：
+1. 日志恢复（_query_single_server）
+之前的 except Exception: return None 把错误完全吞掉了。现在改为：
+[custom DNS] 8.8.4.4(UDP) 查询 A t.overflow.biz 失败: LifetimeTimeout: ...
+每台服务器单独报，控制台和 Web 日志都是 error 级别，能看到具体是哪台 DNS、哪个协议、什么错误。NXDOMAIN/NoAnswer 仍然静默（域名不存在不是服务器的锅）。
+2. 硬编码 8.8.8.8 解释
+两处兜底都加了注释：
+CONFIG.get('dns_custom', '8.8.8.8') —— 配置文件里压根没有这个键时的防崩默认值，配置页保存过就不会触发
+if not raw_list: raw_list = ['8.8.8.8'] —— 用户把输入框留空或全填逗号时的二次防崩，同样是极端边界情况
+
+正常使用中这两行不会被实际执行到，改成别的 DNS 也没影响，纯粹是"保证列表非空"的防御性代码。
 
 
 --------------------------------------

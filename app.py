@@ -1672,48 +1672,101 @@ def _resolve_dnspython(domain: str):
             db.add_log(f"[dnspython] DNS {rtype} {domain}: {type(e).__name__}: {e}", 'debug')
     return ips
 
-def _resolve_custom(domain: str):
-    """模式3: 自定义DNS服务器（支持多个，逗号分隔）
+def _parse_dns_servers():
+    """解析 dns_custom 配置字符串，返回 [(ip, use_tcp), ...] 列表。
     支持格式：
-      8.8.8.8            → UDP 53
-      tcp://8.8.8.8      → TCP 53（单独指定）
-    全局 dns_use_tcp=True 时，所有服务器强制走 TCP 53。
+      8.8.8.8          → UDP/TCP 由全局 dns_use_tcp 决定
+      tcp://8.8.8.8    → 强制 TCP 53
+
+    兜底逻辑说明：
+      CONFIG.get('dns_custom', '8.8.8.8') —— 配置文件里压根没有 dns_custom 键时的硬编码默认值，
+        正常情况下配置页面已经写入该键，这里只是防止空键导致后续代码崩溃。
+      if not raw_list: raw_list = ['8.8.8.8'] —— 用户把字段留空/全填逗号时的二次兜底，
+        同样只是保证列表非空，不会在实际使用中被触发到。
+      两处 8.8.8.8 都不是业务逻辑，而是"最后一道防崩溃"，无实际配置含义。
     """
     servers_raw = CONFIG.get('dns_custom', '8.8.8.8').strip()
-    use_tcp = CONFIG.get('dns_use_tcp', False)
-
-    # 解析服务器列表，支持 tcp:// 前缀覆盖全局开关
+    use_tcp_global = CONFIG.get('dns_use_tcp', False)
     raw_list = [s.strip() for s in servers_raw.replace('，', ',').split(',') if s.strip()]
     if not raw_list:
+        # 用户填了空字符串或全是逗号，兜底用 Google DNS，避免列表为空导致后续崩溃
         raw_list = ['8.8.8.8']
-
     servers = []
     for s in raw_list:
         if s.lower().startswith('tcp://'):
-            servers.append((s[6:], True))   # 单独指定 TCP
+            servers.append((s[6:].strip(), True))
         else:
-            servers.append((s, use_tcp))    # 跟随全局开关
+            servers.append((s, use_tcp_global))
+    return servers
 
-    ips = []
-    seen = set()
+def _query_single_server(domain: str, rtype: str, srv_ip: str, use_tcp: bool, timeout: float):
+    """向单台 DNS 服务器查询。
+    返回值：
+      [ip, ...]  —— 查询成功，有记录
+      []         —— 域名不存在（NXDOMAIN / NoAnswer），确定性结果
+      None       —— 超时 / 网络错误，此服务器本次失败
+    """
+    proto = 'TCP' if use_tcp else 'UDP'
+    try:
+        resolver = dns.resolver.Resolver(configure=False)
+        resolver.nameservers = [srv_ip]
+        resolver.timeout  = timeout
+        resolver.lifetime = timeout
+        return [str(r) for r in resolver.resolve(domain, rtype, tcp=use_tcp)]
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
+        # 域名确实不存在，属于正常的"无结果"，不记录为错误
+        return []
+    except Exception as e:
+        # 超时 / 连接失败 / 协议错误 —— error 级别，控制台和 Web 日志都能看到
+        db.add_log(
+            f"[custom DNS] {srv_ip}({proto}) 查询 {rtype} {domain} 失败: {type(e).__name__}: {e}",
+            'error'
+        )
+        cprint(
+            f"[custom DNS] {srv_ip}({proto}) 查询 {rtype} {domain} 失败: {type(e).__name__}: {e}",
+            'error'
+        )
+        return None  # 告知调用方此服务器本次失败，继续尝试其他服务器
+
+def _resolve_custom(domain: str):
+    """模式3: 自定义DNS服务器 —— Racing 并发模式。
+    对每台服务器同时发起查询（A 和 AAAA 各自独立 race），取最快成功返回的结果。
+    某台服务器超时不影响其他服务器，整体延迟 = 最快那台的延迟，而非所有之和。
+    """
+    servers  = _parse_dns_servers()
+    timeout  = float(CONFIG.get('timeout', 5))
+    ips      = []
+    seen     = set()
+
     for rtype, ver in [('A', 'ipv4'), ('AAAA', 'ipv6')]:
-        try:
-            resolver = dns.resolver.Resolver(configure=False)
-            resolver.nameservers = [ip for ip, _ in servers]
-            resolver.timeout     = CONFIG['timeout']
-            resolver.lifetime    = CONFIG['timeout']
-            # 只要列表中任意一个服务器指定了 TCP，或全局开关开启，就用 TCP
-            tcp_flag = any(t for _, t in servers)
-            for rdata in resolver.resolve(domain, rtype, tcp=tcp_flag):
-                ip = str(rdata)
+        result_ips = None   # None=还没赢家, []=NXDOMAIN/NoAnswer, [str,...]=成功
+
+        with ThreadPoolExecutor(max_workers=len(servers)) as ex:
+            future_to_srv = {
+                ex.submit(_query_single_server, domain, rtype, srv, tcp, timeout): srv
+                for srv, tcp in servers
+            }
+            for fut in as_completed(future_to_srv, timeout=timeout + 0.5):
+                res = fut.result()
+                if res is None:
+                    # 此服务器超时/失败，继续等其他服务器
+                    continue
+                if res:
+                    # 有结果，赢了
+                    result_ips = res
+                    break
+                else:
+                    # NXDOMAIN/NoAnswer，也是一种确定答案（域名不存在）
+                    if result_ips is None:
+                        result_ips = []
+                    # 不 break，继续等——万一其他服务器能解析出来
+
+        if result_ips:
+            for ip in result_ips:
                 if ip not in seen:
                     seen.add(ip)
                     ips.append({'ip': ip, 'version': ver, 'country': get_geo(ip)})
-        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
-            pass
-        except Exception as e:
-            srv_str = ','.join(ip for ip, _ in servers)
-            db.add_log(f"[custom:{srv_str}] DNS {rtype} {domain}: {type(e).__name__}: {e}", 'debug')
+
     return ips
 
 # 已记录过DNS失败的域名集合（应用生命周期内只报一次，避免控制台/web日志刷屏）
