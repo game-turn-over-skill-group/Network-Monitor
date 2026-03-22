@@ -11419,13 +11419,109 @@ Viewer 用户的旧 session 里根本没有 csrf_token 这个 key（只有在页
 然后是 快速搜索的 可用率红色和绿色的字体 好像太粗了 改成 可用率排行榜那样的 红色和绿色 百分比
 还有这个快速搜索和监控列表 域名名称的这个黑体字 似乎太粗了？改细一点？
 
-
 ----------------
 
-
+四处修改汇总：
+1. up-yellow 颜色修复（所有主题）
+之前用 color: var(--warn)，日间模式下 --warn 是 #d97706（深橙褐），在浅黄背景上显示不自然。
+改为固定色 #f59e0b（明亮琥珀黄），和 up-green/up-red 一样用固定色，不跟主题色走。
+2. 日间模式 badge 颜色优化
+绿色 #059669、黄色 #d97706、红色 #e53e3e，三色都适当调亮，在日间浅色背景上更自然好看，不再偏深偏暗。
+3. badge-up 字重减细
+font-weight: 600 → 500，和排行榜里的可用率样式感觉统一，不再过粗。
+4. 域名字重减细
+.domain-name 和 .tl-domain-name 的 font-weight: 600 → 500，快速搜索和监控列表的域名字体变细，视觉上更轻盈。
 
 
 --------------------------------------
+
+
+//新增API查询域名级显示活跃IP数据+修复监控列表IP级暂停无数据时不显示暂停状态
+
+2个问题
+1、API 希望域名级查询支持 返回当前域名激活状态dns解析的 所有IP情况 （不包含已暂停和历史DNS解析的IP）
+2、监控列表 已暂停的IP 似乎未登录用户和普通用户 在还没数据的被暂停的IP 看不到任何暂停的提示
+
+----------------
+
+两个文件都修好了：
+问题2（前端）— IP暂停无历史数据空白
+原来 IP 级暂停的三个显示元素全都加了 v-if="ip.ip_uptime !== null && ip.ip_uptime !== undefined" 守卫，没数据时三个都不渲染导致完全空白。
+现在改为：⏸ 图标无条件显示，可用率百分比仍然只在有数据时显示，Paused 文字无条件显示。
+效果：无数据时显示 ⏸ Paused，有数据时显示 ⏸ 46.7% Paused。
+
+问题1（后端）— /api/query 支持 list=ips
+新增 ips 字段，调用方式：
+GET /api/query?host=example.com&list=status,uptime,ips
+GET /api/query?host=example.com&list=status,uptime,ips,location,checked
+返回格式（强制 JSON）：
+{
+  "host": "example.com",
+  "status": "Online",
+  "uptime": "95.3%",
+  "ips": [
+    {"ip": "1.2.3.4", "version": "ipv4", "status": "online", "latency": 42, "uptime": 96.1},
+    {"ip": "2001::1", "version": "ipv6", "status": "online", "latency": 38, "uptime": 94.5}
+  ]
+}
+
+只返回未暂停、未移除的激活 IP，每个 IP 包含状态、延迟、可用率，加上 location/checked 字段（如果请求了的话）。
+
+----------------
+
+C:\Users\Administrator\Desktop>curl -x socks://127.0.0.1:42416 "https://test.rer.lol/api/query?host=tracker.zhuqiy.com"
+tracker.zhuqiy.com  Online  100.0%  183ms  2026-03-22T13:24:33.034150
+
+C:\Users\Administrator\Desktop>curl -x socks://127.0.0.1:42416 "https://test.rer.lol/api/query?host=tracker.zhuqiy.com&list=ips"
+{"host":"tracker.zhuqiy.com","ips":[{"ip":"2606:4700:3035::ac43:8d1a","latency":228,"status":"online","uptime":100.0,"version":"ipv6"},{"ip":"2606:4700:3034::6815:36ba","latency":262,"status":"online","uptime":100.0,"version":"ipv6"},{"ip":"45.40.150.104","latency":351,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.153.210","latency":193,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.150.237","latency":3369,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.152.236","latency":269,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.153.76","latency":173,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.153.89","latency":201,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"31.56.27.128","latency":351,"status":"online","uptime":98.3,"version":"ipv4"},{"ip":"209.206.51.55","latency":-1,"status":"offline","uptime":97.8,"version":"ipv4"},{"ip":"2.58.104.10","latency":184,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.155.50","latency":184,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.155.24","latency":199,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.155.30","latency":183,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"209.102.207.178","latency":-1,"status":"offline","uptime":99.0,"version":"ipv4"},{"ip":"209.102.207.68","latency":676,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"208.86.168.29","latency":227,"status":"online","uptime":100.0,"version":"ipv4"}],"status":"Online"}
+
+C:\Users\Administrator\Desktop>curl -x socks://127.0.0.1:42416 "https://test.rer.lol/api/query?host=tracker.zhuqiy.com&list=ips&type=txt"
+{"host":"tracker.zhuqiy.com","ips":[{"ip":"2606:4700:3035::ac43:8d1a","latency":228,"status":"online","uptime":100.0,"version":"ipv6"},{"ip":"2606:4700:3034::6815:36ba","latency":262,"status":"online","uptime":100.0,"version":"ipv6"},{"ip":"45.40.150.104","latency":351,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.153.210","latency":193,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.150.237","latency":3369,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.152.236","latency":269,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.153.76","latency":173,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.153.89","latency":201,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"31.56.27.128","latency":351,"status":"online","uptime":98.3,"version":"ipv4"},{"ip":"209.206.51.55","latency":-1,"status":"offline","uptime":97.8,"version":"ipv4"},{"ip":"2.58.104.10","latency":184,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.155.50","latency":184,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.155.24","latency":199,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"45.40.155.30","latency":183,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"209.102.207.178","latency":-1,"status":"offline","uptime":99.0,"version":"ipv4"},{"ip":"209.102.207.68","latency":676,"status":"online","uptime":100.0,"version":"ipv4"},{"ip":"208.86.168.29","latency":227,"status":"online","uptime":100.0,"version":"ipv4"}],"status":"Online"}
+我希望域名查询 不带ips时 就能查询完整的 当前域名下所有激活状态的IP数据
+而且现在的带了ips的格式为txt的数据格式也不对 我觉得没必要新增ips参数 你觉得呢
+查询域名 就应该包含 当前域名的数据 + 所有该域名下的激活IP的数据
+
+----------------
+
+同意，不需要 ips 参数，域名查询直接默认返回所有激活IP数据，简洁清晰。type=txt 时每行一个IP。
+
+改完后的行为：
+域名查询（?host=tracker.zhuqiy.com）
+JSON 默认自动包含 ips 数组，无需任何额外参数：
+{
+  "host": "tracker.zhuqiy.com",
+  "status": "Online",
+  "uptime": "99.2%",
+  "delay": "183ms",
+  "checked": "...",
+  "ips": [
+    {"ip": "45.40.150.104", "version": "ipv4", "status": "online", "latency": 351, "uptime": 100.0},
+    {"ip": "2606:4700::1",  "version": "ipv6", "status": "online", "latency": 228, "uptime": 100.0},
+    ...
+  ]
+}
+```
+
+txt 格式第一行是域名汇总，后续每行一个IP：
+```
+tracker.zhuqiy.com  Online  99.2%  183ms  2026-03-22T13:24:33
+45.40.150.104  online  100.0%  351ms
+2606:4700::1   online  100.0%  228ms
+209.206.51.55  offline  97.8%  -
+...
+
+IP直接查询（?host=45.40.150.104） 行为不变，单行返回该IP的数据，无 ips 字段。
+
+
+--------------------------------------
+
+
+
+
+
+
+
+
 
 
 

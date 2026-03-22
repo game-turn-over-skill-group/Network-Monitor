@@ -3317,8 +3317,10 @@ def api_query():
     对外开放的单域名/IP查询接口。
     参数:
         ?host=<域名或IP>
-        &list=status,uptime,delay,location,checked   (可选，默认 status,uptime,delay,checked)
+        &list=status,uptime,delay,location,checked  (可选，默认 status,uptime,delay,checked)
         &type=json|txt  (可选；只带host时默认txt，带list时默认json，显式指定优先)
+    域名查询时，JSON 中 ips 字段自动包含所有激活IP（非暂停、非移除）的详情；
+    txt 格式每行一个IP：ip  status  uptime  delay  [location]  [checked]
     速率限制: 同IP每分钟66次
     """
     client_ip = _client_ip()
@@ -3336,7 +3338,7 @@ def api_query():
     list_raw  = request.args.get('list', '').lower()
     type_raw  = request.args.get('type', '').lower()
     has_extra = bool(list_raw or type_raw)
-     # 字段集合
+    # 字段集合（ips 不作为独立字段，域名查询时自动附带）
     VALID = {'status', 'uptime', 'delay', 'location', 'checked'}
     if list_raw:
         fields = {f.strip() for f in list_raw.split(',') if f.strip()} & VALID
@@ -3350,14 +3352,17 @@ def api_query():
     elif not has_extra:      fmt = 'txt'
     else:                    fmt = 'json'
     # 查找匹配的 tracker
-    matched_ip = None; matched_tr = None
+    matched_ip = None; matched_tr = None; is_domain = False
     with db.lock:
         all_tr = dict(db.trackers)
     # 优先精确匹配域名
     if host in all_tr:
         matched_tr = all_tr[host]
-        # 选代表IP（优先online，否则第一个非removed）
-        active = [ip for ip in matched_tr.get('ips', []) if not ip.get('removed')]
+        is_domain  = True
+        # 选代表IP（优先online且未暂停，否则第一个非removed非paused）
+        active = [ip for ip in matched_tr.get('ips', []) if not ip.get('removed') and not ip.get('paused')]
+        if not active:
+            active = [ip for ip in matched_tr.get('ips', []) if not ip.get('removed')]
         online = [ip for ip in active if ip.get('status') == 'online']
         matched_ip = online[0] if online else (active[0] if active else None)
     else:
@@ -3372,55 +3377,93 @@ def api_query():
             from flask import Response as _R
             return _R(f'{host}  Not Found\n', status=404, mimetype='text/plain')
         return jsonify({'error': f'Host not found: {host}', 'host': host}), 404
-    # 构建状态
+    # 构建域名级状态
     period = CONFIG.get('tracker_stat_period', '24h')
-    pkmap = {'24h': 'uptime_24h', '7d': 'uptime_7d', '30d': 'uptime_30d'}
-    # 域名/IP 级暂停状态
-    is_paused = matched_tr.get('paused') or (matched_ip and matched_ip.get('paused'))
+    secs   = HISTORY_WINDOWS.get(period, 86400)
+    is_paused  = matched_tr.get('paused') or (matched_ip and matched_ip.get('paused'))
     raw_status = matched_ip.get('status', 'unknown') if matched_ip else 'unknown'
-    if is_paused:
-        status_val = 'Paused'
-    elif raw_status == 'online':
-        status_val = 'Online'
-    elif raw_status == 'offline':
-        status_val = 'Offline'
-    else:
-        status_val = 'Unknown'
+    if is_paused:       status_val = 'Paused'
+    elif raw_status == 'online':  status_val = 'Online'
+    elif raw_status == 'offline': status_val = 'Offline'
+    else:                         status_val = 'Unknown'
     result = {'host': host}
     if 'status' in fields:
         result['status'] = status_val
     if 'uptime' in fields:
-        secs = HISTORY_WINDOWS.get(period, 86400)
-        if host in all_tr:
-            # 查询目标是域名：排除已暂停IP后汇总
-            tr_paused = matched_tr.get('paused', False)
+        if is_domain:
+            tr_paused  = matched_tr.get('paused', False)
             paused_set = set() if tr_paused else {
                 ip.get('ip','') for ip in matched_tr.get('ips', [])
                 if ip.get('paused') and not ip.get('removed')
             }
             s = hdb.get_domain_summary(host, secs, excluded_ips=paused_set if paused_set else None)
-            uptime = round(s['ok'] / s['total'] * 100, 1) if s['total'] > 0 else None
         else:
-            # 查询目标是 IP：返回该 IP 自己的可用率
-            domain_key = matched_tr.get('domain', '')
+            domain_key = next((d for d, t in all_tr.items() if any(i.get('ip') == host for i in t.get('ips', []))), '')
             s = hdb.get_ip_summary(domain_key, host, secs)
-            uptime = round(s['ok'] / s['total'] * 100, 1) if s['total'] > 0 else None
+        uptime = round(s['ok'] / s['total'] * 100, 1) if s['total'] > 0 else None
         result['uptime'] = f'{uptime}%' if uptime is not None else None
     if 'delay' in fields:
         lat = matched_ip.get('latency', -1) if matched_ip else -1
         result['delay'] = f'{lat}ms' if isinstance(lat, (int, float)) and lat >= 0 else None
     if 'location' in fields:
-        co = (matched_ip.get('country') or {}) if matched_ip else {}
+        co    = (matched_ip.get('country') or {}) if matched_ip else {}
         parts = [p for p in [co.get('country'), co.get('isp')] if p]
         result['location'] = ' · '.join(parts) if parts else None
     if 'checked' in fields:
         result['checked'] = (matched_ip.get('last_check') or None) if matched_ip else None
+
+    # ── 域名查询：附带所有激活IP的详情 ──────────────────────────
+    if is_domain:
+        ip_rows = []
+        for ipi in matched_tr.get('ips', []):
+            if ipi.get('removed') or ipi.get('paused'):
+                continue
+            s_ip  = hdb.get_ip_summary(host, ipi.get('ip', ''), secs)
+            up_ip = round(s_ip['ok'] / s_ip['total'] * 100, 1) if s_ip['total'] > 0 else None
+            lat_i = ipi.get('latency', -1)
+            row   = {
+                'ip':      ipi.get('ip'),
+                'version': ipi.get('version', 'ipv4'),
+                'status':  ipi.get('status', 'unknown'),
+                'latency': lat_i,
+                'uptime':  up_ip,
+            }
+            if 'location' in fields:
+                co_i  = ipi.get('country') or {}
+                pts   = [p for p in [co_i.get('country'), co_i.get('isp')] if p]
+                row['location'] = ' · '.join(pts) if pts else None
+            if 'checked' in fields:
+                row['checked'] = ipi.get('last_check') or None
+            ip_rows.append(row)
+        result['ips'] = ip_rows
+
+    # ── 输出 ──────────────────────────────────────────────────────
     if fmt == 'txt':
         from flask import Response as _R
-        col_order = ['status', 'uptime', 'delay', 'location', 'checked']
-        parts = [host] + [str(result[k]) if result.get(k) is not None else '-'
-                          for k in col_order if k in result]
-        return _R('  '.join(parts) + '\n', mimetype='text/plain',
+        lines = []
+        if is_domain:
+            # 第一行：域名汇总
+            col_order = ['status', 'uptime', 'delay', 'location', 'checked']
+            summary_parts = [host] + [str(result[k]) if result.get(k) is not None else '-'
+                                      for k in col_order if k in result]
+            lines.append('  '.join(summary_parts))
+            # 后续行：每个激活IP一行
+            for row in result.get('ips', []):
+                ip_parts = [row['ip'],
+                            row.get('status', 'unknown'),
+                            (f"{row['uptime']}%" if row.get('uptime') is not None else '-'),
+                            (f"{row['latency']}ms" if isinstance(row.get('latency'), (int, float)) and row['latency'] >= 0 else '-')]
+                if 'location' in fields:
+                    ip_parts.append(row.get('location') or '-')
+                if 'checked' in fields:
+                    ip_parts.append(str(row.get('checked')) if row.get('checked') else '-')
+                lines.append('  '.join(ip_parts))
+        else:
+            col_order = ['status', 'uptime', 'delay', 'location', 'checked']
+            parts = [host] + [str(result[k]) if result.get(k) is not None else '-'
+                              for k in col_order if k in result]
+            lines.append('  '.join(parts))
+        return _R('\n'.join(lines) + '\n', mimetype='text/plain',
                   headers={'Cache-Control': 'no-store'})
     return jsonify(result)
 

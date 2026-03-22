@@ -2052,7 +2052,7 @@
                         <thead><tr><th>{{ t('monitor.apiColParam') }}</th><th>{{ t('monitor.apiColValues') }}</th><th>{{ t('monitor.apiColDefault') }}</th><th>{{ t('monitor.apiColDesc') }}</th></tr></thead>
                         <tbody>
                             <tr><td><code>host</code></td><td><i style="color:#64748b;">domain / IP</i></td><td>—</td><td>{{ t('monitor.apiParamHostDesc') }} <span style="color:#f87171;">*</span></td></tr>
-                            <tr><td><code>list</code></td><td><code>status</code> <code>uptime</code> <code>delay</code> <code>location</code> <code>checked</code></td><td><code>status,uptime,delay,checked</code></td><td>{{ t('monitor.apiParamList') }}</td></tr>
+                            <tr><td><code>list</code></td><td><code>status</code> <code>uptime</code> <code>delay</code> <code>location</code> <code>checked</code> <code>ips</code></td><td><code>status,uptime,delay,checked</code></td><td>{{ t('monitor.apiParamList') }}</td></tr>
                             <tr><td><code>type</code></td><td><code>txt</code> <code>json</code></td><td><code>json</code> <td>{{ t('monitor.apiParamTypeDesc') }}</td> <span style="color:#64748b;font-size:.75rem;">(host only→txt)</span></td></tr>
                         </tbody>
                     </table>
@@ -2165,14 +2165,12 @@
                                             <span v-else class="badge-up up-yellow" style="font-size:.72rem;">?</span>
                                         </template>
                                         <template v-else-if="ip.paused">
-                                            <!-- IP级暂停：显示最后可用率+多语言文字 -->
-                                            <span v-if="ip.ip_uptime !== null && ip.ip_uptime !== undefined"
-                                                  class="ip-status-dot dot-unk" style="color:#fbbf24;font-size:.7rem;">⏸︎</span>
+                                            <!-- IP级暂停：显示最后可用率+多语言文字，无数据也显示暂停标识 -->
+                                            <span class="ip-status-dot dot-unk" style="color:#fbbf24;font-size:.7rem;">⏸︎</span>
                                             <span v-if="ip.ip_uptime !== null && ip.ip_uptime !== undefined"
                                                   class="badge-up up-yellow"
                                                   style="font-size:.72rem;margin-right:3px;">{{ ip.ip_uptime.toFixed(1) }}%</span>
-                                            <span v-if="ip.ip_uptime !== null && ip.ip_uptime !== undefined"
-                                                  style="font-size:.72rem;color:#fbbf24;">Paused</span>
+                                            <span style="font-size:.72rem;color:#fbbf24;">Paused</span>
                                         </template>
                                         <template v-else>
                                             <!-- ● / ✗ 状态标 -->
