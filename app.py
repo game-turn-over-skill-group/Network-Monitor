@@ -691,25 +691,25 @@ class TrackerDB:
         secs = HISTORY_WINDOWS.get(period, 86400)
         out = []
         with self.lock:
-            for domain, d in self.trackers.items():
-                if d.get('paused'):
+            for name, tr in self.trackers.items():
+                # name  = 外层key（备注），也是 history.json 的索引
+                # tr['domain'] = 实际连接地址（可以是IP或域名）
+                if tr.get('paused'):
                     continue
-                active_ips = [ip for ip in d['ips'] if not ip.get('removed') and not ip.get('paused')]
+                active_ips = [ip for ip in tr['ips'] if not ip.get('removed') and not ip.get('paused')]
                 if not active_ips: continue
-                # 已暂停IP不参与域名可用率计算
-                paused_ip_set = {ip.get('ip','') for ip in d['ips']
+                paused_ip_set = {ip.get('ip','') for ip in tr['ips']
                                  if ip.get('paused') and not ip.get('removed')}
-                s      = hdb.get_domain_summary(domain, secs, excluded_ips=paused_ip_set if paused_ip_set else None)
+                s      = hdb.get_domain_summary(name, secs, excluded_ips=paused_ip_set if paused_ip_set else None)
                 uptime = round(s['ok'] / s['total'] * 100, 2) if s['total'] > 0 else None
                 if uptime is None and min_uptime > 0: continue
                 if uptime is not None and uptime < min_uptime: continue
                 online_count  = sum(1 for ip in active_ips if ip.get('status') == 'online')
-                # 故障IP数：仅计活跃（非暂停）且offline的IP
                 offline_count = sum(1 for ip in active_ips if ip.get('status') == 'offline')
                 versions = list({ip.get('version','ipv4') for ip in active_ips})
-                actual_domain = d.get('domain', domain)  # 实际连接地址（可以是IP）
-                out.append({'domain': actual_domain, 'port': d.get('port',80),
-                            'protocol': d.get('protocol','tcp'),
+                domain = tr.get('domain', name)  # 实际连接地址（可以是IP）
+                out.append({'name': name, 'domain': domain, 'port': tr.get('port',80),
+                            'protocol': tr.get('protocol','tcp'),
                             'uptime': uptime,
                             'ip_count': len(active_ips),
                             'online_count': online_count,
@@ -2938,10 +2938,9 @@ def api_trackers_export():
         trackers_snap = {k: dict(v) for k, v in db.trackers.items()}
     lines = []
     for item in ranking:
-        key      = item['domain']   # 外层key(备注)
-        td       = trackers_snap.get(key, {})
-        # 实际连接地址：优先用 tr['domain'] 字段，fallback 外层key
-        domain   = td.get('domain', key)
+        name     = item['name']    # 外层key(备注)，用于查 trackers
+        domain   = item['domain']  # 实际连接地址，用于拼 URL
+        td       = trackers_snap.get(name, {})
         protocol = td.get('protocol', 'tcp')
         port     = td.get('port', 80)
         ips      = td.get('ips', [])
@@ -3422,9 +3421,10 @@ def api_ranking_export():
         trackers_snap = {k: dict(v) for k, v in db.trackers.items()}
     lines = []
     for item in ranking:
-        domain   = item['domain']
-        td       = trackers_snap.get(domain, {})
-        protocol = td.get('protocol', 'tcp')   # tcp / https / udp
+        name     = item['name']    # 外层key(备注)，用于查 trackers
+        domain   = item['domain']  # 实际连接地址，用于拼 URL
+        td       = trackers_snap.get(name, {})
+        protocol = td.get('protocol', 'tcp')
         port     = td.get('port', 80)
         ips      = td.get('ips', [])
         # 协议过滤

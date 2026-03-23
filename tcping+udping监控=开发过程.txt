@@ -12437,6 +12437,7 @@ Q22：新版 app.py 原子写入的原理解释，说明为什么不会再出现
 
 //停止解析的域名以备注+IP方式继续监控
 //修复可用率排行榜停止解析域名以IP方式显示
+//修复API不导出已停止解析域名的IP+梳理函数名词
 
 下面这个域名已经停止解析很久了 但是我知道他的历史IP还在工作 我不知道对方是出于什么原因 停止了
 我想把这个data配置读取部分 稍微做一些修整 第一个显示名称的地方 我觉得应该当作备注一样来显示？
@@ -12666,6 +12667,56 @@ out.append({'domain': actual_domain, ...})
 
 这样 /api/ranking/24h、/7d、/30d 返回的 domain 字段就直接是你设的实际IP，排行榜显示和导出按钮全部自动正确，前端完全不需要动。
 _save() 和 load() 的改动（之前已在）保证重启后 domain 字段不被 key 覆盖，这是基础前提。
+
+
+----------------
+
+Q：
+好像有bug 之前修复了可用率排行榜 导出 按钮 现在API好像不会有那些停止解析的IP了？
+看看是什么问题……奇了怪了
+
+----------------
+
+A：
+问题根因和修法：
+上次改了 get_ranking() 让它返回实际IP作为 domain，
+但两个导出函数（/api/tracker 和前端下载按钮）都在用 item['domain'] 去查 trackers_snap——
+而 trackers_snap 的 key 是 name（备注），
+用IP当key当然查不到，td 是空字典，ips 为空，全部被 online_ips 判断跳过，输出为空。
+这次的修法：
+get_ranking() 在返回的每条记录里增加一个 name 字段（保留原始外层key），
+两个导出函数改为用 item.get('name', domain) 查 trackers 拿 protocol/port/ips，
+用 item['domain']（实际IP）拼 URL。三处改动，逻辑完整自洽。
+
+----------------
+
+Q：
+我看你现在写的代码 感觉就不太对。。不易阅读
+name就是name  domain就是domain
+怎么你还混合用上了呢……你梳理一下逻辑 然后再改改
+
+----------------
+
+A：
+你说得对，现在确实乱了。梳理一下：
+trackers 字典：外层key = name（备注），tr['domain'] = 实际连接地址
+get_ranking() 遍历时的循环变量叫 domain 实际上是 name，这个命名本身就是混乱源头
+整个 get_ranking 和两个导出函数，统一用 name 表示外层key，domain 表示实际连接地址，捋清楚重写：
+现在逻辑清晰了，整体重写这三处，命名干净统一：
+干净了。但注意 /api/ranking 现在也会把 name 字段暴露给前端，前端 filteredRanking 里的显示逻辑要确认用的是 item.domain：
+前端完全用 item.domain 显示、筛选、导出，现在后端 get_ranking 返回的 item.domain 就是实际连接地址了，一切对齐，不需要改前端。
+
+现在三处的命名完全统一：
+get_ranking()
+循环变量 name, tr — 含义明确
+domain = tr.get('domain', name) — 一行得出实际地址
+返回结果同时带 name（查 trackers 用）和 domain（显示/URL 用）
+
+两个导出函数
+name = item['name'] → 查 trackers_snap
+domain = item['domain'] → 拼 URL
+
+前端不用改，item.domain 直接就是实际连接地址，显示、筛选、导出全部正确。
 
 
 --------------------------------------
