@@ -22,6 +22,8 @@ A full-featured BitTorrent Tracker monitoring tool with TCP/UDP ping, multi-IP m
 - ✅ 24-hour / 7-day / 30-day uptime calculated against real time windows (not fixed round counts)
 - ✅ Separate stat period config for monitor list and ranking
 - ✅ History persisted to `history.json` (timestamp format, survives restarts, auto-GC clears records older than 30 days)
+- ✅ Atomic write protection for `history.json`: data is written to a temp file first, then swapped in — a crash or interruption mid-save can never corrupt the existing file
+- ✅ Invalid IP records (e.g. `[::]`, `127.0.0.1` from DNS hijacking) are automatically filtered on startup — no history pollution
 - ✅ Domain-level uptime = total successes ÷ total checks across **all historical IPs** under that domain (including IPs removed by DNS rotation) — full historical accuracy regardless of IP changes
 - ✅ Per-IP uptime tracked independently for each IP
 - ✅ Health color coding:
@@ -236,6 +238,8 @@ Network Monitor/
 ├── config.json           # auto-generated, config persistence
 ├── data.json             # auto-generated, current state + summaries
 ├── history.json          # auto-generated, timestamp-based uptime history (primary data source)
+│                         #   ⚠️ Do not hand-edit the compact format in Notepad — easy to break JSON
+│                         #   Use fix_history.py to reformat it into a readable format first
 ├── error.log             # auto-generated (when disk logging is enabled)
 ├── access.log            # auto-generated (when disk logging is enabled, nginx format)
 └── session_secret.key    # auto-generated, ⚠️ DO NOT commit to public repos
@@ -541,6 +545,55 @@ In Config → DNS Settings:
 3. Check **Force TCP port 53 queries**
 
 TCP port 53 is far more reliable than UDP in China's network environment — GFW interference frequently drops UDP DNS packets. Switching to TCP typically resolves resolution failures immediately. You can also force TCP for individual servers only using the `tcp://8.8.8.8` prefix format (effective when the global toggle is off).
+
+**20. Using Cloudflare's security DNS (e.g. `2606:4700:4700::1113`) causes many trackers to resolve to `[::]` or `127.0.0.1` — what should I do?**
+
+This is Cloudflare's NXDOMAIN blocking behavior: when a tracker domain is flagged as malicious or non-existent, the DNS returns `[::]` (IPv6 null address) or `127.0.0.1` as a substitute, causing the monitor to show everything as online (but unreachable) or all offline, severely polluting uptime statistics.
+
+**Solution:**
+1. **Switch DNS servers**: In Config → DNS Settings, switch to a non-filtering DNS like `8.8.8.8` or `1.1.1.1` (the standard version, not the security variant)
+2. **Clean up already-polluted history**: On startup, the app automatically filters out history records for invalid IPs (`[::]`, `127.0.0.1`, `0.0.0.0`, `::1`) — no manual action needed
+
+**21. After manually editing `history.json`, the app fails to start with `Expecting ',' delimiter: line 1 column XXXXXXX` and all data is gone — what happened?**
+
+The file's JSON structure was broken. `history.json` is stored in compact format (no newlines, no indentation) by default. On a large installation it can be several MB to tens of MB — nearly impossible to safely edit in Notepad or similar editors. A single stray or missing comma causes the entire file to fail parsing. When this happens, the app overwrites the broken file with `{}` on its next save, erasing all history.
+
+**The right approach — use `fix_history.py`:**
+
+```bash
+# Place fix_history.py in the same directory as history.json, then run:
+python fix_history.py
+```
+
+The tool will:
+- Validate JSON integrity (reports exact error location if broken)
+- Automatically filter `[::]`, `127.0.0.1`, and other invalid IPs
+- Reformat the file so **each IP is on its own line** — easy to read and edit
+- **Atomic write**: writes to a temp file first, then swaps it in — the original file is never at risk
+- Auto-backup the original file as `history.json.bak`
+
+Formatted file structure:
+```json
+{
+  "tracker.example.com": {
+    "ip:1.2.3.4": [[1700000000,1],[1700000030,0]],
+    "ip:5.6.7.8": [[1700000000,1]]
+  },
+  "other.tracker.org": {
+    "ip:2a06:1280::1": [[1700000000,1]]
+  }
+}
+```
+To delete an IP, remove the entire line. Note that the **last IP entry in a block must not have a trailing comma**.
+
+**22. Why won't the updated `app.py` ever wipe `history.json` to `{}` again?**
+
+The new `save()` method uses **atomic writes**:
+1. Data is written to a temporary file `history.json.tmp` first
+2. Once the write completes successfully, `os.replace()` atomically swaps it into place as `history.json`
+3. If the app crashes or the system fails mid-write, the original `history.json` is completely untouched — the temp file is cleaned up on the next startup
+
+`os.replace()` is an atomic operation on the same filesystem (POSIX `rename` semantics), so there is no possible "half-written" intermediate state.
 
 ---
 

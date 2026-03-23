@@ -998,28 +998,59 @@ class HistoryDB:
                     del self._data[domain]
             self._last_gc = int(time.time())
 
+    # 无效IP集合：CF安全DNS可能将tracker解析为这些地址，需自动过滤
+    _INVALID_IPS = {'[::]', '::', '0.0.0.0', '127.0.0.1', '::1'}
+
+    @staticmethod
+    def _is_invalid_ip(ip_str):
+        """判断是否为无效IP（NXDOMAIN类DNS劫持结果）"""
+        ip = ip_str.lower().strip()
+        return ip in HistoryDB._INVALID_IPS
+
     def save(self):
-        """持久化到 history.json（紧凑格式）"""
+        """持久化到 history.json（原子写入：先写临时文件再替换，防止写入中断导致数据损坏）"""
+        tmp_file = HISTORY_FILE + '.tmp'
         try:
             with self.lock:
                 data_copy = {
                     domain: {ik: list(pts) for ik, pts in ip_map.items()}
                     for domain, ip_map in self._data.items()
                 }
-            with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
-                json.dump(data_copy, f, separators=(',', ':'), ensure_ascii=False)
+            # 第一步：写入临时文件（即使此时崩溃，原文件也不受影响）
+            with open(tmp_file, 'w', encoding='utf-8') as f:
+                # 每个IP条目单独一行，便于手动编辑和区分
+                f.write('{\n')
+                domains = list(data_copy.items())
+                for d_idx, (domain, ip_map) in enumerate(domains):
+                    f.write(f'  {json.dumps(domain, ensure_ascii=False)}: {{\n')
+                    ip_items = list(ip_map.items())
+                    for i_idx, (ik, pts) in enumerate(ip_items):
+                        pts_str = json.dumps(pts, separators=(',', ':'))
+                        comma = ',' if i_idx < len(ip_items) - 1 else ''
+                        f.write(f'    {json.dumps(ik)}: {pts_str}{comma}\n')
+                    domain_comma = ',' if d_idx < len(domains) - 1 else ''
+                    f.write(f'  }}{domain_comma}\n')
+                f.write('}\n')
+            # 第二步：原子替换（os.replace 在同一文件系统下是原子操作）
+            os.replace(tmp_file, HISTORY_FILE)
         except Exception as e:
             cprint(f"[HistoryDB] 保存失败: {e}", 'error')
+            # 清理可能残留的临时文件
+            try:
+                if os.path.exists(tmp_file):
+                    os.remove(tmp_file)
+            except Exception:
+                pass
 
     def load(self):
-        """从 history.json 恢复，GC过期数据"""
+        """从 history.json 恢复，GC过期数据，自动过滤无效IP（如[::]、127.0.0.1）"""
         try:
             if not os.path.exists(HISTORY_FILE):
                 return
             with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
                 raw = json.load(f)
             cutoff = int(time.time()) - 30 * 86400
-            loaded_domains = loaded_ips = 0
+            loaded_domains = loaded_ips = skipped_ips = 0
             with self.lock:
                 for domain, ip_map in raw.items():
                     if not isinstance(ip_map, dict):
@@ -1028,6 +1059,12 @@ class HistoryDB:
                     for ik, pts in ip_map.items():
                         if not isinstance(pts, list):
                             continue
+                        # 自动过滤CF安全DNS解析出的无效IP（[::]、127.0.0.1等）
+                        raw_ip = ik[3:] if ik.startswith('ip:') else ik
+                        if self._is_invalid_ip(raw_ip):
+                            cprint(f"[HistoryDB] 跳过无效IP: {ik} (域名: {domain})", 'debug')
+                            skipped_ips += 1
+                            continue
                         cleaned = [[int(ts), int(v)] for ts, v in pts if ts >= cutoff]
                         if cleaned:
                             cleaned_map[ik] = cleaned
@@ -1035,6 +1072,8 @@ class HistoryDB:
                     if cleaned_map:
                         self._data[domain] = cleaned_map
                         loaded_domains += 1
+            if skipped_ips:
+                cprint(f"[HistoryDB] 已自动过滤 {skipped_ips} 个无效IP记录（[::]、127.0.0.1等）", 'info')
             cprint(f"[HistoryDB] 加载完成：{loaded_domains} 个域名，{loaded_ips} 个IP key", 'info')
         except Exception as e:
             cprint(f"[HistoryDB] 加载失败: {e}", 'error')
