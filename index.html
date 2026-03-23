@@ -2121,7 +2121,7 @@
                                         <span v-else-if="tr.ips.filter(i=>!i.removed).every(i=>i.status==='offline')" class="badge-up up-red"><i class="bi bi-x-circle-fill" style="font-size:.78rem;"></i></span>
                                         <span v-else class="badge-up up-unknown">?</span>
                                         <span style="font-size:.82rem;white-space:nowrap;margin-left:6px;">
-                                            <span :class="tr.ips.filter(i=>!i.removed&&i.status==='online').length>0?'ok':'err'" style="font-weight:600;">{{ tr.ips.filter(i=>!i.removed&&i.status==='online').length }}</span><span class="text-secondary">/{{ tr.ips.filter(i=>!i.removed).length }}</span><span class="text-secondary" style="font-size:.7rem;"> IP</span>
+                                            <span :class="tr.ips.filter(i=>!i.removed&&!i.paused&&i.status==='online').length>0?'ok':'err'" style="font-weight:600;">{{ tr.ips.filter(i=>!i.removed&&!i.paused&&i.status==='online').length }}</span><span class="text-secondary">/{{ tr.ips.filter(i=>!i.removed&&!i.paused).length }}</span><span class="text-secondary" style="font-size:.7rem;"> IP</span>
                                         </span>
                                     </span>
                                     <!-- 列3-5：空白对齐延迟/归属地/最后检查 -->
@@ -3932,7 +3932,13 @@ createApp({
         // 可用率排行（最差/最好切换）
         const dashRankList = computed(() => {
             const list = Object.entries(trackers.value)
-                .filter(([d,tr]) => !tr.paused)  // 已暂停域名不显示在排行榜
+                .filter(([d,tr]) => {
+                    if (tr.paused) return false;  // 域名级暂停
+                    // 所有非removed的IP都被暂停 → 无活跃IP → 不显示在排行榜
+                    const activeIps = (tr.ips||[]).filter(i=>!i.removed && !i.paused);
+                    if (activeIps.length === 0) return false;
+                    return true;
+                })
                 .map(([d,tr]) => _domainMetric(d,tr))
                 .filter(x => x.uptime !== null);
             if (dashRankMode.value === 'worst') {
