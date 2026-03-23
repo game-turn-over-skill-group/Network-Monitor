@@ -1888,7 +1888,7 @@
                                 <tr v-for="row in qsPagedResults" :key="row.domain+row.ip"
                                     :class="{'table-active': qsSelected.includes(row.domain+row.ip)}">
                                     <td><input type="checkbox" :value="row.domain+row.ip" v-model="qsSelected" style="cursor:pointer;"></td>
-                                    <!-- 域名列 -->
+                                    <!-- 域名列：显示name(备注)，tooltip显示实际地址 -->
                                     <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="row.domain">
                                         <span style="font-size:.82rem;" class="domain-name">{{ row.domain }}</span>
                                     </td>
@@ -2097,7 +2097,7 @@
                             <!-- 域名头行 -->
                             <div class="tl-domain-row" @click.stop="toggleExpand(domain)"
                                  :class="{paused: tr.paused, 'dns-error': tr.dns_error}">
-                                <!-- 左：展开图标 + 域名 -->
+                                <!-- 左：展开图标 + 备注(域名key) + 实际domain小字 -->
                                 <div class="tl-domain-left">
                                     <span class="tl-expand-icon">
                                         <i class="bi" :class="(tr.paused ? expanded.includes(domain) : (tr.ips.filter(i=>!i.removed).length < 10 ? !collapsed.includes(domain) : expanded.includes(domain))) ? 'bi-chevron-down' : 'bi-chevron-right'"></i>
@@ -3394,6 +3394,9 @@ createApp({
             const r = {};
             for (const [d,data] of Object.entries(base)) {
                 if (d.toLowerCase().includes(searchTerm)) { r[d]=data; continue; } // 智能搜索 q替换为searchTerm
+                // 同时搜索实际domain字段（可能是IP）
+                const actualD = (data.domain||'').toLowerCase();
+                if (actualD && actualD.includes(searchTerm)) { r[d]=data; continue; }
                 // 端口搜索
                 if (String(data.port).includes(q)) { r[d]=data; continue; }
                 // 添加时间

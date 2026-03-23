@@ -487,6 +487,7 @@ class TrackerDB:
                     'dns_error': False
                 }
             else:
+                # 已有条目：只更新 port/protocol，不覆盖 domain 字段（用户可能手动改成IP）
                 self.trackers[domain]['port']     = port
                 self.trackers[domain]['protocol'] = protocol
             if ip_list:
@@ -706,7 +707,8 @@ class TrackerDB:
                 # 故障IP数：仅计活跃（非暂停）且offline的IP
                 offline_count = sum(1 for ip in active_ips if ip.get('status') == 'offline')
                 versions = list({ip.get('version','ipv4') for ip in active_ips})
-                out.append({'domain': domain, 'port': d.get('port',80),
+                actual_domain = d.get('domain', domain)  # 实际连接地址（可以是IP）
+                out.append({'domain': actual_domain, 'port': d.get('port',80),
                             'protocol': d.get('protocol','tcp'),
                             'uptime': uptime,
                             'ip_count': len(active_ips),
@@ -837,7 +839,7 @@ class TrackerDB:
                             for pk, secs in HISTORY_WINDOWS.items():
                                 ip_entry[f'history_{pk}'] = hdb.get_ip_summary(d, ip, secs)
                         ips_to_save.append(ip_entry)
-                    entry = {'domain':d,'port':t.get('port',80),
+                    entry = {'domain':t.get('domain',d),'port':t.get('port',80),
                              'protocol':t.get('protocol','tcp'),
                              'ips':ips_to_save,'added_time':t['added_time'],
                              'paused':t.get('paused',False)}
@@ -872,7 +874,7 @@ class TrackerDB:
                         for k in ('history_24h','history_7d','history_30d'):
                             ip_obj.pop(k, None)
                     self.trackers[d] = {
-                        'domain':d,'port':t.get('port',80),
+                        'domain':t.get('domain',d),'port':t.get('port',80),
                         'protocol':t.get('protocol','tcp'),'ips':clean_ips,
                         'added_time':t.get('added_time',datetime.now().isoformat()),
                         'dns_error': t.get('dns_error', False),
@@ -2409,21 +2411,24 @@ def check_ip(domain, ip_info, retry=True, update_db=True):
         db.update_status(domain, ip, status, lat)
     return status, lat, err
 
-def _resolve_and_update(domain, port, protocol):
-    """每轮检测前重新解析 DNS，更新 IP 列表（合并新IP，标记消失IP，DNS失败保留旧缓存）"""
+def _resolve_and_update(name, domain, port, protocol):
+    """每轮检测前重新解析 DNS，更新 IP 列表（合并新IP，标记消失IP，DNS失败保留旧缓存）
+    name:   data.json 外层key（备注），用于数据库索引
+    domain: data['domain'] 字段，实际连接地址（可以是域名，也可以是IP）
+    """
     is_ip = bool(re.match(r'^\d{1,3}(?:\.\d{1,3}){3}$', domain)) or (':' in domain and '.' not in domain)
     if is_ip:
-        return  # 纯 IP 模式无需解析
+        return  # IP 直连模式，无需 DNS 解析
     try:
         new_ips = resolve(domain)
-        db.update_ips(domain, new_ips, dns_error=(not new_ips))
+        db.update_ips(name, new_ips, dns_error=(not new_ips))
         if new_ips:
-            cprint(f"DNS刷新 {domain}: {len(new_ips)}个IP", 'debug')
+            cprint(f"DNS刷新 {name} ({domain}): {len(new_ips)}个IP", 'debug')
         else:
             # 无结果时日志已在 resolve() 内通过 _dns_fail_once 去重，此处不重复打印
             pass
     except Exception as e:
-        db.update_ips(domain, [], dns_error=True)
+        db.update_ips(name, [], dns_error=True)
         # 异常日志同样由 resolve() 内去重处理，此处静默
         pass
 
@@ -2560,11 +2565,13 @@ def monitor_loop():
             # ── 第一步：并行重新解析所有域名 DNS ─────────────────────────
             with ThreadPoolExecutor(max_workers=32) as dns_pool:
                 dns_futures = {
+                    # name=外层key(备注), domain=data['domain']字段(实际连接地址，可以是IP或域名)
                     dns_pool.submit(_resolve_and_update,
-                                    domain,
+                                    name,
+                                    data.get('domain', name),
                                     data.get('port', 80),
-                                    data.get('protocol','tcp')): domain
-                    for domain, data in snapshot.items()
+                                    data.get('protocol','tcp')): name
+                    for name, data in snapshot.items()
                 }
                 for f in as_completed(dns_futures):
                     try: f.result()
@@ -2931,8 +2938,10 @@ def api_trackers_export():
         trackers_snap = {k: dict(v) for k, v in db.trackers.items()}
     lines = []
     for item in ranking:
-        domain   = item['domain']
-        td       = trackers_snap.get(domain, {})
+        key      = item['domain']   # 外层key(备注)
+        td       = trackers_snap.get(key, {})
+        # 实际连接地址：优先用 tr['domain'] 字段，fallback 外层key
+        domain   = td.get('domain', key)
         protocol = td.get('protocol', 'tcp')
         port     = td.get('port', 80)
         ips      = td.get('ips', [])
@@ -3546,9 +3555,19 @@ def api_query():
     matched_ip = None; matched_tr = None; is_domain = False
     with db.lock:
         all_tr = dict(db.trackers)
-    # 优先精确匹配域名
+    # 优先精确匹配：外层key(备注)或 domain 字段(实际地址)均可匹配
+    matched_key = None
     if host in all_tr:
-        matched_tr = all_tr[host]
+        matched_key = host
+    else:
+        # 尝试通过 tr['domain'] 字段匹配（实际连接地址）
+        for _k, _tr in all_tr.items():
+            if _tr.get('domain', '') == host:
+                matched_key = _k
+                break
+    if matched_key is not None:
+        matched_tr = all_tr[matched_key]
+        host = matched_key  # 统一用key作为标识
         is_domain  = True
         # 选代表IP（优先online且未暂停，否则第一个非removed非paused）
         active = [ip for ip in matched_tr.get('ips', []) if not ip.get('removed') and not ip.get('paused')]

@@ -12435,6 +12435,241 @@ Q22：新版 app.py 原子写入的原理解释，说明为什么不会再出现
 --------------------------------------
 
 
+//停止解析的域名以备注+IP方式继续监控
+//修复可用率排行榜停止解析域名以IP方式显示
+
+下面这个域名已经停止解析很久了 但是我知道他的历史IP还在工作 我不知道对方是出于什么原因 停止了
+我想把这个data配置读取部分 稍微做一些修整 第一个显示名称的地方 我觉得应该当作备注一样来显示？
+解析域名应该从"domain"行开始 根据这个"domain"的内容做解析，能在修正data.json整体结构不变的情况下
+实现我要的备注吗？就是我手动去修改domain改成他的IP 这样因为域名是IP就不用走DNS解析了
+原有的添加方式 应该是没啥大改变 主要是读取配置这块 还有监控列表 显示这块 做一些调整
+我希望 修正data.json展示名称这边 相当于备注 域名那边为主域名/ip
+然后可用率排行 提取的话 也是以"domain"为主
+快速搜索和监控列表 可以看到备注 就是相当于现在的名称部分
+然后可用率排行榜TOP10 可以看到备注 就是相当于现在的名称部分
+主要改动 其实就是读取data配置这块 现在我手动去修改"domain"改成IP他还是会从名称做解析 解决这个问题
+你看看还有啥问题 如果要实现我要的效果的话
+data.json：
+  "p2p.publictracker.xyz": {
+    "domain": "p2p.publictracker.xyz",
+    "port": 6969,
+    "protocol": "udp",
+    "ips": [
+      {
+        "ip": "176.123.1.180",
+        "version": "ipv4",
+        "country": {
+          "country": "Moldova",
+          "country_code": "MD",
+          "isp": "Alexhost SRL"
+        },
+        "status": "online",
+        "latency": 212,
+        "last_check": "2026-03-24T02:15:12.388468",
+        "paused": false,
+        "history_24h": {
+          "total": 1,
+          "ok": 1,
+          "fail": 0
+        },
+        "history_7d": {
+          "total": 1,
+          "ok": 1,
+          "fail": 0
+        },
+        "history_30d": {
+          "total": 1,
+          "ok": 1,
+          "fail": 0
+        }
+      }
+    ],
+
+
+----------------
+
+现在我已经完全理解了代码结构。让我来实现你要求的改动：
+核心改动思路：
+1、data.json 的 key（外层名称）变成备注 (remark)，domain 字段才是实际用于连接/解析的地址（可以是域名或IP）
+2、监控列表的名称列显示备注，domain 字段作为实际连接地址
+3、快速搜索、TOP10排行榜显示备注
+4、排行榜提取以 domain 为主（用于生成连接URL）
+5、搜索时备注和domain都可以匹配
+
+现在开始进行修改。主要有以下几处改动：
+1. 监控列表域名头行：显示备注(key)，tooltip显示domain
+2. qsAllResults：传递remark字段，搜索支持remark
+3. 快速搜索域名列：显示remark
+4. TOP10排行榜：显示remark
+5. filteredTrackers搜索：支持remark搜索
+6. _domainMetric：传递remark
+
+改动说明
+核心逻辑
+data.json 结构不变，规则调整为：
+外层 key = 备注（显示名称），比如 "p2p.publictracker.xyz"
+domain 字段 = 实际连接地址（你手动改成 IP 后就走IP直连，不再 DNS 解析）
+
+app.py 改动
+① _resolve_and_update 函数
+新增 actual_domain 参数（原 domain 只是 key/备注）。IP 判断改为检查 actual_domain 字段——手动把 domain 改成 IP 后，is_ip 为 True，直接跳过 DNS 解析。
+② monitor_loop DNS 调度
+传入 data.get('domain', domain) 作为 actual_domain，不再直接用外层 key 解析。
+③ /api/tracker 导出 URL
+URL 拼接改用 td.get('domain', key) 字段（实际连接地址）而非 key，导出的 tracker 列表 URL 指向真实地址。
+④ /api/query 接口
+查找逻辑扩展为：先精确匹配 key，再通过 tr['domain'] 字段匹配，两种方式都能查到。
+
+index.html 改动
+① 监控列表（trackers 页）
+域名头行显示外层 key（备注）为主，若 tr.domain ≠ key，则在备注下方小字显示实际地址。
+② 快速搜索表格（dashboard）
+域名列显示备注，实际 domain 字段作为小字辅助显示。搜索时备注和实际 domain 两者都能匹配。
+③ 仪表盘 TOP10 排行
+显示 item.remark（备注），实际地址小字辅助。
+④ 排行榜页面
+filteredRanking 中通过 trackers 数据反查补充 remark 字段，显示备注名称。
+
+----------------
+
+Q：
+我看了你的函数改动_resolve_and_update
+为什么要叫key而不直接叫name？actual_domain直接叫domain会有问题吗？我觉得域名可以包含IP或者是IP 前面的actual_显得有些多余
+就按照我说的 改一下_resolve_and_update这个函数部分
+
+然后 我的其他问题是 这样修改后 不会影响原有的history.json数据结构吧？
+history.json部分 要改什么吗？要不要手动修改这些域名改成IP？
+  "p2p.publictracker.xyz": {
+    "ip:176.123.1.180": [[1774289784,1],[1774289806,1],[1774289867,1],[1774289973,1],[1774290018,1],[1774290124,1],[1774290180,1],[1774290281,1],[1774290387,1],[1774290491,1],[1774290562,1],[1774290668,1],[1774290774,1],[1774290875,1]]
+  },
+  "tracker.ccp.ovh": {
+    "ip:51.81.222.188": [[1774289784,1],[1774289806,1],[1774289867,1],[1774289973,1],[1774290018,1],[1774290124,1],[1774290180,1],[1774290281,1],[1774290387,1],[1774290491,1],[1774290562,1],[1774290668,1],[1774290774,1],[1774290875,1]]
+  },
+  "retracker.lanta.me": {
+    "ip:37.235.176.37": [[1774289806,1],[1774289867,1],[1774289973,1],[1774290018,1],[1774290124,1],[1774290180,1],[1774290281,1],[1774290387,1],[1774290491,1],[1774290562,1],[1774290668,1],[1774290774,1],[1774290875,1]]
+  }
+
+----------------
+
+A：
+好的，先回答你的问题，再做改动。关于命名： 
+完全同意，key 改 name、actual_domain 改 domain 更简洁。
+域名本来就可以是IP，没必要加 actual_ 前缀。
+关于 history.json： 完全不需要改。
+history.json 用的是外层 key（备注名）作为索引，比如 "p2p.publictracker.xyz"——这个 key 在 data.json 里不变，
+所以历史数据天然延续，不会丢失任何记录。
+你只需要在 data.json 里把 domain 字段从 "p2p.publictracker.xyz" 改成 "176.123.1.180" 即可，外层 key 保持不动。
+
+调用处变量名也叫 domain（外层 for 循环里的迭代变量），和新函数签名里的参数名 domain 重名了但没问题——这是两个作用域。
+不过注释里说的不够清楚，顺手也整理一下调用处的注释：
+
+改好了。关于你的几个问题，统一回答：
+命名： key → name，actual_domain → domain，同时调用处的 for 循环迭代变量也从 domain, data 改成了 name, data，整体更清晰一致。
+history.json 完全不需要动。 原因是 history 用的索引是外层 key（备注名），
+比如 "p2p.publictracker.xyz"——这个 key 在你的操作里根本不会变，
+你只改的是 data.json 里面的 domain 字段值。两个文件的关联靠的是 key，key 不动历史数据就完好无损。
+你只需要做的操作就是： 打开 data.json，找到目标条目，把 "domain": "p2p.publictracker.xyz" 改成 "domain": "176.123.1.180"，
+外层 key 和 history.json 都不用碰，重启服务后该条目就会直接走 IP 连接，不再做 DNS 解析。
+
+----------------
+
+Q：
+写入data.json那边有问题 我修改后启动程序 他好像就覆盖了 自动把name改到domain了
+  "retracker.lanta.me": {
+    "domain": "retracker.lanta.me",
+这个怎么搞？还有下面 启动程序的时候 就会变成又走DNS解析了 现在的DNS解析是用name还是domain？
+  2026/3/24 02:51:58 [ERROR] DNS解析失败 retracker.lanta.me [模式:custom]
+  2026/3/24 02:51:58 [ERROR] DNS解析失败 p2p.publictracker.xyz [模式:custom]
+  2026/3/24 02:51:58 [ERROR] DNS解析失败 tracker.ccp.ovh [模式:custom]
+之前的应该也有判断domain是IP不做DNS解析吧？
+
+其实我要的效果是修改data.json的 "domain": 字段改成IP时 不会被name覆盖写入
+然后大部分显示 还是用name 只有 可用率排行(不是TOP10) 24小时/7天/30天 那边显示的是domain就行了
+其他的保留旧的 显示name 没问题
+
+----------------
+
+A：
+问题找到了。有两处会覆盖 domain 字段为 name（key）：
+_save() 第840行：entry = {'domain':d, ...} — 保存时强制把 key 写回 domain 字段
+load() 第875行：'domain':d — 加载时强制用 key 覆盖 domain 字段
+还有 DNS 解析用的是 name（key）还是 domain 字段的问题——当前上传的文件还是旧版，需要重新应用全部改动。一次性全修：
+
+现在明确了。需要做以下改动：
+1、监控列表：去掉小字，改回干净的单行显示（只加 tooltip）
+2、快速搜索：去掉小字，改回干净的单行显示
+3、TOP10：去掉小字，改回干净的单行显示
+4、排行榜页：item.domain 显示实际连接地址（逻辑要重写：filteredRanking 把 key 存为 remark，把 tr.domain 替换进 item.domain）
+5、排行榜筛选：rankFilterDomain 要用 name(key) 来筛选，不能用实际domain
+
+改动汇总：
+根本问题（app.py）：
+_save()：原来写死 'domain': d（用 key 覆盖），现在改为 t.get('domain', d)，保留你手动改的 IP 值
+load()：原来写死 'domain': d（加载时覆盖），现在改为 t.get('domain', d)，从文件里读回你设的值
+add_tracker()：已有条目更新时只改 port/protocol，加注释说明不覆盖 domain 字段
+_resolve_and_update(name, domain, ...)：IP 判断用的是 domain 字段，不是 name——所以把 "domain": "176.123.1.180" 改成IP后，
+is_ip 为 True，直接跳过 DNS 解析，不再报 DNS解析失败
+
+history.json 完全不用动——它的索引是外层 key（name），你不动 key，历史数据就完好衔接。
+显示逻辑（index.html）：
+监控列表、快速搜索、仪表盘TOP10：都显示 name（备注），鼠标悬停 tooltip 会显示 name → 实际IP
+排行榜页（24h/7d/30d）：显示 实际连接地址（tr.domain 字段），鼠标悬停显示备注名
+
+----------------
+
+Q：
+其他基本都对了 就是可用率排行榜 那边 看到的名称还是名称(name)的
+不是(domain)IP的 那样用导出按钮 导出的就是看到的 名称(name)的 可能就不能用。。
+/api/tracker这个API的话 倒是没问题……
+
+----------------
+
+A：
+问题根因：排行榜页加载时只请求 /api/ranking，没有请求 /api/datas，导致 trackers.value 是空的，
+nameToActual 映射表里什么都没有，item.domain 自然还是 name 原样显示。
+
+这次修的两行：
+onMounted：直接打开排行榜页时，同时请求 loadTrackers() + loadRanking()
+watch(currentTab)：从其他页切换到排行榜时，同样并行请求两个接口
+
+这样 trackers.value 就有数据了，nameToActual[name] 能查到 tr.domain（你设的实际IP），排行榜就会显示 IP，导出按钮导出的也是 IP 地址。
+
+----------------
+
+Q：
+关键是 我不想 可用率排行榜 那边加载/api/datas
+可用率排行榜 那边显示改一下 问题不就解决了？为什么要去改那么多东西
+他的导出按钮 实际上是按照 可用率排行榜 看到的做输出的……相当于前端页面整合资源
+原本几乎不需要调用我后台后端数据，你改太多了 反而把事情变得麻烦了
+别人实际上 请求的是
+/api/ranking/24h?min_uptime=0
+/api/ranking/7d?min_uptime=0
+/api/ranking/30d?min_uptime=0
+我也看了API ranking的domain字段还是旧的。。解决这个问题不就好了？
+我发你之前还没改过的版本 你在这个基础上改吧
+
+----------------
+
+A：
+明白了，思路完全搞反了。问题根源就一个：/api/ranking 返回的 domain 字段是外层 key（name），不是 tr['domain'] 字段（实际IP）。
+只需要在后端 get_ranking 里把返回的 domain 换成 tr.get('domain', key) 就行，前端完全不动。
+
+你说得对，就该这么做。
+实际改动只有三处（全在 app.py）：
+get_ranking() 里一行：
+# 改前
+out.append({'domain': domain, ...})
+
+# 改后  
+actual_domain = d.get('domain', domain)  # 读 tr['domain'] 字段
+out.append({'domain': actual_domain, ...})
+
+这样 /api/ranking/24h、/7d、/30d 返回的 domain 字段就直接是你设的实际IP，排行榜显示和导出按钮全部自动正确，前端完全不需要动。
+_save() 和 load() 的改动（之前已在）保证重启后 domain 字段不被 key 覆盖，这是基础前提。
+
+
+--------------------------------------
+
 
 
 
