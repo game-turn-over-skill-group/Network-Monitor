@@ -200,6 +200,8 @@ window.__i18n_ko = {
     dnsCustomDesc: '사용자 정의 모드에서만 사용, 여러 서버는 쉼표로 구분',
     dnsTcpLabel: 'DNS 쿼리를 TCP 53 포트로 강제',
     dnsTcpDesc: 'UDP DNS 패킷 손실이 높을 때 활성화하세요. dnspython 및 사용자 정의 모드에만 적용됩니다. 사용자 정의 모드에서 tcp://8.8.8.8 형식으로 특정 서버만 TCP로 지정할 수 있습니다.',
+    dnsTimeout: 'DNS 조회 제한 시간',
+    dnsTimeoutDesc: 'DNS 서버당 한 번의 조회 최대 대기 시간(초). 0이면 연결 제한 시간과 동일. 여러 DNS 사용 시 2~4초로 두면 다음 서버로 빨리 넘어갑니다.',
     dnsTcpTcpPrefix: '사용자 정의 DNS에서 단일 서버에 TCP 지정: tcp://8.8.8.8',
     staggerTitle: '발송 분산 설정',
     staggerBatchProxy: '프록시 배치 크기',

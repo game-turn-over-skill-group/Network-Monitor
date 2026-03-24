@@ -200,6 +200,8 @@ window.__i18n_fr = {
     dnsCustomDesc: 'Utilisé uniquement en mode personnalisé, séparer plusieurs serveurs par virgule',
     dnsTcpLabel: 'Forcer les requêtes DNS via TCP port 53',
     dnsTcpDesc: 'Activer si le taux de perte de paquets UDP DNS est élevé. Applicable uniquement aux modes dnspython et personnalisé. En mode personnalisé, vous pouvez aussi préfixer un serveur individuel avec tcp://8.8.8.8.',
+    dnsTimeout: 'Délai d\'expiration DNS',
+    dnsTimeoutDesc: 'Secondes max par tentative DNS (dnspython/personnalisé). 0 = identique au délai de connexion. Des valeurs plus faibles (ex. 2–4) passent plus vite au serveur suivant.',
     dnsTcpTcpPrefix: 'Forcer TCP pour un seul serveur DNS personnalisé : tcp://8.8.8.8',
     staggerTitle: 'Config envoi échelonné',
     staggerBatchProxy: 'Taille lot (proxy)',

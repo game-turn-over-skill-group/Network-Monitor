@@ -200,6 +200,8 @@ window.__i18n_ja = {
     dnsCustomDesc: 'カスタムモードでのみ使用、複数サーバーはコンマ区切り',
     dnsTcpLabel: 'DNS クエリを TCP ポート 53 に強制',
     dnsTcpDesc: 'UDP DNS のパケットロスが多い場合に有効にしてください。dnspython およびカスタムモードのみ対応。カスタムDNSでは tcp://8.8.8.8 形式で特定サーバーのみ TCP にすることも可能。',
+    dnsTimeout: 'DNS クエリタイムアウト',
+    dnsTimeoutDesc: '各DNSサーバー1回あたりの最大待機時間（秒）。0 は接続タイムアウトと同じ。複数DNS時は 2～4 秒程度で次サーバーへ切り替えやすくなります。',
     dnsTcpTcpPrefix: 'カスタムDNSで単一サーバーにTCPを指定：tcp://8.8.8.8',
     staggerTitle: '発送分散設定',
     staggerBatchProxy: 'プロキシバッチ数',

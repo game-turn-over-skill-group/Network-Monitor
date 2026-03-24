@@ -200,6 +200,8 @@ window.__i18n_zh = {
     dnsCustomDesc: '仅在自定义模式下生效，多个服务器用逗号分隔',
     dnsTcpLabel: '强制使用 TCP 53 查询',
     dnsTcpDesc: '国内 UDP DNS 丢包率高时开启。仅对 dnspython 和自定义模式有效。自定义DNS也支持单独写 tcp://8.8.8.8 格式指定单台服务器走TCP。',
+    dnsTimeout: 'DNS 单次查询超时',
+    dnsTimeoutDesc: '每台 DNS 服务器一次查询的最长等待时间（秒）。0 表示与「连接超时」相同。多 DNS 时可设为 2～4 秒以更快切换到下一台（仍受网络波动影响）。',
     dnsTcpTcpPrefix: '在自定义DNS中为单台服务器指定TCP，格式：tcp://8.8.8.8',
     staggerTitle: '错峰发包配置',
     staggerBatchProxy: '代理每批发包数',

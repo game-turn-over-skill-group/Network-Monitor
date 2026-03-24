@@ -56,6 +56,7 @@ DEFAULT_CONFIG = {
     'dns_mode': 'system',              # system | dnspython | custom
     'dns_custom': '8.8.8.8',           # 自定义DNS时使用，支持多个用逗号分隔
     'dns_use_tcp': False,              # 自定义/dnspython 模式下强制使用 TCP 53（国内UDP丢包时开启）
+    'dns_timeout': 0,                  # DNS 单次查询超时（秒）。0=与 timeout 相同；可设为 2~4 加快多 DNS 故障转移
     'max_log_entries': 1000,           # 日志最大条目数（兼容旧版，以下三项优先）
     'max_log_info': 1000,              # Info 级日志最大条目数
     'max_log_success': 1000,           # Success 级日志最大条目数
@@ -120,7 +121,7 @@ def load_config():
                       'log_to_disk','log_level','console_log_level','debug_save_trace',
                       'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                       'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
-                      'dns_mode','dns_custom','dns_use_tcp','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                      'dns_mode','dns_custom','dns_use_tcp','dns_timeout','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                       'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','export_suffix',
                       'show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
                       'cleanup_interval','trust_cf_ip',
@@ -146,7 +147,7 @@ def persist_config(cfg):
                                         'log_to_disk','log_level','debug_save_trace',
                                         'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                                         'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
-                                        'dns_mode','dns_custom','dns_use_tcp','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                                        'dns_mode','dns_custom','dns_use_tcp','dns_timeout','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                                         'dashboard_stat_period','tracker_stat_period','cache_history',
                                         'tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width',
                                         'allow_private_ips','min_password_length','users',
@@ -1753,8 +1754,9 @@ def _resolve_dnspython(domain: str):
     for rtype, ver in [('A', 'ipv4'), ('AAAA', 'ipv6')]:
         try:
             resolver = dns.resolver.Resolver()
-            resolver.timeout  = CONFIG['timeout']
-            resolver.lifetime = CONFIG['timeout']
+            _dto = _dns_query_timeout()
+            resolver.timeout  = _dto
+            resolver.lifetime = _dto
             for rdata in resolver.resolve(domain, rtype, tcp=use_tcp):
                 ip = str(rdata)
                 if ip not in seen:
@@ -1793,7 +1795,60 @@ def _parse_dns_servers():
             servers.append((s, use_tcp_global))
     return servers
 
-def _query_single_server(domain: str, rtype: str, srv_ip: str, use_tcp: bool, timeout: float):
+def _dns_query_timeout() -> float:
+    """DNS 查询使用的超时（秒），可与探测 timeout 分离以加快多服务器故障转移。"""
+    raw = CONFIG.get('dns_timeout')
+    base = float(CONFIG.get('timeout', 5))
+    try:
+        if raw is None or float(raw) <= 0:
+            return max(0.5, base)
+        return max(0.5, min(float(raw), 60.0))
+    except (TypeError, ValueError):
+        return max(0.5, base)
+
+# 自定义 DNS：按服务器记录近期失败，冷却期内降低优先级（仍会尝试，排在队尾）。
+# dnspython 单次 resolve 通常每次新建 TCP，不在这里做连接池；缩短超时 + 避开慢服更实际。
+_dns_srv_stats: Dict[Tuple[str, bool], Dict[str, float]] = {}
+_dns_srv_stats_lock = threading.Lock()
+
+def _dns_note_srv_result(srv_ip: str, use_tcp: bool, ok: bool):
+    """ok=True：查询成功或 NXDOMAIN/NoAnswer（服务器可达）；ok=False：超时/网络错误。"""
+    k = (srv_ip, use_tcp)
+    now = time.time()
+    with _dns_srv_stats_lock:
+        st = dict(_dns_srv_stats.get(k, {'fail_s': 0, 'cool_until': 0.0}))
+        if ok:
+            st['fail_s'] = 0
+            st['cool_until'] = 0.0
+        else:
+            fs = int(st.get('fail_s', 0)) + 1
+            st['fail_s'] = float(fs)
+            delay = min(120.0, 15.0 * (2 ** min(fs - 1, 3)))
+            st['cool_until'] = now + delay
+        _dns_srv_stats[k] = st
+
+def _dns_custom_try_order(servers: List[Tuple[str, bool]]) -> List[int]:
+    """返回本轮尝试顺序（服务器下标）：非冷却、失败少者优先，再 Round-Robin 旋转。
+
+    注意：健康度按「DNS 服务器 (IP+TCP)」统计，与域名无关；任意域名在该机上超时都会拉低其优先级。
+    """
+    count = len(servers)
+    if count <= 0:
+        return []
+    now = time.time()
+    with _dns_srv_stats_lock:
+        def sort_key(i: int):
+            srv_ip, use_tcp = servers[i]
+            st = _dns_srv_stats.get((srv_ip, use_tcp), {'fail_s': 0, 'cool_until': 0.0})
+            cooling = now < float(st.get('cool_until', 0))
+            fail_s = int(st.get('fail_s', 0))
+            return (1 if cooling else 0, fail_s, i)
+
+        indices = sorted(range(count), key=sort_key)
+    start = _dns_rr_next(len(indices))
+    return [indices[(start + j) % len(indices)] for j in range(len(indices))]
+
+def _query_single_server(domain: str, rtype: str, srv_ip: str, use_tcp: bool):
     """向单台 DNS 服务器查询。
     返回值：
       [ip, ...]  —— 查询成功，有记录
@@ -1801,6 +1856,7 @@ def _query_single_server(domain: str, rtype: str, srv_ip: str, use_tcp: bool, ti
       None       —— 超时 / 网络错误，此服务器本次失败
     """
     proto = 'TCP' if use_tcp else 'UDP'
+    timeout = _dns_query_timeout()
     try:
         resolver = dns.resolver.Resolver(configure=False)
         resolver.nameservers = [srv_ip]
@@ -1808,7 +1864,22 @@ def _query_single_server(domain: str, rtype: str, srv_ip: str, use_tcp: bool, ti
         resolver.lifetime = timeout
         return [str(r) for r in resolver.resolve(domain, rtype, tcp=use_tcp)]
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
-        # 域名确实不存在，属于正常的"无结果"，不记录为错误
+        # NXDOMAIN / NoAnswer / NoNameservers：属于确定性"无结果"
+        now = time.time()
+        key = (domain, rtype)
+        with _dns_noresult_lock:
+            last = _dns_noresult_logged.get(key, 0)
+            if now - last > 86400:  # 1天窗口内只记录一次
+                _dns_noresult_logged[key] = now
+                # 你希望像超时一样知道是哪个 DNS/IP、查询哪个记录类型（A/AAAA）
+                db.add_log(
+                    f"[custom DNS] {srv_ip}({proto}) 查询 {rtype} {domain} 失败: 无结果",
+                    'debug'
+                )
+                cprint(
+                    f"[custom DNS] {srv_ip}({proto}) 查询 {rtype} {domain} 失败: 无结果",
+                    'debug'
+                )
         return []
     except Exception as e:
         # 超时 / 连接失败 / 协议错误 —— error 级别，控制台和 Web 日志都能看到
@@ -1830,7 +1901,11 @@ _dns_rr_index  = 0
 _dns_rr_lock   = threading.Lock()
 
 def _dns_rr_next(count: int) -> int:
-    """返回本次查询的起始服务器下标（Round-Robin），线程安全。"""
+    """返回 RR 旋转偏移（0..count-1），线程安全。
+
+    自定义 DNS：用在「已排好优先级的下标列表」上，决定本轮从列表里哪一位开始试，
+    不是「一个域名只绑一台 DNS」；单次查询仍按顺序逐台试直到成功或确定无记录。
+    """
     global _dns_rr_index
     with _dns_rr_lock:
         idx = _dns_rr_index % count
@@ -1838,40 +1913,43 @@ def _dns_rr_next(count: int) -> int:
         return idx
 
 def _resolve_custom(domain: str):
-    """模式3: 自定义DNS服务器 —— 轮询负载均衡 + 顺序故障转移。
+    """模式3: 自定义DNS服务器 —— 健康度排序 + Round-Robin + 顺序故障转移.
 
     策略说明：
-      1. 每次查询从 Round-Robin 游标选出"本轮首选"服务器，只向它发一次请求。
-      2. 若首选服务器超时/失败，依次尝试列表中的其余服务器（故障转移）。
-      3. 遇到 NXDOMAIN/NoAnswer 视为"域名不存在的确定答案"，直接停止不再尝试。
-      4. 全部服务器均失败时返回空列表，由上层 resolve() 处理日志和 dns_error 标记。
+      1. 按近期超时次数做短冷却：经常超时的服务器排在队尾（仍会尝试，避免全员冷却时饿死）。
+      2. 在优先序列上再做 Round-Robin 旋转，分散负载。
+      3. 依次为每台服务器单独查询；超时/错误则换下一台。
+      4. 遇到 NXDOMAIN/NoAnswer 视为确定答案，直接停止，不再问其他服务器。
+      5. 全部失败时返回空列表，由上层 resolve() 处理日志和 dns_error 标记.
 
-    相比 Racing 模式的优势：
-      - 每次只向 1 台服务器发包，不会因并发请求触发运营商对 TCP 53 的限速/丢包。
-      - Round-Robin 让请求均匀分散到各服务器，单台压力低，国内/国外混用时效果好。
-      - 某台挂掉后自动切换，不影响整体可用性。
+    说明：dnspython 单次查询多为「一问一连」，自建 TCP 连接池成本高；
+    实践中更有效的是 dns_timeout（可短于探测 timeout）+ 避开近期超时服务器.
+
+    轮询语义（易混点）：
+      - 不是「一个域名永远只用一台 DNS」：每次查 A / AAAA 各自会按 try_order 顺序试，第一台失败立刻试下一台。
+      - 「轮询」指：全进程共享 RR，让不同次 resolve() 的首选 DNS 在列表里错位，分散压力。
+      - 不是「多个域名凑够错误才换 DNS」：单次查询内即会故障转移；健康度是每台 DNS 的全局统计，不按域名凑次数。
     """
     servers = _parse_dns_servers()
-    timeout = float(CONFIG.get('timeout', 5))
     count   = len(servers)
     ips     = []
     seen    = set()
 
     for rtype, ver in [('A', 'ipv4'), ('AAAA', 'ipv6')]:
-        start = _dns_rr_next(count)          # Round-Robin 起始下标
+        try_order = _dns_custom_try_order(servers)
         result_ips = None
 
         for i in range(count):
-            srv_ip, use_tcp = servers[(start + i) % count]
-            res = _query_single_server(domain, rtype, srv_ip, use_tcp, timeout)
+            idx = try_order[i]
+            srv_ip, use_tcp = servers[idx]
+            res = _query_single_server(domain, rtype, srv_ip, use_tcp)
 
             if res is None:
-                # 此服务器超时/网络错误，日志已在 _query_single_server 里记录
-                # 继续尝试下一台（故障转移）
+                _dns_note_srv_result(srv_ip, use_tcp, False)
                 continue
 
+            _dns_note_srv_result(srv_ip, use_tcp, True)
             if res:
-                # 查询成功，有 IP 记录
                 result_ips = res
                 break
 
@@ -1891,6 +1969,10 @@ def _resolve_custom(domain: str):
 # 重启应用后集合清空，会重新提醒一次，方便感知配置变更后的效果。
 _dns_fail_logged: set = set()
 _dns_fail_lock = threading.Lock()
+
+# 已记录过DNS“无结果”的域名+记录类型集合（应用生命周期内只报一次，避免刷屏）
+_dns_noresult_logged = {}          # {(domain, rtype): last_time}
+_dns_noresult_lock = threading.Lock()
 
 def _dns_fail_once(domain: str) -> bool:
     """返回 True 表示首次失败，应记录日志；False 表示已记录过，静默跳过。"""
@@ -1921,7 +2003,9 @@ def resolve(domain: str):
             db.add_log(f"DNS解析异常 {domain}: {e}", 'error')
         return []
     if not ips:
-        if _dns_fail_once(domain):
+        # custom 模式下：无结果/超时都会在 _query_single_server 内按「具体 DNS + 记录类型」记录；
+        # 这里避免再输出一条通用的「无结果」重复日志。
+        if mode != 'custom' and _dns_fail_once(domain):
             db.add_log(f"DNS解析失败 {domain} [模式:{mode}]: 无结果", 'error')
             cprint(f"DNS解析失败 {domain} [模式:{mode}]", 'error')
     else:
@@ -2168,6 +2252,14 @@ def validate_config(config: dict) -> list:
         min_len = config['min_password_length']
         if not isinstance(min_len, int) or min_len < 6 or min_len > 128:
             errors.append('密码最小长度必须是6-128之间的整数')
+
+    if 'dns_timeout' in config:
+        try:
+            dto = float(config['dns_timeout'])
+            if dto < 0 or dto > 60:
+                errors.append('DNS查询超时必须在0-60秒之间（0表示与连接超时相同）')
+        except (TypeError, ValueError):
+            errors.append('DNS查询超时必须是数字')
     
     return errors
 
@@ -4016,7 +4108,7 @@ def api_config():
                 'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
                 'log_to_disk','log_level','console_log_level','debug_save_trace','http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                 'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
-                'dns_mode','dns_custom','dns_use_tcp','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                'dns_mode','dns_custom','dns_use_tcp','dns_timeout','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
                 'export_suffix','show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
                 'cleanup_interval','trust_cf_ip',
@@ -4049,6 +4141,7 @@ def api_config():
             'dns_mode':              'DNS模式',
             'dns_custom':            '自定义DNS',
             'dns_use_tcp':           'DNS强制TCP',
+            'dns_timeout':           'DNS查询超时',
             'max_log_entries':       '最大日志条数',
             'max_log_info':          'Info日志最大条数',
             'max_log_success':       'Success日志最大条数',
@@ -4074,7 +4167,7 @@ def api_config():
             'auto_pause_threshold':  '自动暂停累计失败次数',
         }
         suffixes = {
-            'check_interval': 's', 'timeout': 's', 'retry_interval': 's',
+            'check_interval': 's', 'timeout': 's', 'retry_interval': 's', 'dns_timeout': 's',
             'page_refresh_ms': 'ms', 'stagger_delay_proxy': 'ms', 'stagger_delay_direct': 'ms',
         }
         bool_fmt = {True: '开', False: '关'}
@@ -4112,7 +4205,7 @@ def api_config():
         return jsonify({k: CONFIG.get(k) for k in public_keys})
     all_keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'log_to_disk','log_level','debug_save_trace','http_proxy','udp_proxy','http_proxy_enabled','udp_proxy_enabled',
-                'dns_mode','dns_custom','dns_use_tcp','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                'dns_mode','dns_custom','dns_use_tcp','dns_timeout','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
                 'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width',
                 'allow_private_ips','min_password_length','cleanup_interval','trust_cf_ip',

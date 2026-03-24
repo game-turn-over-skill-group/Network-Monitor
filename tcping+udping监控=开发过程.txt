@@ -13091,8 +13091,298 @@ static/language/fr.js -> fois
 这样“累计失败多少次后暂停”就不会再显示成“秒”了。
 如果你愿意，我还能顺手把“次数”在 UI 上做成更明确的文案（比如阈值输入框标题后直接加“(次)”），进一步避免歧义。
 
+----------------
+
+Q：
+你看下代码 现在网页端设置那边 连续失败自动暂停的开关 启用或关闭 是立即生效吗？
+
+----------------
+
+A：
+追踪 saveCfg 如何写入后端配置，以及 auto_pause_enabled 在服务端何时被读取。
+
+基本可以认为是“保存成功后立刻生效”，不需要重启。
+
+依据如下：
+前端：开关带 @change="saveCfg"，会马上 POST /api/config，并带上 auto_pause_enabled（以及阈值等）。
+
+                                <input class="form-check-input" type="checkbox" v-model="cfg.auto_pause_enabled"
+                                       @change="saveCfg" id="autoPauseSwitch">
+                                <label class="form-check-label" for="autoPauseSwitch" style="cursor:pointer;">
+                                    {{ cfg.auto_pause_enabled ? t('config.autoPauseEnabled') : t('config.autoPauseDisabled') }}
+后端：/api/config 的 POST 会直接改内存里的全局 CONFIG 并 persist_config，监控线程没有单独再读一遍配置文件才能生效的问题。
+
+自动暂停逻辑：在每次处理单 IP 检测结果时，都会现读 CONFIG.get('auto_pause_enabled', True)，不是启动时缓存的旧值。
+
+        # ── 连续失败计数 & 自动暂停 ────────────────────────────────
+        auto_pause_enabled   = CONFIG.get('auto_pause_enabled', True)
+        auto_pause_threshold = int(CONFIG.get('auto_pause_threshold', 30))
+        key = (domain, ip)
+        if status == 'offline' and auto_pause_enabled:
+            with _consec_fail_lock:
+                _consec_fail_count[key] = _consec_fail_count.get(key, 0) + 1
+                cur_count = _consec_fail_count[key]
+            if cur_count >= auto_pause_threshold:
+                # 自动暂停该 IP
+                ...
+        elif status == 'online':
+            # 在线则清零连续失败计数
+            with _consec_fail_lock:
+                _consec_fail_count.pop(key, None)
+因此：只要你看到配置保存成功（toast），之后任意一轮里新跑到的 _check_one_and_record 都会用新开关。
+注意两点边界（不算“不生效”，而是语义如此）：
+
+关掉开关后：离线时不会再走“累加失败次数 / 自动暂停”分支；已累加的计数不会在这里被清掉，
+直到该 IP 有一次在线才会 pop 清零（若你关了很久再开，理论上还带着旧计数，这是个小边角）。
+“立即”：以 HTTP 保存完成并更新了 CONFIG 为准；若当时正有大量探测在跑，
+每条结果仍按处理到这段代码时的当前 CONFIG 判断，一般也就是当前这一轮探测的时间尺度内。
+
 
 --------------------------------------
+
+
+//DNS超时选项+健康度优先
+//DNS类型无结果改为Debug输出一天仅显示1次
+
+看一下现在的DNS查询代码 有没有优化的空间？我现在已经是TCP轮询模式了 但是偶尔还是会出现超时的情况
+E:\Github\Network-Monitor>cat error.log | grep "custom DNS"
+[2026-03-23T23:16:56.860092][ERROR] [custom DNS] 2606:4700:4700::1001(TCP) 查询 A 6ahddutb1ucc3cp.ru 失败: LifetimeTimeout: The resolution lifetime expired after 5.108 seconds: Server Do53:2606:4700:4700::1001@53 answered The DNS operation timed out.
+[2026-03-24T04:26:08.871530][ERROR] [custom DNS] 2001:4860:4860::8844(TCP) 查询 A t.overflow.biz 失败: LifetimeTimeout: The resolution lifetime expired after 5.108 seconds: Server Do53:2001:4860:4860::8844@53 answered The DNS operation timed out.
+[2026-03-24T06:46:56.233031][ERROR] [custom DNS] 2001:4860:4860::8888(TCP) 查询 A t.overflow.biz 失败: LifetimeTimeout: The resolution lifetime expired after 5.110 seconds: Server Do53:2001:4860:4860::8888@53 answered The DNS operation timed out.
+[2026-03-24T09:35:51.848136][ERROR] [custom DNS] 2001:4860:4860::8888(TCP) 查询 A t.overflow.biz 失败: LifetimeTimeout: The resolution lifetime expired after 5.108 seconds: Server Do53:2001:4860:4860::8888@53 answered The DNS operation timed out.
+[2026-03-24T11:43:01.421480][ERROR] [custom DNS] 2001:4860:4860::8844(TCP) 查询 A t.overflow.biz 失败: LifetimeTimeout: The resolution lifetime expired after 5.102 seconds: Server Do53:2001:4860:4860::8844@53 answered The DNS operation timed out.
+[2026-03-24T13:29:03.469967][ERROR] [custom DNS] 2001:4860:4860::8888(TCP) 查询 A t.overflow.biz 失败: LifetimeTimeout: The resolution lifetime expired after 5.111 seconds: Server Do53:2001:4860:4860::8888@53 answered The DNS operation timed out.
+[2026-03-24T13:40:46.886533][ERROR] [custom DNS] 2001:4860:4860::8844(TCP) 查询 A t.overflow.biz 失败: LifetimeTimeout: The resolution lifetime expired after 5.115 seconds: Server Do53:2001:4860:4860::8844@53 answered The DNS operation timed out.
+[2026-03-24T14:34:02.441624][ERROR] [custom DNS] 2001:4860:4860::8888(TCP) 查询 A tr4ck3r.duckdns.org 失败: LifetimeTimeout: The resolution lifetime expired after 5.111 seconds: Server Do53:2001:4860:4860::8888@53 answered The DNS operation timed out.
+[2026-03-24T15:54:46.915740][ERROR] [custom DNS] 2001:4860:4860::8844(TCP) 查询 A t.overflow.biz 失败: LifetimeTimeout: The resolution lifetime expired after 5.110 seconds: Server Do53:2001:4860:4860::8844@53 answered The DNS operation timed out.
+[2026-03-24T16:24:38.849851][ERROR] [custom DNS] 2001:4860:4860::8844(TCP) 查询 A tr4ck3r.duckdns.org 失败: LifetimeTimeout: The resolution lifetime expired after 5.115 seconds: Server Do53:2001:4860:4860::8844@53 answered The DNS operation timed out.
+[2026-03-24T16:45:54.761885][ERROR] [custom DNS] 2001:4860:4860::8844(TCP) 查询 A t.overflow.biz 失败: LifetimeTimeout: The resolution lifetime expired after 5.112 seconds: Server Do53:2001:4860:4860::8844@53 answered The DNS operation timed out.
+[2026-03-24T17:16:44.318726][ERROR] [custom DNS] 2001:4860:4860::8888(TCP) 查询 A tr4ck3r.duckdns.org 失败: LifetimeTimeout: The resolution lifetime expired after 5.102 seconds: Server Do53:2001:4860:4860::8888@53 answered The DNS operation timed out.
+[2026-03-24T17:31:17.884635][ERROR] [custom DNS] 2001:4860:4860::8844(TCP) 查询 A t.overflow.biz 失败: LifetimeTimeout: The resolution lifetime expired after 5.106 seconds: Server Do53:2001:4860:4860::8844@53 answered The DNS operation timed out.
+[2026-03-24T19:10:40.987535][ERROR] [custom DNS] 2001:4860:4860::8844(TCP) 查询 A tr4ck3r.duckdns.org 失败: LifetimeTimeout: The resolution lifetime expired after 5.110 seconds: Server Do53:2001:4860:4860::8844@53 answered The DNS operation timed out.
+[2026-03-24T20:34:34.200873][ERROR] [custom DNS] 2606:4700:4700::1111(TCP) 查询 A tr4ck3r.duckdns.org 失败: LifetimeTimeout: The resolution lifetime expired after 5.110 seconds: Server Do53:2606:4700:4700::1111@53 answered The DNS operation timed out.
+[2026-03-24T20:34:39.302996][ERROR] [custom DNS] 2001:4860:4860::8844(TCP) 查询 A tr4ck3r.duckdns.org 失败: LifetimeTimeout: The resolution lifetime expired after 5.101 seconds: Server Do53:2001:4860:4860::8844@53 answered The DNS operation timed out.
+[2026-03-24T20:34:44.417465][ERROR] [custom DNS] 2001:4860:4860::8888(TCP) 查询 A tr4ck3r.duckdns.org 失败: LifetimeTimeout: The resolution lifetime expired after 5.113 seconds: Server Do53:2001:4860:4860::8888@53 answered The DNS operation timed out.
+[2026-03-24T20:44:29.289245][ERROR] [custom DNS] 2606:4700:4700::1001(TCP) 查询 AAAA tracker.t-1.org 失败: LifetimeTimeout: The resolution lifetime expired after 5.107 seconds: Server Do53:2606:4700:4700::1001@53 answered The DNS operation timed out.
+[2026-03-24T20:45:50.002245][ERROR] [custom DNS] 2606:4700:4700::1111(TCP) 查询 AAAA explodie.org 失败: LifetimeTimeout: The resolution lifetime expired after 5.111 seconds: Server Do53:2606:4700:4700::1111@53 answered The DNS operation timed out.
+[2026-03-24T20:45:50.047681][ERROR] [custom DNS] 2001:4860:4860::8844(TCP) 查询 A tr4ck3r.duckdns.org 失败: LifetimeTimeout: The resolution lifetime expired after 5.106 seconds: Server Do53:2001:4860:4860::8844@53 answered The DNS operation timed out.
+[2026-03-24T20:45:55.160788][ERROR] [custom DNS] 2001:4860:4860::8888(TCP) 查询 A tr4ck3r.duckdns.org 失败: LifetimeTimeout: The resolution lifetime expired after 5.112 seconds: Server Do53:2001:4860:4860::8888@53 answered The DNS operation timed out.
+豆包 跟我说 ：
+可以调整轮询策略，比如给每个 DNS 设置权重，超时率低的多分配查询次数。
+另外，检查下代码里的 TCP 连接是否复用，避免频繁建立新连接导致被限制。
+还可以试试 DNS over TLS，比如 Cloudflare 的 1.1.1.1:853，加密查询可能减少被拦截的概率，不过需要 dnspython 配合 ssl 模块实现。
+//最后那个 DNS over TLS 就算了 在国内 加密反而更麻烦 更容易受到审查。。我是tracker用的 不需要加密
+我现在已经用了 这些IPV6的TCP 53的DNS了 之前还用了谷歌和CF的IPV4可惜 似乎不理想 也是解析失败频率有点高
+2001:4860:4860::8844,2001:4860:4860::8888,2606:4700:4700::1001,2606:4700:4700::1111
+我想说调整下策略后 再用 可能会好些？
+
+----------------
+
+分析项目中自定义 DNS（含 TCP）的实现，评估可优化点并实现合理的改进（例如失败统计、优先级/跳过慢服务器、连接复用若 dnspython 支持）。
+
+实现两项改进：
+1) 可配置的 dns_timeout（与探测 timeout 分离，加快故障转移）；
+2) 基于近期失败的服务器冷却与排序（优先健康服务器，减少先撞慢服的概率）。
+TCP 连接复用：dnspython 的 Resolver 单次 resolve 通常每次新建 TCP，完整连接池改动大，
+本次以“更短 DNS 超时 + 避开近期超时服”达到类似效果。
+
+正在实现：dns_timeout 配置、自适应服务器排序（冷却/失败次数），并更新前端与多语言文案。
+
+现有行为（你日志里 ~5.1 秒的原因）
+自定义 DNS 路径里，之前 resolver.timeout / lifetime 都用的全局 CONFIG['timeout']（默认 5 秒），
+所以日志里常见 LifetimeTimeout ... after ~5.1 seconds，这是预期表现，不是“没走 TCP”。
+
+dnspython 的 Resolver.resolve() 基本是“每次查询新建连接”，没有在项目里做 TCP 连接池；
+要做稳定复用要自建长连接/状态机，复杂度高，且和多线程监控叠在一起容易出边界问题。
+豆包说的“复用”在这套 API 里不是开箱即有。
+已落地的优化（策略向，贴合你说的“权重/避开慢服”）
+独立配置 dns_timeout（默认 0 = 仍用探测超时）
+
+可在 2～4 秒试一轮（仍会被网络偶发抖动影响，但换下一台 DNS 会快很多）。
+对 custom 和 dnspython 模式都生效。
+配置已进：DEFAULT_CONFIG、load_config / persist_config、validate_config、管理 API、设置页、六国语言文案。
+自定义多 DNS：健康度 + 原 Round-Robin
+
+对 每个 (服务器, TCP/UDP) 记录连续超时，失败则进入 短时冷却（15→30→60→120 秒封顶），
+排序时 优先非冷却、失败少的，再在此顺序上做 RR 旋转。
+不会把某台永久拉黑；全员不爽时仍会按顺序试一遍，避免饿死。
+
+使用和预期
+设置里 「DNS 单次查询超时」：例如设为 3，总探测 仍可用 5 秒；DNS 只在 3 秒内等结果，失败就换下一台。
+公网 IPv6 DNS（Google/CF）在国内链路上偶发 5s 拖死是常见现象；策略优化能 减少平均等待和误伤，不能从物理上消灭超时。
+
+涉及文件
+app.py：_dns_query_timeout、_dns_note_srv_result、_dns_custom_try_order、_resolve_custom 
+调整、_resolve_dnspython 使用 DNS 超时、配置与校验、API。
+index.html：DNS 卡片里增加 dns_timeout 数字框。
+static/language/*.js：dnsTimeout / dnsTimeoutDesc。
+若你还想再往前走一小步（不改协议、不做 DoT），可以以后再讨论：
+对同一域名在短时间内连续 DNS 全挂时做一次短时缓存/退避，避免监控线程密集重试把线路打满——需要的话我可以按你接受的延迟再改一版。
+
+----------------
+
+Q：
+之前探测DNS轮询模式 是怎么个轮询法？一个域名用1个DNS？轮询DNS做域名的查询？
+那现在呢？改成什么样了 多个域名用1个DNS错误 才轮询DNS？
+
+----------------
+
+A：（cursor）
+说清楚：轮询的是「哪台 DNS 先被试」，不是「一个域名一辈子只绑一台 DNS」，也不是「很多域名共用一个错误才换 DNS」。
+
+以前（改之前）怎么轮
+对 每一次 resolve(某个域名)，在 自定义 DNS 模式下会查 A 再查 AAAA（两轮）。
+
+每一轮（例如只查 A）的流程是：
+
+用全局计数器 _dns_rr_next(N) 算出一个 起始下标 start（在 0 … N-1 里转圈，全进程所有域名共用这一个计数器）。
+按顺序试服务器：(start+0) % N, (start+1) % N, … 直到：
+某台 成功返回记录，或
+某台给出 确定结果（如 NXDOMAIN / NoAnswer，空列表），就不再试后面的。
+
+所以：
+一个域名、一次查询类型（A 或 AAAA）：仍然是 按顺序最多试遍列表里所有 DNS，只是 从哪一台开始 由全局 RR 决定。
+不同域名：会 轮流 让「首选 DNS」在列表里错位（分散负载），不是「一个域名只用一个 DNS」。
+现在改成什么样了
+仍然是：每个域名、每种记录类型，按顺序一台台试，直到成功或确定无记录。
+
+变化只有两点：
+1、尝试顺序不再只是「固定列表 + RR 起点」，而是先按 每台 DNS 的健康状态 排序（近期超时多的会 靠后，并有一段 冷却时间 降低优先级），再在这个排好序的列表上做 RR 旋转。
+2、健康统计是按 「哪台 DNS 服务器（IP + 是否 TCP）」 记的，不是按域名。
+所以：任意域名 在某台 DNS 上超时，都会让那台在全局看来「变差一点」，后面 所有域名 都会 更少优先 先试它（但列表里仍会轮到它，不会永久不用）。
+
+直接回答你的两句理解
+说法						实际
+「一个域名用 1 个 DNS？」			不是。一个域名一次 A（或 AAAA）查询会从 某一台开始，失败就 立刻换下一台，直到成功或确定无记录。
+「多个域名用 1 个 DNS 出错才轮询 DNS？」	不是。单次查询里第一台挂了就会试第二台；多台域名之间没有「凑够几次错误才轮询」这种逻辑。
+如果你愿意，我可以把这段说明缩成注释写进 app.py 里 _resolve_custom 的 docstring，方便以后自己看。
+
+----------------
+
+Q：
+好的 你加注释
+
+----------------
+
+A：（cursor）
+已加上，位置如下：
+1、_resolve_custom：在原有 docstring 末尾增加了 「轮询语义（易混点）」 三条说明（单域名仍按序试多台 DNS、RR 是错位首选、健康度按 DNS 不按域名凑错误）。
+2、_dns_rr_next：补充了 RR 用在「已排序的下标列表」上，以及不是一域名绑一台 DNS。
+3、_dns_custom_try_order：在 docstring 里补了一句——健康度按 (IP+TCP)、与域名无关。
+
+python -m py_compile app.py 已通过。
+
+----------------
+
+Q：
+2026/3/25 02:31:13[ERROR] DNS解析失败 bughome.de [模式:custom]: 无结果
+2026/3/25 02:30:05[ERROR] DNS解析失败 uabits.today [模式:custom]: 无结果
+2026/3/25 02:30:05[ERROR] DNS解析失败 tracker.dhitechnical.com [模式:custom]: 无结果
+像这种DNS查询失败 无结果的 我也要像超时那样的格式 还要知道是哪个DNS查询的无结果
+例如（要知道 哪个DNS 查的是哪个（A/AAAA）记录无结果）：
+[ERROR] [custom DNS] 2001:4860:4860::8844(TCP) 查询 A bughome.de 失败: 无结果
+
+----------------
+
+A：（cursor）
+我会在 custom DNS 的底层函数 _query_single_server() 里，把原来被“忽略的 NXDOMAIN/NoAnswer/NoNameservers 无结果”
+也按你想要的格式记一条 [custom DNS] DNSIP(TCP/UDP) 查询 A/AAAA 域名 失败: 无结果。
+同时在 resolve() 里避免再额外打印一条通用的 DNS解析失败 ... 无结果（否则会重复），
+保证你看到的是“带具体 DNS + 记录类型”的那种格式。
+
+我看懂你的诉求了：
+你现在看到的 DNS解析失败 xxx [模式:custom]: 无结果 这种日志没有“到底是哪台 DNS（IP）+ A/AAAA”。
+
+你希望它也像超时那样，输出成：
+[custom DNS] 2001:...(TCP) 查询 A bughome.de 失败: 无结果
+
+我已经在后端把这个补齐了：
+代码修改点（app.py）
+_query_single_server()
+
+原来 NXDOMAIN / NoAnswer / NoNameservers 会直接 return []，不记日志。
+现在遇到这些“无结果”情况，会记一条和超时相同风格的错误日志，包含：
+DNS 服务器 IP（srv_ip）
+协议（TCP/UDP）
+记录类型（A/AAAA）
+域名
+resolve()
+
+为了避免你同时再看到一条通用的：
+DNS解析失败 xxx [模式:custom]: 无结果
+我在 mode=='custom' 时不再额外输出这条通用日志（因为每台 DNS 的“无结果”日志已经在 _query_single_server 里输出了）。
+已验证
+python -m py_compile app.py 通过
+linter 无报错
+如果你希望“无结果”也像原来那样做去重（比如同一个域名一段时间内只记一次，避免日志太多），你告诉我你想按什么粒度去重：domain 还是 domain+rtype+dns_ip。
+
+----------------
+
+Q：
+是的 无结果 必须去重复 避免刷控制台 有的是停止解析的无结果 所以要避免重复 
+按照域名+A/AAAA记录类型来记录过滤
+然后现在是WEB那边和控制台 都能看到这个日志了 对吧 都是error的日志对吧？
+
+----------------
+
+A：（deepseek）
+1. 当前日志输出位置（Web 界面 + 控制台）
+在 _query_single_server() 里，我们为“无结果”（NXDOMAIN / NoAnswer / NoNameservers）记录了：
+……
+db.add_log(...) → 写入 Web 日志（可在前端“日志”页面看到），级别为 error。
+cprint(...) → 输出到控制台（取决于 console_log_level，如果 log_level 为 error 或 debug，就会显示）。
+
+因此，你现在在控制台和 Web 界面都能看到这类日志，且都是 error 级别。
+
+2. 去重需求
+你希望“无结果”日志按照 域名 + 记录类型（A/AAAA） 去重，避免刷屏。
+这类似于我们之前对 _dns_fail_once 的处理，但作用范围从单纯“域名”扩展到“域名+记录类型”。
+
+建议的去重逻辑
+维护一个字典：_dns_noresult_logged = {}，键为 (domain, rtype)，值为最近一次记录的时间戳（秒）。
+时间窗口设为 1 小时（与 _dns_fail_once 一致），超过窗口才允许再次记录。
+在 _query_single_server() 检测到“无结果”时，先检查该键是否在窗口期内，若在则跳过，否则记录并更新时间戳。
+这样即使不同 DNS 服务器都返回“无结果”，也只会为每个 (domain, rtype) 每 1 小时最多记录一次，完全避免刷屏。
+
+3. 代码实现（修改 _query_single_server()）
+在文件开头增加一个全局去重结构（与 _dns_fail_logged 并列）：
+
+4. 其它细节
+此去重与 _dns_fail_once 独立，因为后者用于“解析异常”（超时、连接失败），而这里是“域名本身无记录”（正常现象）。
+在 resolve() 函数中，当 mode=='custom' 且 ips 为空时，我们不再额外调用 _dns_fail_once（已经通过上述去重记录过），所以不会有重复的通用日志。
+如果你希望去重的时间窗口可配置，后续也可以从 CONFIG 读取。
+
+5. 总结
+当前日志：控制台 + Web 界面，error 级别。
+新增去重：按 (domain, rtype) 在 1 小时内只记录一次“无结果”。
+修改后既能满足你的调试需求，又不会刷屏。
+如果你对去重的时间窗口还有其他要求（例如 10 分钟、24 小时），或者希望将“无结果”日志级别改为 info（避免错误告警误判），告诉我即可调整。
+
+
+--------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
