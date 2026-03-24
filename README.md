@@ -621,4 +621,4 @@ MIT License
 ---
 
 ##### 项目发起人：rer
-##### 项目协作者：minimaxi、Claude、豆包、grok、deepseek、Trae(solo)
+##### 项目协作者：minimaxi、Claude、豆包、grok、deepseek、Trae(solo)、Gemini、Cursor

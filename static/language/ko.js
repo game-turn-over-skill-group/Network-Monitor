@@ -180,6 +180,7 @@ window.__i18n_ko = {
     udpProxyDesc: 'SOCKS5만 지원 (pip install PySocks 필요)',
     seconds: '초',
     second: '초',
+    times: '회',
     minute: '분',
     minutes: '분',
     hour: '시간',
@@ -293,3 +294,26 @@ window.__i18n_ko = {
     sortUnknownFirst: '알 수 없음 우선'
   }
 }
+// ── 추가: 프로브 / 장애 감지 / 자동 일시정지 설정 번역 ──
+;(function(){
+  const t = window.__i18n_ko;
+  Object.assign(t.config, {
+    probeSection:          '네트워크 프로브 & 장애 감지 & 자동 일시정지',
+    probeFailLabel:        '실패율 트리거 임계값',
+    probeFailDesc:         '라운드 실패율이 이 값에 도달하면 네트워크 이상으로 판정 (기본값 50%)',
+    probeTimeoutLabel:     '프로브 타임아웃',
+    probeTimeoutDesc:      '프로브 대상당 TCP 연결 최대 대기 시간 (초)',
+    probeIPv4Label:        'IPv4 프로브 대상 (한 줄에 하나)',
+    probeIPv4Desc:         '하나라도 도달 가능하면 IPv4 정상 판정; 비워두면 IPv4 프로브 비활성화',
+    probeIPv6Label:        'IPv6 프로브 대상 (한 줄에 하나, 비워두면 비활성화)',
+    probeIPv6Desc:         'IPv4와 IPv6 프로브는 독립적으로 평가되며 툴팁에서 별도로 표시됩니다',
+    autoPauseLabel:        '연속 실패 시 자동 일시정지',
+    autoPauseDesc:         '활성화하면 N회 연속 실패한 IP를 자동 일시정지하여 ISP 스캔으로 인한 오탐을 방지합니다',
+    autoPauseEnabled:      '활성화됨',
+    autoPauseDisabled:     '비활성화됨',
+    autoPauseThreshLabel:  '일시정지까지 연속 실패 횟수',
+    autoPauseThreshDesc:   '자동 일시정지를 트리거하는 연속 실패 횟수 (기본값 30회). INFO 로그가 콘솔과 Web 로그에 출력됩니다',
+    autoPauseHint:         '자동 일시정지된 IP는 모니터링 목록에서 수동으로 재개할 수 있습니다. 재개 시 실패 카운터가 초기화됩니다',
+    probeIPv6NotConfigured:'IPv6 프로브 미설정',
+  });
+})();

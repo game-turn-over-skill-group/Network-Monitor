@@ -180,6 +180,7 @@ window.__i18n_ja = {
     udpProxyDesc: 'SOCKS5のみ（pip install PySocks が必要）',
     seconds: '秒',
     second: '秒',
+    times: '回',
     minute: '分',
     minutes: '分',
     hour: '時間',
@@ -293,3 +294,26 @@ window.__i18n_ja = {
     sortUnknownFirst: '不明優先'
   }
 }
+// ── 追加：プローブ / 障害検知 / 自動一時停止 設定翻訳 ──
+;(function(){
+  const t = window.__i18n_ja;
+  Object.assign(t.config, {
+    probeSection:          'ネットワークプローブ & 障害検知 & 自動一時停止',
+    probeFailLabel:        '失敗率トリガー閾値',
+    probeFailDesc:         'ラウンドの失敗率がこの値に達した場合にネットワーク障害と判定（デフォルト 50%）',
+    probeTimeoutLabel:     'プローブタイムアウト',
+    probeTimeoutDesc:      'プローブ対象1件あたりのTCP接続最大待機時間（秒）',
+    probeIPv4Label:        'IPv4 プローブターゲット（1行1アドレス）',
+    probeIPv4Desc:         'いずれか到達可能であればIPv4正常と判定；空欄でIPv4プローブ無効化',
+    probeIPv6Label:        'IPv6 プローブターゲット（1行1アドレス、空欄でIPv6プローブ無効）',
+    probeIPv6Desc:         'IPv4とIPv6のプローブは独立して評価され、ツールチップで個別表示されます',
+    autoPauseLabel:        '連続失敗時の自動一時停止',
+    autoPauseDesc:         '有効にすると、N回連続で失敗したIPを自動一時停止し、ISPスキャンによる誤検知を防ぎます',
+    autoPauseEnabled:      '有効',
+    autoPauseDisabled:     '無効',
+    autoPauseThreshLabel:  '一時停止までの連続失敗回数',
+    autoPauseThreshDesc:   '自動一時停止をトリガーする連続失敗回数（デフォルト 30回）。INFOログがコンソールとWebログに出力されます',
+    autoPauseHint:         '自動一時停止されたIPはモニタリングリストで手動再開できます。再開後、失敗カウンターはリセットされます',
+    probeIPv6NotConfigured:'IPv6プローブ未設定',
+  });
+})();

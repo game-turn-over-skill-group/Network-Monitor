@@ -1567,16 +1567,55 @@
                     <div v-if="showProbeTooltip"
                          :style="{ position:'fixed', left:(probeTooltipX+14)+'px', top:(probeTooltipY+14)+'px', zIndex:99999,
                                    background:'var(--probe-tooltip-bg, var(--glass-nav))', border:'1px solid var(--glass-border)',
-                                   borderRadius:'8px', padding:'8px 14px', minWidth:'160px',
+                                   borderRadius:'8px', padding:'8px 14px', minWidth:'200px',
                                    backdropFilter:'blur(14px)', boxShadow:'var(--probe-tooltip-shadow, 0 6px 24px rgba(0,0,0,.5))',
                                    whiteSpace:'nowrap', pointerEvents:'none' }">
                         <div style="font-size:.65rem;color:var(--muted);margin-bottom:4px;font-weight:600;letter-spacing:.3px;">
                             {{ t('stats.probe') }}
                         </div>
-                        <div v-for="(ok, ip) in (stats.probe_details||{})" :key="ip"
-                             style="font-size:.78rem;font-weight:600;line-height:2;"
-                             :style="{ color: ok ? 'var(--ok)' : 'var(--err)' }">
-                            <span style="margin-right:6px;">{{ ok ? '✔' : '✗' }}</span>{{ ip }}
+                        <!-- IPv4 分组：用 template v-for 避免 Vue3 v-for+v-if 同元素限制 -->
+                        <div v-if="Object.values(stats.probe_details||{}).some(d=>d.version==='ipv4')"
+                             style="font-size:.6rem;color:var(--muted);margin-top:2px;margin-bottom:1px;font-weight:600;letter-spacing:.2px;">
+                            IPv4
+                        </div>
+                        <template v-for="(d, ip) in (stats.probe_details||{})" :key="'v4-'+ip">
+                            <div v-if="d.version==='ipv4'"
+                                 style="font-size:.78rem;font-weight:600;line-height:1.9;display:flex;align-items:center;gap:6px;"
+                                 :style="{ color: d.ok ? 'var(--ok)' : 'var(--err)' }">
+                                <span>{{ d.ok ? '✔' : '✗' }}</span>
+                                <span>{{ ip }}</span>
+                                <span style="font-size:.7rem;opacity:.8;">{{ d.ok && d.latency >= 0 ? d.latency+'ms' : (d.ok ? '' : t('stats.timeout')||'超时') }}</span>
+                            </div>
+                        </template>
+                        <!-- IPv6 分组 -->
+                        <div v-if="Object.values(stats.probe_details||{}).some(d=>d.version==='ipv6')"
+                             style="font-size:.6rem;color:var(--muted);margin-top:4px;margin-bottom:1px;font-weight:600;letter-spacing:.2px;">
+                            IPv6
+                        </div>
+                        <template v-for="(d, ip) in (stats.probe_details||{})" :key="'v6-'+ip">
+                            <div v-if="d.version==='ipv6'"
+                                 style="font-size:.78rem;font-weight:600;line-height:1.9;display:flex;align-items:center;gap:6px;"
+                                 :style="{ color: d.ok ? 'var(--ok)' : 'var(--err)' }">
+                                <span>{{ d.ok ? '✔' : '✗' }}</span>
+                                <span style="max-width:150px;overflow:hidden;text-overflow:ellipsis;">{{ ip }}</span>
+                                <span style="font-size:.7rem;opacity:.8;">{{ d.ok && d.latency >= 0 ? d.latency+'ms' : (d.ok ? '' : t('stats.timeout')||'超时') }}</span>
+                            </div>
+                        </template>
+                        <!-- IPv6 未配置提示 -->
+                        <div v-if="stats.net_probe_v6_ok===null || stats.net_probe_v6_ok===undefined"
+                             style="font-size:.65rem;color:var(--muted);margin-top:4px;opacity:.6;">
+                            {{ t('config.probeIPv6NotConfigured') }}
+                        </div>
+                        <!-- 网络状态摘要 -->
+                        <div style="margin-top:5px;padding-top:4px;border-top:1px solid var(--glass-border);font-size:.68rem;">
+                            <span :style="{color: stats.net_probe_v4_ok ? 'var(--ok)' : 'var(--err)'}">
+                                IPv4: {{ stats.net_probe_v4_ok ? t('stats.netOk') : t('stats.netBad') }}
+                            </span>
+                            <span v-if="stats.net_probe_v6_ok !== null && stats.net_probe_v6_ok !== undefined"
+                                  style="margin-left:10px;"
+                                  :style="{color: stats.net_probe_v6_ok ? 'var(--ok)' : 'var(--err)'}">
+                                IPv6: {{ stats.net_probe_v6_ok ? t('stats.netOk') : t('stats.netBad') }}
+                            </span>
                         </div>
                     </div>
                 </teleport>
@@ -2791,6 +2830,85 @@
                 </div>
             </div>
 
+            <!-- 网络探针 & 故障检测 & 自动暂停 -->
+            <div class="card mb-3">
+                <div class="card-header">
+                    <i class="bi bi-radar me-1"></i>{{ t('config.probeSection') }}
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <!-- 故障率阈值 -->
+                        <div class="col-md-3">
+                            <label class="form-label"><i class="bi bi-speedometer2 me-1"></i>{{ t('config.probeFailLabel') }}</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" v-model.number="cfg.probe_fail_threshold"
+                                       @change="saveCfg" min="10" max="100" step="5">
+                                <span class="input-group-text">%</span>
+                            </div>
+                            <div class="form-text">{{ t('config.probeFailDesc') }}</div>
+                        </div>
+                        <!-- 探针超时 -->
+                        <div class="col-md-2">
+                            <label class="form-label"><i class="bi bi-hourglass-split me-1"></i>{{ t('config.probeTimeoutLabel') }}</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" v-model.number="cfg.probe_timeout"
+                                       @change="saveCfg" min="1" max="30">
+                                <span class="input-group-text">{{ t('config.seconds') }}</span>
+                            </div>
+                            <div class="form-text">{{ t('config.probeTimeoutDesc') }}</div>
+                        </div>
+                        <!-- IPv4 探针列表 -->
+                        <div class="col-md-3">
+                            <label class="form-label"><i class="bi bi-4-circle me-1"></i>{{ t('config.probeIPv4Label') }}</label>
+                            <textarea class="form-control" rows="3"
+                                      :value="(cfg.probe_ipv4_targets||[]).join('\n')"
+                                      @blur="e => { cfg.probe_ipv4_targets = e.target.value.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean); saveCfg(); }"
+                                      placeholder="8.8.8.8&#10;1.1.1.1&#10;114.114.114.114"></textarea>
+                            <div class="form-text">{{ t('config.probeIPv4Desc') }}</div>
+                        </div>
+                        <!-- IPv6 探针列表 -->
+                        <div class="col-md-4">
+                            <label class="form-label"><i class="bi bi-6-circle me-1"></i>{{ t('config.probeIPv6Label') }}</label>
+                            <textarea class="form-control" rows="3"
+                                      :value="(cfg.probe_ipv6_targets||[]).join('\n')"
+                                      @blur="e => { cfg.probe_ipv6_targets = e.target.value.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean); saveCfg(); }"
+                                      placeholder="2001:4860:4860::8888&#10;2606:4700:4700::1111&#10;2400:3200:baba::1"></textarea>
+                            <div class="form-text">{{ t('config.probeIPv6Desc') }}</div>
+                        </div>
+                    </div>
+                    <hr style="border-color:var(--glass-border);margin:14px 0 10px;">
+                    <div class="row g-3">
+                        <!-- 自动暂停开关 -->
+                        <div class="col-md-4">
+                            <label class="form-label"><i class="bi bi-pause-circle me-1"></i>{{ t('config.autoPauseLabel') }}</label>
+                            <div class="form-check form-switch mt-1">
+                                <input class="form-check-input" type="checkbox" v-model="cfg.auto_pause_enabled"
+                                       @change="saveCfg" id="autoPauseSwitch">
+                                <label class="form-check-label" for="autoPauseSwitch" style="cursor:pointer;">
+                                    {{ cfg.auto_pause_enabled ? t('config.autoPauseEnabled') : t('config.autoPauseDisabled') }}
+                                </label>
+                            </div>
+                            <div class="form-text">{{ t('config.autoPauseDesc') }}</div>
+                        </div>
+                        <!-- 自动暂停次数 -->
+                        <div class="col-md-4" :style="cfg.auto_pause_enabled ? '' : 'opacity:.4;pointer-events:none;'">
+                            <label class="form-label"><i class="bi bi-123 me-1"></i>{{ t('config.autoPauseThreshLabel') }}</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" v-model.number="cfg.auto_pause_threshold"
+                                       @change="saveCfg" min="5" max="500" :disabled="!cfg.auto_pause_enabled">
+                                <span class="input-group-text">{{ t('config.times') }}</span>
+                            </div>
+                            <div class="form-text">{{ t('config.autoPauseThreshDesc') }}</div>
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <div class="form-text" style="font-size:.72rem;color:#64748b;padding-bottom:2px;">
+                                <i class="bi bi-info-circle me-1"></i>{{ t('config.autoPauseHint') }}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- 用户管理 (仅admin) -->
             <div class="card mb-3">
                 <div class="card-header d-flex justify-content-between align-items-center">
@@ -3105,7 +3223,13 @@ createApp({
             listen_ipv6: 'global',
             listen_ipv6_custom: '',
             http_proxy_enabled: false,
-            udp_proxy_enabled: false
+            udp_proxy_enabled: false,
+            probe_fail_threshold: 50,
+            probe_timeout: 5,
+            probe_ipv4_targets: ['8.8.8.8', '1.1.1.1', '114.114.114.114'],
+            probe_ipv6_targets: ['2001:4860:4860::8888', '2606:4700:4700::1111', '2400:3200:baba::1'],
+            auto_pause_enabled: true,
+            auto_pause_threshold: 30
         });
         // 仪表盘 rank 切换 / 快速搜索
         const dashRankMode = ref('worst'); // 'worst' | 'best'
@@ -3741,6 +3865,12 @@ createApp({
                     listen_ipv6_custom: cfg.value.listen_ipv6_custom,
                     http_proxy_enabled: cfg.value.http_proxy_enabled,
                     udp_proxy_enabled: cfg.value.udp_proxy_enabled,
+                    probe_fail_threshold: cfg.value.probe_fail_threshold ?? 50,
+                    probe_timeout: cfg.value.probe_timeout || 5,
+                    probe_ipv4_targets: cfg.value.probe_ipv4_targets || ['8.8.8.8','1.1.1.1','114.114.114.114'],
+                    probe_ipv6_targets: cfg.value.probe_ipv6_targets || [],
+                    auto_pause_enabled: cfg.value.auto_pause_enabled !== false,
+                    auto_pause_threshold: cfg.value.auto_pause_threshold || 30,
                 });
                 if (res.data?.success) showToast(_t('config.savedOk'), 'ok', 2000);
                 // 检测端口或监听地址是否改变

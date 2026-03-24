@@ -621,4 +621,4 @@ MIT License
 ---
 
 ##### Project founder: rer
-##### Contributors: minimaxi, Claude, Doubao、grok、deepseek、Trae(solo)
+##### Contributors: minimaxi, Claude, Doubao、grok、deepseek、Trae(solo)、Gemini、Cursor

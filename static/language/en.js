@@ -180,6 +180,7 @@ window.__i18n_en = {
     udpProxyDesc: 'SOCKS5 only (requires pip install PySocks)',
     seconds: 's',
     second: 's',
+    times: 'times',
     minute: 'min',
     minutes: 'mins',
     hour: 'hour',
@@ -293,3 +294,26 @@ window.__i18n_en = {
     sortUnknownFirst: 'Unknown First'
   }
 }
+// ── Appended: probe / fault detection / auto-pause config translations ──
+;(function(){
+  const t = window.__i18n_en;
+  Object.assign(t.config, {
+    probeSection:          'Network Probe & Fault Detection & Auto-Pause',
+    probeFailLabel:        'Failure Rate Threshold',
+    probeFailDesc:         'Trigger network-fault when round failure rate reaches this value (default 50%)',
+    probeTimeoutLabel:     'Probe Timeout',
+    probeTimeoutDesc:      'Max TCP connect wait per probe target (seconds)',
+    probeIPv4Label:        'IPv4 Probe Targets (one address per line)',
+    probeIPv4Desc:         'Network is healthy if any target is reachable; leave empty to disable IPv4 probing',
+    probeIPv6Label:        'IPv6 Probe Targets (one per line, empty = disable IPv6 probe)',
+    probeIPv6Desc:         'IPv4 and IPv6 probes are evaluated independently and shown separately in the tooltip',
+    autoPauseLabel:        'Auto-Pause on Consecutive Failures',
+    autoPauseDesc:         'When enabled, an IP that fails N times in a row is automatically paused to avoid ISP scan false-positives',
+    autoPauseEnabled:      'Enabled',
+    autoPauseDisabled:     'Disabled',
+    autoPauseThreshLabel:  'Consecutive Failures Before Pause',
+    autoPauseThreshDesc:   'How many consecutive failures trigger auto-pause (default 30). An INFO log is written to console and Web logs',
+    autoPauseHint:         'Auto-paused IPs can be resumed manually in the monitor list. The failure counter resets on resume',
+    probeIPv6NotConfigured:'IPv6 probe not configured',
+  });
+})();

@@ -180,6 +180,7 @@ window.__i18n_zh = {
     udpProxyDesc: 'UDP通常只支持SOCKS5（需安装PySocks: pip install PySocks）',
     seconds: '秒',
     second: '秒',
+    times: '次',
     minute: '分钟',
     minutes: '分钟',
     hour: '小时',
@@ -293,3 +294,26 @@ window.__i18n_zh = {
     sortUnknownFirst: '未知优先'
   }
 }
+// ── 追加：探针/故障检测/自动暂停 配置项翻译 ──
+;(function(){
+  const t = window.__i18n_zh;
+  Object.assign(t.config, {
+    probeSection:          '网络探针 & 故障检测 & 自动暂停',
+    probeFailLabel:        '本轮失败率触发阈值',
+    probeFailDesc:         '失败率达到此值则判定为网络异常（默认 50%）',
+    probeTimeoutLabel:     '探针超时',
+    probeTimeoutDesc:      '单次探针 TCP 连接最大等待时间（秒）',
+    probeIPv4Label:        'IPv4 探针目标（每行一个地址）',
+    probeIPv4Desc:         '任一可达即判定 IPv4 正常；留空则禁用 IPv4 探测',
+    probeIPv6Label:        'IPv6 探针目标（每行一个地址，留空则禁用 IPv6 探测）',
+    probeIPv6Desc:         'IPv4 与 IPv6 探针独立判断，Tooltip 中分开显示',
+    autoPauseLabel:        '连续失败自动暂停',
+    autoPauseDesc:         '开启后，单个 IP 连续探测失败 N 次将自动暂停，避免运营商巡查误触发',
+    autoPauseEnabled:      '已启用',
+    autoPauseDisabled:     '已禁用',
+    autoPauseThreshLabel:  '连续失败暂停阈值',
+    autoPauseThreshDesc:   '连续失败多少次后自动暂停该 IP（默认 30 次）。暂停后控制台和 Web 日志均输出 INFO 提示',
+    autoPauseHint:         '自动暂停的 IP 可在监控列表中手动恢复。恢复后连续失败计数重置',
+    probeIPv6NotConfigured:'IPv6探针未配置',
+  });
+})();

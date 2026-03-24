@@ -180,6 +180,7 @@ window.__i18n_fr = {
     udpProxyDesc: 'Uniquement SOCKS5 (nécessite pip install PySocks)',
     seconds: 's',
     second: 's',
+    times: 'fois',
     minute: 'min',
     minutes: 'mins',
     hour: 'heure',
@@ -293,3 +294,26 @@ window.__i18n_fr = {
     sortUnknownFirst: 'Inconnu en premier'
   }
 }
+// ── Ajout : traductions configuration sonde / détection / pause auto ──
+;(function(){
+  const t = window.__i18n_fr;
+  Object.assign(t.config, {
+    probeSection:          'Sonde réseau & Détection de panne & Pause automatique',
+    probeFailLabel:        'Seuil de taux d\'échec',
+    probeFailDesc:         'Déclenche une anomalie réseau si le taux d\'échec du tour atteint cette valeur (défaut 50%)',
+    probeTimeoutLabel:     'Délai d\'expiration sonde',
+    probeTimeoutDesc:      'Temps d\'attente TCP max par cible de sonde (secondes)',
+    probeIPv4Label:        'Cibles sonde IPv4 (une adresse par ligne)',
+    probeIPv4Desc:         'Le réseau est sain si l\'une des cibles est accessible ; laisser vide pour désactiver la sonde IPv4',
+    probeIPv6Label:        'Cibles sonde IPv6 (une par ligne, vide = désactiver)',
+    probeIPv6Desc:         'Les sondes IPv4 et IPv6 sont évaluées indépendamment et affichées séparément dans l\'infobulle',
+    autoPauseLabel:        'Pause automatique sur échecs consécutifs',
+    autoPauseDesc:         'Lorsqu\'activé, une IP qui échoue N fois de suite est automatiquement mise en pause pour éviter les faux positifs liés aux scans FAI',
+    autoPauseEnabled:      'Activé',
+    autoPauseDisabled:     'Désactivé',
+    autoPauseThreshLabel:  'Échecs consécutifs avant pause',
+    autoPauseThreshDesc:   'Nombre d\'échecs consécutifs déclenchant la pause auto (défaut 30). Un log INFO est écrit en console et dans les journaux Web',
+    autoPauseHint:         'Les IP mises en pause automatiquement peuvent être relancées manuellement dans la liste. Le compteur d\'échecs se remet à zéro à la reprise',
+    probeIPv6NotConfigured:'Sonde IPv6 non configurée',
+  });
+})();

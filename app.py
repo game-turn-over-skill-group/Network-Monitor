@@ -47,6 +47,7 @@ DEFAULT_CONFIG = {
     'stagger_delay_direct': 100,       # 直连模式：批间延迟 ms
     'log_to_disk': False,
     'log_level': 'info',               # none | info | error | debug
+    'debug_save_trace': False,         # 调试：输出异步保存耗时/队列状态（仅 debug 级别打印）
     'log_file': 'error.log',
     'data_file': 'data.json',
     'max_history': 2880,               # history_24h 上限：24h × 3600s ÷ 30s间隔 = 2880点
@@ -68,6 +69,22 @@ DEFAULT_CONFIG = {
     'show_removed_ips': True,          # 是否显示已移除的历史IP（前端控制）
     'default_layout_width': '1700',    # 默认页面视野宽度（px字符串，对应50%~100%）
     'allow_private_ips': False,        # 是否允许添加内网IP，默认禁止（SSRF防护）
+    # ── 网络探针与故障检测 ──
+    'probe_fail_threshold': 50,        # 本轮失败率达到多少%触发网络异常（默认50%，原90%太高）
+    'probe_timeout': 5,                # 探针单次 TCP 连接超时（秒），默认5s（原硬编码3s）
+    'probe_ipv4_targets': [            # IPv4 探针目标列表（任一可达即认为 IPv4 正常）
+        '8.8.8.8',                     # Google Public DNS
+        '1.1.1.1',                     # Cloudflare DNS
+        '114.114.114.114',             # 国内 114 DNS
+    ],
+    'probe_ipv6_targets': [            # IPv6 探针目标列表（任一可达即认为 IPv6 正常，留空则禁用）
+        '2001:4860:4860::8888',        # Google IPv6 DNS
+        '2606:4700:4700::1111',        # Cloudflare IPv6 DNS
+        '2400:3200:baba::1',           # 阿里巴巴 IPv6 DNS（替换失效的 240c::6666 CNNIC）
+    ],
+    # ── 连续失败自动暂停 ──
+    'auto_pause_enabled': True,        # 是否开启连续失败自动暂停
+    'auto_pause_threshold': 30,        # 连续失败多少次后自动暂停该IP
     'min_password_length': 8,          # 用户修改密码最小长度
     'refresh_geo_on_restart': True,    # 重启时自动更新 IP 归属地
     # ── 安全/限流内存清理 ──
@@ -100,13 +117,16 @@ def load_config():
                 saved = json.load(f)
             for k in ['check_interval','timeout','retry_mode','retry_interval',
                       'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
-                      'log_to_disk','log_level','console_log_level',
+                      'log_to_disk','log_level','console_log_level','debug_save_trace',
                       'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                       'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                       'dns_mode','dns_custom','dns_use_tcp','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                       'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','export_suffix',
                       'show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
-                      'cleanup_interval','trust_cf_ip']:
+                      'cleanup_interval','trust_cf_ip',
+                      'probe_fail_threshold','probe_ipv6_targets',
+                      'probe_timeout','probe_ipv4_targets',
+                      'auto_pause_enabled','auto_pause_threshold']:
                 if k in saved:
                     cfg[k] = saved[k]
             # 向后兼容：旧配置文件用 rank_stat_period，迁移到 dashboard_stat_period
@@ -123,14 +143,17 @@ def persist_config(cfg):
     try:
         savable = {k: cfg[k] for k in ['check_interval','timeout','retry_mode','retry_interval',
                                         'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
-                                        'log_to_disk','log_level',
+                                        'log_to_disk','log_level','debug_save_trace',
                                         'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                                         'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                                         'dns_mode','dns_custom','dns_use_tcp','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                                         'dashboard_stat_period','tracker_stat_period','cache_history',
                                         'tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width',
                                         'allow_private_ips','min_password_length','users',
-                                        'cleanup_interval','trust_cf_ip']
+                                        'cleanup_interval','trust_cf_ip',
+                                        'probe_fail_threshold','probe_ipv6_targets',
+                                        'probe_timeout','probe_ipv4_targets',
+                                        'auto_pause_enabled','auto_pause_threshold']
                    if k in cfg}
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(savable, f, indent=2, ensure_ascii=False)
@@ -445,6 +468,11 @@ class TrackerDB:
         # 异步保存线程池（单线程）
         self._save_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="db_save")
         self._save_pending = False
+        self._save_requested = False
+        self._save_state_lock = threading.RLock()
+
+    def _save_trace_enabled(self):
+        return CONFIG.get('debug_save_trace', False) and CONFIG.get('log_level') == 'debug'
 
     def _get_uptime_cached(self, domain, period):
         """从缓存获取域名可用率，如果缓存有效则返回，否则 None"""
@@ -811,16 +839,38 @@ class TrackerDB:
 
     # 异步保存：将保存任务提交到线程池
     def _save_async(self):
-        if self._save_pending:
-            return   # 已有保存任务在排队，跳过本次
-        self._save_pending = True
+        with self._save_state_lock:
+            if self._save_pending:
+                # 已有保存任务在执行/排队：只标记“还需要再保存一次”
+                # 避免高频更新时丢失最后一次落盘请求。
+                self._save_requested = True
+                if self._save_trace_enabled():
+                    cprint("[save] queue=busy pending=1 requested=1 -> merge", 'debug')
+                return
+            self._save_pending = True
+            self._save_requested = False
+            if self._save_trace_enabled():
+                cprint("[save] queue=idle pending=1 requested=0 -> submit worker", 'debug')
         def _save_worker():
-            try:
-                self._save()
-            except Exception as e:
-                cprint(f"异步保存失败: {e}", 'error')
-            finally:
-                self._save_pending = False
+            while True:
+                t0 = time.perf_counter()
+                try:
+                    self._save()
+                except Exception as e:
+                    cprint(f"异步保存失败: {e}", 'error')
+                finally:
+                    cost_ms = int((time.perf_counter() - t0) * 1000)
+                    with self._save_state_lock:
+                        # 期间若有新请求，立刻再保存一轮；否则退出并清空 pending。
+                        if self._save_requested:
+                            if self._save_trace_enabled():
+                                cprint(f"[save] worker cost={cost_ms}ms pending=1 requested=1 -> continue", 'debug')
+                            self._save_requested = False
+                            continue
+                        self._save_pending = False
+                        if self._save_trace_enabled():
+                            cprint(f"[save] worker cost={cost_ms}ms pending=0 requested=0 -> done", 'debug')
+                        break
         self._save_executor.submit(_save_worker)
 
     def _save(self):
@@ -1033,6 +1083,9 @@ class HistoryDB:
                     domain_comma = ',' if d_idx < len(domains) - 1 else ''
                     f.write(f'  }}{domain_comma}\n')
                 f.write('}\n')
+                # 确保内容已刷入磁盘，降低进程异常退出导致的落盘缺失概率
+                f.flush()
+                os.fsync(f.fileno())
             # 第二步：原子替换（os.replace 在同一文件系统下是原子操作）
             os.replace(tmp_file, HISTORY_FILE)
         except Exception as e:
@@ -2437,52 +2490,123 @@ def _resolve_and_update(name, domain, port, protocol):
 #   方案A（探针）：后台定期 TCP 连接 8.8.8.8:53，维护 _probe_ok 状态
 #   方案B（失败率）：monitor_loop 每轮统计，≥90% 失败视为本地网络异常
 # 两种方案任一触发，即认定本地网络异常，跳过本轮历史写入
-_probe_ok   = True    # 探针当前状态（True=可达，False=不可达）
-_probe_lock = threading.Lock()
-_net_bad = False   # 网络故障标志，由 monitor_loop 每轮更新
-_probe_details = {}  # 每个探针IP的最后探测结果 {ip: True/False}
+_probe_ok    = True   # 探针当前状态（True=可达，False=不可达）
+_probe_ok_v4 = True   # IPv4 探针状态
+_probe_ok_v6 = None   # IPv6 探针状态（None=未配置，True/False=有结果）
+_probe_lock  = threading.Lock()
+_net_bad     = False  # 网络故障标志，由 monitor_loop 每轮更新
+_probe_details = {}   # 每个探针IP的最后探测结果 {ip: {'ok': bool, 'latency': int_or_-1, 'version': 'ipv4'/'ipv6'}}
+
+# 连续失败计数：{(domain, ip): int}
+_consec_fail_count = {}
+_consec_fail_lock  = threading.Lock()
+
+def _probe_one(host, port, timeout=3):
+    """探测单个目标，返回 (reachable: bool, latency_ms: int)"""
+    try:
+        import ipaddress
+        addr = ipaddress.ip_address(host)
+        af = socket.AF_INET6 if isinstance(addr, ipaddress.IPv6Address) else socket.AF_INET
+    except ValueError:
+        af = socket.AF_UNSPEC
+    try:
+        infos = socket.getaddrinfo(host, port, af, socket.SOCK_STREAM)
+        if not infos:
+            return False, -1
+        fam, _, _, _, sockaddr = infos[0]
+        t = time.time()
+        s = socket.socket(fam, socket.SOCK_STREAM)
+        s.settimeout(timeout)
+        s.connect(sockaddr)
+        lat = int((time.time() - t) * 1000)
+        s.close()
+        return True, lat
+    except Exception:
+        return False, -1
 
 def _probe_loop():
-    """后台探针线程：多目标探测，任一可达即视为网络正常，全部不可达才告警。"""
-    global _probe_ok, _probe_details
-    _warned = False
-    # 多个探针目标：任一可达即认为网络正常（避免单点误判）
-    PROBE_TARGETS = [
-        ('8.8.8.8',   53),   # Google DNS
-        ('1.1.1.1',   53),   # Cloudflare DNS
-        ('114.114.114.114', 53),  # 国内DNS（服务器在国内也能探到）
-    ]
-    PROBE_TIMEOUT = 3
+    """后台探针线程：IPv4/IPv6 分组探测，分别维护可达状态和延迟。
+    - IPv4 探针：从 CONFIG['probe_ipv4_targets'] 读取（默认 8.8.8.8/1.1.1.1/114.114.114.114）
+    - IPv6 探针：从 CONFIG['probe_ipv6_targets'] 读取，可为空列表（禁用IPv6探测）
+    - 超时：从 CONFIG['probe_timeout'] 读取（默认 5s）
+    - 每组中任一可达即认为该栈正常
+    - _probe_ok = IPv4 可达（向后兼容，monitor_loop 用此判断是否丢弃本轮）
+    - _probe_ok_v6 = IPv6 可达 / None（未配置）
+    """
+    global _probe_ok, _probe_ok_v4, _probe_ok_v6, _probe_details
+    _warned_v4 = False
+    _warned_v6 = False
     while True:
         probe_interval = CONFIG.get('check_interval', 30)
-        reachable = False
-        hit_target = ''
+        PROBE_TIMEOUT  = int(CONFIG.get('probe_timeout', 5))
+
+        # 每轮从 CONFIG 动态读取目标列表，支持运行时热更新
+        ipv4_target_list = CONFIG.get('probe_ipv4_targets', ['8.8.8.8', '1.1.1.1', '114.114.114.114'])
+        IPV4_TARGETS = [(h, 53, 'ipv4') for h in ipv4_target_list] if ipv4_target_list else []
+
+        ipv6_target_list = CONFIG.get('probe_ipv6_targets', [])
+        IPV6_TARGETS = [(h, 53, 'ipv6') for h in ipv6_target_list] if ipv6_target_list else []
+
         details = {}
-        for host, port in PROBE_TARGETS:
-            try:
-                s = socket.create_connection((host, port), timeout=PROBE_TIMEOUT)
-                s.close()
-                details[host] = True
-                reachable = True
-                if not hit_target:
-                    hit_target = f"{host}:{port}"
-            except Exception:
-                details[host] = False
+
+        # ── IPv4 探测 ──────────────────────────────────────────────────
+        v4_reachable = False
+        v4_hit = ''
+        for host, port, ver in IPV4_TARGETS:
+            ok, lat = _probe_one(host, port, PROBE_TIMEOUT)
+            details[host] = {'ok': ok, 'latency': lat, 'version': ver}
+            if ok:
+                v4_reachable = True
+                if not v4_hit:
+                    v4_hit = f"{host}:{port}"
+
+        # ── IPv6 探测 ──────────────────────────────────────────────────
+        if IPV6_TARGETS:
+            v6_reachable = False
+            v6_hit = ''
+            for host, port, ver in IPV6_TARGETS:
+                ok, lat = _probe_one(host, port, PROBE_TIMEOUT)
+                details[host] = {'ok': ok, 'latency': lat, 'version': ver}
+                if ok:
+                    v6_reachable = True
+                    if not v6_hit:
+                        v6_hit = f"{host}:{port}"
+        else:
+            v6_reachable = None  # 未配置，不参与判断
+
         with _probe_lock:
-            prev = _probe_ok
-            _probe_ok = reachable
+            _probe_ok    = v4_reachable
+            _probe_ok_v4 = v4_reachable
+            _probe_ok_v6 = v6_reachable
             _probe_details = details
-        if not reachable and not _warned:
-            targets_str = ', '.join(f"{h}:{p}" for h,p in PROBE_TARGETS)
-            msg = f"[探针] 全部目标({targets_str})均不可达，本地网络可能异常"
+
+        # ── IPv4 告警 ──────────────────────────────────────────────────
+        v4_targets_str = ', '.join(f"{h}:{p}" for h,p,_ in IPV4_TARGETS) if IPV4_TARGETS else '(无)'
+        if not v4_reachable and not _warned_v4:
+            msg = f"[探针] IPv4全部目标({v4_targets_str})均不可达，IPv4网络可能异常"
             db.add_log(msg, 'error')
             cprint(msg, 'error')
-            _warned = True
-        elif reachable and _warned:
-            msg = f"[探针] 网络已恢复，{hit_target} 可达"
+            _warned_v4 = True
+        elif v4_reachable and _warned_v4:
+            msg = f"[探针] IPv4网络已恢复，{v4_hit} 可达"
             db.add_log(msg, 'info')
             cprint(msg, 'info')
-            _warned = False
+            _warned_v4 = False
+
+        # ── IPv6 告警 ──────────────────────────────────────────────────
+        if v6_reachable is not None:
+            v6_targets_str = ', '.join(h for h,_,__ in IPV6_TARGETS)
+            if not v6_reachable and not _warned_v6:
+                msg = f"[探针] IPv6全部目标({v6_targets_str})均不可达，IPv6网络可能异常"
+                db.add_log(msg, 'error')
+                cprint(msg, 'error')
+                _warned_v6 = True
+            elif v6_reachable and _warned_v6:
+                msg = f"[探针] IPv6网络已恢复，{v6_hit} 可达"
+                db.add_log(msg, 'info')
+                cprint(msg, 'info')
+                _warned_v6 = False
+
         time.sleep(probe_interval)
 
 # 立即检测触发器：启动时或添加 tracker 后置位，monitor_loop 检测到后立即执行（不等待 check_interval）
@@ -2502,6 +2626,36 @@ def _check_one_and_record(domain, ip_info, temp_results, round_ok, round_fail, r
         if status == 'skipped':
             cprint(f"⏭ {proto_s}://{domain}:{port} ({ip}) 跳过 | {err}", 'debug')
             return
+        # ── 连续失败计数 & 自动暂停 ────────────────────────────────
+        auto_pause_enabled   = CONFIG.get('auto_pause_enabled', True)
+        auto_pause_threshold = int(CONFIG.get('auto_pause_threshold', 30))
+        key = (domain, ip)
+        if status == 'offline' and auto_pause_enabled:
+            with _consec_fail_lock:
+                _consec_fail_count[key] = _consec_fail_count.get(key, 0) + 1
+                cur_count = _consec_fail_count[key]
+            if cur_count >= auto_pause_threshold:
+                # 自动暂停该 IP
+                with db.lock:
+                    td2 = db.trackers.get(domain, {})
+                    for ip_obj in td2.get('ips', []):
+                        if ip_obj.get('ip') == ip and not ip_obj.get('paused'):
+                            ip_obj['paused'] = True
+                            break
+                pause_msg = (f"[自动暂停] {proto_s}://{domain}:{port} ({ip}) "
+                             f"累计失败 {cur_count} 次，已自动暂停监控")
+                db.add_log(pause_msg, 'info')
+                cprint(pause_msg, 'info')
+                # 重置计数，避免重复触发
+                with _consec_fail_lock:
+                    _consec_fail_count[key] = 0
+                db._save_async()
+                with round_lock: round_fail[0] += 1
+                return
+        elif status == 'online':
+            # 在线则清零连续失败计数
+            with _consec_fail_lock:
+                _consec_fail_count.pop(key, None)
         # 记录检测完成的时间戳
         check_time = datetime.now().isoformat()
         # 存储结果（增加 check_time）
@@ -2524,6 +2678,14 @@ def _check_one_and_record(domain, ip_info, temp_results, round_ok, round_fail, r
         msg = f"检查异常 {domain}:{port} ({ip}): {type(e).__name__}: {e}"
         cprint(msg, 'error')
         with round_lock: round_fail[0] += 1
+
+def _ip_ver(ip_str: str) -> str:
+    """返回 IP 地址族字符串：'ipv6' 或 'ipv4'。解析失败默认视为 ipv4。"""
+    import ipaddress as _ipa
+    try:
+        return 'ipv6' if isinstance(_ipa.ip_address(ip_str), _ipa.IPv6Address) else 'ipv4'
+    except Exception:
+        return 'ipv4'
 
 def _write_healthy_results(temp_results):
     for (domain, ip), (status, lat, err, protocol, port, check_time) in temp_results.items():
@@ -2622,21 +2784,43 @@ def monitor_loop():
                         d, ip = futures[f]
                         cprint(f"检测线程异常 {d} ({ip}): {e}", 'error')
             # ── 第三步：网络健康判断（探针 + 失败率双重保障）────────────
+            # 细分策略：
+            #   IPv4 探针故障  → 跳过本轮 IPv4 IP 的 history 写入，IPv6 IP 正常写入
+            #   IPv6 探针故障  → 跳过本轮 IPv6 IP 的 history 写入，IPv4 IP 正常写入
+            #   双栈均故障     → 全轮丢弃（_net_bad=True，net_ok=False）
+            #   失败率超阈值   → 来源无法细分，仍全轮丢弃
             total_checked = round_ok[0] + round_fail[0]
-            net_ok = True
-            net_reason = ''
-            # 方案A：探针状态（由 _probe_loop 后台维护）
             with _probe_lock:
-                probe_reachable = _probe_ok
-            if not probe_reachable:
-                net_ok = False
-                net_reason = '探针不可达(8.8.8.8:53)'
-            # 方案B：本轮失败率 ≥ 90%（仅在探针正常时才额外判断，避免重复告警）
+                probe_v4_ok = _probe_ok_v4
+                probe_v6_ok = _probe_ok_v6  # None=未配置（不参与判断）
+
+            # 确定哪些 IP 版本的结果需要跳过写入
+            skip_v4 = not probe_v4_ok                          # IPv4 探针故障 → 跳过 v4
+            skip_v6 = (probe_v6_ok is False)                   # IPv6 探针故障且已配置 → 跳过 v6
+            net_ok  = not (skip_v4 and (skip_v6 or probe_v6_ok is None))
+            # net_ok=False 仅在 IPv4 故障 且 (IPv6 也故障 或 IPv6 未配置) 时成立
+            # 即：只要有任一可用栈探针正常，net_ok 保持 True，允许该栈结果写入
+
+            net_reason = ''
+            if skip_v4 and skip_v6:
+                net_reason = '探针IPv4+IPv6均不可达'
+            elif skip_v4:
+                net_reason = '探针IPv4不可达'
+            elif skip_v6:
+                net_reason = '探针IPv6不可达'
+
+            # 方案B：本轮整体失败率 ≥ 配置阈值（仅在探针层面正常时追加判断，来源无法细分故全轮丢弃）
+            fail_threshold = CONFIG.get('probe_fail_threshold', 50) / 100.0
+            fail_rate_triggered = False
             if net_ok and total_checked >= 5:
                 fail_rate = round_fail[0] / total_checked
-                if fail_rate >= 0.90:
+                if fail_rate >= fail_threshold:
                     net_ok = False
+                    skip_v4 = skip_v6 = True
+                    fail_rate_triggered = True
                     net_reason = f'失败率{fail_rate*100:.0f}%({round_fail[0]}/{total_checked})'
+
+            # ── 告警日志 ──────────────────────────────────────────────────
             if not net_ok:
                 if not _net_warn_printed:
                     warn_msg = (f"[网络异常] 疑似本地网络故障（{net_reason}），"
@@ -2646,7 +2830,15 @@ def monitor_loop():
                     _net_warn_printed = True
                 with _probe_lock:
                     _net_bad = True
-                # 本轮结果直接丢弃，不更新数据库
+            elif skip_v4 or skip_v6:
+                # 部分栈故障：有选择地写入，输出细分告警
+                partial_msg = f"[网络部分异常] {net_reason}，仅跳过{'IPv4' if skip_v4 else ''}{'/' if skip_v4 and skip_v6 else ''}{'IPv6' if skip_v6 else ''}历史写入"
+                if not _net_warn_printed:
+                    db.add_log(partial_msg, 'error')
+                    cprint(partial_msg, 'error')
+                    _net_warn_printed = True
+                with _probe_lock:
+                    _net_bad = False  # 部分正常，不标记整体故障
             else:
                 if _net_warn_printed:
                     recover_msg = "[网络恢复] 探针与检测均正常，恢复历史数据统计"
@@ -2655,18 +2847,42 @@ def monitor_loop():
                     _net_warn_printed = False
                 with _probe_lock:
                     _net_bad = False
-                if temp_results:   # 只有有实际检测结果才写入
+
+            # ── 写入历史（细分 IPv4/IPv6）──────────────────────────────────
+            if temp_results:
+                if not skip_v4 and not skip_v6:
+                    # 全部正常，直接写入
                     _write_healthy_results(temp_results)
-                    if CONFIG.get('cache_history', True):
-                        db._save_async()
-                # 保存数据（仅当 cache_history 开启）
+                elif skip_v4 and skip_v6:
+                    pass  # 双栈均故障，全部丢弃
+                else:
+                    # 部分故障：只写入探针正常一侧的结果
+                    filtered = {
+                        (domain, ip): v
+                        for (domain, ip), v in temp_results.items()
+                        if not (skip_v4 and _ip_ver(ip) == 'ipv4')
+                        and not (skip_v6 and _ip_ver(ip) == 'ipv6')
+                    }
+                    if filtered:
+                        _write_healthy_results(filtered)
                 if CONFIG.get('cache_history', True):
-                    db._save_async()  # 改为异步保存
+                    db._save_async()
+            elif net_ok or (not skip_v4 or not skip_v6):
+                if CONFIG.get('cache_history', True):
+                    db._save_async()
+
+            skipped_note = ''
+            if skip_v4 and skip_v6:
+                skipped_note = ' | ⚠ 双栈故障，历史全跳过'
+            elif skip_v4:
+                skipped_note = ' | ⚠ IPv4探针故障，v4历史跳过'
+            elif skip_v6:
+                skipped_note = ' | ⚠ IPv6探针故障，v6历史跳过'
             s = db.get_stats()
             summary = (f"轮检完成 | "
                        f"总:{s['total']} [v4:{s['ipv4']} v6:{s['ipv6']}] | "
                        f"在线:{s['alive']} [v4:{s['alive_v4']} v6:{s['alive_v6']}]"
-                       + (" | ⚠ 网络异常轮次，历史跳过" if not net_ok else ""))
+                       + skipped_note)
             db.add_log(summary, 'info')
         except Exception as e:
             msg = f"监控线程错误: {type(e).__name__}: {e}"
@@ -3013,55 +3229,59 @@ def _memory_cleanup_loop():
       _query_rate        : 删除所有时间戳列表为空的IP条目
     """
     while True:
-        interval = CONFIG.get('cleanup_interval', 3600)
-        time.sleep(interval)
-        now = time.time()
-        cleaned = {}
+        try:
+            interval = CONFIG.get('cleanup_interval', 3600)
+            time.sleep(interval)
+            now = time.time()
+            cleaned = {}
 
-        # 清理 _rate_limit_store：删除空列表条目
-        with _rate_limit_lock:
-            before = len(_rate_limit_store)
-            expired = [ip for ip, ts in _rate_limit_store.items() if not ts]
-            for ip in expired:
-                del _rate_limit_store[ip]
-            cleaned['rate_limit_store'] = before - len(_rate_limit_store)
+            # 清理 _rate_limit_store：删除空列表条目
+            with _rate_limit_lock:
+                before = len(_rate_limit_store)
+                expired = [ip for ip, ts in list(_rate_limit_store.items()) if not ts]
+                for ip in expired:
+                    _rate_limit_store.pop(ip, None)
+                cleaned['rate_limit_store'] = before - len(_rate_limit_store)
 
-        # 清理 _rate_limit_warned：超过2倍间隔未再触发的IP
-        with _rate_limit_warned_lock:
-            before = len(_rate_limit_warned)
-            expired = [ip for ip, t in _rate_limit_warned.items() if now - t > interval * 2]
-            for ip in expired:
-                del _rate_limit_warned[ip]
-            cleaned['rate_limit_warned'] = before - len(_rate_limit_warned)
+            # 清理 _rate_limit_warned：超过2倍间隔未再触发的IP
+            with _rate_limit_warned_lock:
+                before = len(_rate_limit_warned)
+                expired = [ip for ip, t in list(_rate_limit_warned.items()) if now - t > interval * 2]
+                for ip in expired:
+                    _rate_limit_warned.pop(ip, None)
+                cleaned['rate_limit_warned'] = before - len(_rate_limit_warned)
 
-        # 清理 _login_fail：锁定已到期的条目
-        with _login_fail_lock:
-            before = len(_login_fail)
-            expired = [ip for ip, rec in _login_fail.items()
-                       if rec[1] < now and now - rec[1] > interval]
-            for ip in expired:
-                del _login_fail[ip]
-            cleaned['login_fail'] = before - len(_login_fail)
+            # 清理 _login_fail：锁定已到期的条目
+            with _login_fail_lock:
+                before = len(_login_fail)
+                expired = [ip for ip, rec in list(_login_fail.items())
+                           if rec[1] < now and now - rec[1] > interval]
+                for ip in expired:
+                    _login_fail.pop(ip, None)
+                cleaned['login_fail'] = before - len(_login_fail)
 
-        # 清理 _retry_throttle：超过1小时未操作的用户
-        with _retry_throttle_lock:
-            before = len(_retry_throttle)
-            expired = [u for u, t in _retry_throttle.items() if now - t > 3600]
-            for u in expired:
-                del _retry_throttle[u]
-            cleaned['retry_throttle'] = before - len(_retry_throttle)
+            # 清理 _retry_throttle：超过1小时未操作的用户
+            with _retry_throttle_lock:
+                before = len(_retry_throttle)
+                expired = [u for u, t in list(_retry_throttle.items()) if now - t > 3600]
+                for u in expired:
+                    _retry_throttle.pop(u, None)
+                cleaned['retry_throttle'] = before - len(_retry_throttle)
 
-        # 清理 _query_rate：删除空列表条目
-        with _query_rate_lock:
-            before = len(_query_rate)
-            expired = [ip for ip, ts in _query_rate.items() if not ts]
-            for ip in expired:
-                del _query_rate[ip]
-            cleaned['query_rate'] = before - len(_query_rate)
+            # 清理 _query_rate：删除空列表条目
+            with _query_rate_lock:
+                before = len(_query_rate)
+                expired = [ip for ip, ts in list(_query_rate.items()) if not ts]
+                for ip in expired:
+                    _query_rate.pop(ip, None)
+                cleaned['query_rate'] = before - len(_query_rate)
 
-        total = sum(cleaned.values())
-        if total > 0:
-            cprint(f"[cleanup] 限流内存清理完成，共清除 {total} 条过期记录: {cleaned}", 'info')
+            total = sum(cleaned.values())
+            if total > 0:
+                cprint(f"[cleanup] 限流内存清理完成，共清除 {total} 条过期记录: {cleaned}", 'info')
+        except Exception as e:
+            # 兜底保护：清理线程异常不应影响主监控流程
+            cprint(f"[cleanup] 清理线程异常: {e}", 'error')
 # ── 认证 ──
 @app.route('/api/auth/login', methods=['POST'])
 @rate_limit(limit=10, window=60)  # 登录限流
@@ -3163,11 +3383,15 @@ def api_whoami():
 def api_stats():
     s = db.get_stats()
     with _probe_lock:
-        probe_ok = _probe_ok
-        net_bad = _net_bad
-    s['net_probe_ok'] = probe_ok
-    s['net_healthy']  = probe_ok and not net_bad
-    s['probe_details'] = _probe_details
+        probe_ok    = _probe_ok
+        net_bad     = _net_bad
+        probe_v4_ok = _probe_ok_v4
+        probe_v6_ok = _probe_ok_v6
+    s['net_probe_ok']    = probe_ok
+    s['net_probe_v4_ok'] = probe_v4_ok
+    s['net_probe_v6_ok'] = probe_v6_ok   # None = IPv6 未配置
+    s['net_healthy']     = probe_ok and not net_bad
+    s['probe_details']   = _probe_details  # {ip: {ok, latency, version}}
     today = datetime.now().strftime('%Y-%m-%d')
     logs = db.get_logs(limit=5000)
     s['today_alerts'] = sum(
@@ -3790,12 +4014,15 @@ def api_config():
             return jsonify({'error': '配置参数无效', 'details': errors}), 400
         keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
-                'log_to_disk','log_level','console_log_level','http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
+                'log_to_disk','log_level','console_log_level','debug_save_trace','http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                 'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                 'dns_mode','dns_custom','dns_use_tcp','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
                 'export_suffix','show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
-                'cleanup_interval','trust_cf_ip']
+                'cleanup_interval','trust_cf_ip',
+                'probe_fail_threshold','probe_ipv6_targets',
+                'probe_timeout','probe_ipv4_targets',
+                'auto_pause_enabled','auto_pause_threshold']
         labels = {
             'check_interval':        '监控间隔',
             'timeout':               '连接超时',
@@ -3809,6 +4036,7 @@ def api_config():
             'log_to_disk':           '日志存盘',
             'log_level':             '日志级别',
             'console_log_level':     '控制台日志级别',
+            'debug_save_trace':      '保存调试日志',
             'http_proxy':            'HTTP代理',
             'udp_proxy':             'UDP代理',
             'http_proxy_enabled':    'HTTP代理开关',
@@ -3838,6 +4066,12 @@ def api_config():
             'users':                 '用户账户',
             'cleanup_interval':      '限流内存清理间隔',
             'trust_cf_ip':           'CF/代理IP信任',
+            'probe_fail_threshold':  '网络故障失败率阈值',
+            'probe_ipv6_targets':    'IPv6探针目标',
+            'probe_timeout':         '探针超时',
+            'probe_ipv4_targets':    'IPv4探针目标',
+            'auto_pause_enabled':    '自动暂停开关',
+            'auto_pause_threshold':  '自动暂停累计失败次数',
         }
         suffixes = {
             'check_interval': 's', 'timeout': 's', 'retry_interval': 's',
@@ -3877,11 +4111,12 @@ def api_config():
     if not session.get('role'):
         return jsonify({k: CONFIG.get(k) for k in public_keys})
     all_keys = ['check_interval','timeout','retry_mode','retry_interval',
-                'log_to_disk','log_level','http_proxy','udp_proxy','http_proxy_enabled','udp_proxy_enabled',
+                'log_to_disk','log_level','debug_save_trace','http_proxy','udp_proxy','http_proxy_enabled','udp_proxy_enabled',
                 'dns_mode','dns_custom','dns_use_tcp','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
                 'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width',
-                'allow_private_ips','min_password_length','cleanup_interval','trust_cf_ip']
+                'allow_private_ips','min_password_length','cleanup_interval','trust_cf_ip',
+                'probe_fail_threshold','probe_ipv6_targets','probe_timeout','probe_ipv4_targets','auto_pause_enabled','auto_pause_threshold']
     return jsonify({k: CONFIG.get(k) for k in all_keys})
 
 @app.route('/api/users', methods=['GET'])
