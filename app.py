@@ -1882,14 +1882,14 @@ def _query_single_server(domain: str, rtype: str, srv_ip: str, use_tcp: bool):
                 )
         return []
     except Exception as e:
-        # 超时 / 连接失败 / 协议错误 —— error 级别，控制台和 Web 日志都能看到
+        # 超时 / 连接失败 / 协议错误 —— debug 级别，控制台 调试模式才能看到，Web 日志能看到
         db.add_log(
             f"[custom DNS] {srv_ip}({proto}) 查询 {rtype} {domain} 失败: {type(e).__name__}: {e}",
-            'error'
+            'debug'
         )
         cprint(
             f"[custom DNS] {srv_ip}({proto}) 查询 {rtype} {domain} 失败: {type(e).__name__}: {e}",
-            'error'
+            'debug'
         )
         return None  # 告知调用方此服务器本次失败，继续尝试其他服务器
 

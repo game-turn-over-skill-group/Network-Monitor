@@ -730,9 +730,12 @@
         body.light-mode .ipv4-addr { color: #065f46 !important; }
         body.light-mode .proto-udp { background: rgba(79,142,201,0.15); color: #4f8ec9; border: 1px solid rgba(79,142,201,0.3); }
         .proto-tag { font-size:.67rem; padding:2px 6px; border-radius:4px; font-weight:700; letter-spacing:.4px; }
-        .proto-udp { background: rgba(110,168,217,0.12); color: #6ea8d9; border: 1px solid rgba(110,168,217,0.25); }
-        .proto-tcp  { background:rgba(52,211,153,.18);  color:var(--ok);   border:1px solid rgba(52,211,153,.3); }
-        .proto-https{ background:rgba(52,211,153,.15);  color:var(--ok);   border:1px solid rgba(52,211,153,.25); }
+        .proto-udp  { background: rgba(110,168,217,0.12); color: #6ea8d9;  border: 1px solid rgba(110,168,217,0.25); }
+        /* TCP / HTTP 同色：固定绿色，!important 防止阳光橙等主题的 --ok 覆盖 */
+        .proto-tcp  { background: rgba(52,211,153,.18);  color: #34d399 !important; border: 1px solid rgba(52,211,153,.3); }
+        .proto-http { background: rgba(52,211,153,.15);  color: #34d399 !important; border: 1px solid rgba(52,211,153,.25); }
+        /* HTTPS 协议标签：所有皮肤下统一金色，!important 防止主题色覆盖 */
+        .proto-https{ background: rgba(251,191,36,.13);  color: #f6c738 !important; border: 1px solid rgba(251,191,36,.45); }
 
         /* ── Toast ── */
         .toast-bar {
@@ -1939,7 +1942,7 @@
                                     <td style="white-space:nowrap;"><span class="port-tag">:{{ row.port }}</span></td>
                                     <!-- 协议列 -->
                                     <td>
-                                        <span class="proto-tag" :class="'proto-'+(row.protocol==='https'?'tcp':row.protocol)">{{ row.protocol.toUpperCase() }}</span>
+                                        <span class="proto-tag" :class="'proto-'+row.protocol">{{ row.protocol.toUpperCase() }}</span>
                                     </td>
                                     <!-- 归属地（含运营商小字）-->
                                     <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
@@ -4190,11 +4193,10 @@ createApp({
                     else if (u <= 80) upcls = 'up-yellow';
                     else upcls = 'up-green';
                 }
-                // TCP协议: 根据端口推断 http/https
+                // 直接读取 data.json 中的 protocol 字段，不做端口推断
                 const rawProto = tr.protocol||'tcp';
                 const port = tr.port||80;
-                const displayProto = rawProto === 'https' ? 'https'
-                    : rawProto === 'tcp' ? (port===443?'https':'http') : rawProto;
+                const displayProto = rawProto; // 直接使用 data.json 原始协议值
                 for (const ip of (tr.ips||[])) {
                     if (ip.removed) continue;
                     const co = ip.country || {};
