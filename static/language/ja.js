@@ -115,6 +115,8 @@ window.__i18n_ja = {
     apiEx2: '30日間稼働率 ≥ 90%、TCPのみ、IPv4のみ',
     apiEx3: '30日間稼働率 ≥ 90%、すべてのプロトコル、IPv6のみ',
     apiEx4: '24時間 ≥ 90%、UDP、IPv4、カスタムサフィックス',
+    apiEx6: 'HTTPのみ（UDPとHTTPSを除く）',
+    apiEx7: 'HTTPSのみ',
     apiEx5: 'ファイルに保存（旧URLは自動リダイレクト）'
   },
   logs: {

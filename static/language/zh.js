@@ -115,6 +115,8 @@ window.__i18n_zh = {
     apiEx2: '30天可用率 ≥ 90%，仅 TCP，仅 IPv4',
     apiEx3: '30天可用率 ≥ 90%，全协议，仅 IPv6',
     apiEx4: '24h ≥ 90%，UDP，IPv4，自定义后缀',
+    apiEx6: '仅 HTTP（不含 UDP 和 HTTPS）',
+    apiEx7: '仅 HTTPS',
     apiEx5: '下载为文件（旧URL自动跳转）'
   },
   logs: {

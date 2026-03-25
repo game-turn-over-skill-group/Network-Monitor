@@ -3219,7 +3219,7 @@ def api_trackers_export():
     Query params (all optional):
       day    = 24h | 7d | 30d        (default: 24h)   uptime stats period
       uptime = 0 | 50 | 80 | 90 | 100 (default: 0)   minimum uptime % (0 = no filter)
-      net    = all | tcp | udp       (default: all)   protocol filter
+      net    = all | tcp | udp | http | https  (default: all)   protocol filter
       ip     = all | ipv4 | ipv6    (default: all)   IP version filter
       url    = any string            (default: /announce) URL suffix per entry
 
@@ -3253,10 +3253,14 @@ def api_trackers_export():
         port     = td.get('port', 80)
         ips      = td.get('ips', [])
         if proto != 'all':
-            is_udp = (protocol == 'udp')
-            if proto == 'udp' and not is_udp: continue
-            if proto == 'tcp' and is_udp: continue
-        online_ips = [ip for ip in ips if not ip.get('removed') and ip.get('status') == 'online']
+            is_udp   = (protocol == 'udp')
+            is_https = (protocol == 'https')
+            is_http  = not is_udp and not is_https
+            if proto == 'udp'   and not is_udp:            continue
+            if proto == 'tcp'   and is_udp:                continue  # TCP含HTTP+HTTPS
+            if proto == 'https' and not is_https:          continue
+            if proto == 'http'  and (is_udp or is_https):  continue
+        online_ips = [ip for ip in ips if not ip.get('removed') and not ip.get('paused') and ip.get('status') == 'online']
         if ip_ver != 'all':
             online_ips = [ip for ip in online_ips if ip.get('version','ipv4') == ip_ver]
         if not online_ips: continue
@@ -3744,12 +3748,16 @@ def api_ranking_export():
         port     = td.get('port', 80)
         ips      = td.get('ips', [])
         # 协议过滤
-        is_udp = (protocol == 'udp')
-        if proto == 'tcp' and is_udp: continue
-        if proto == 'udp' and not is_udp: continue
-        # IP版本过滤（检查该域名下是否有符合版本的 IP）
+        is_udp   = (protocol == 'udp')
+        is_https = (protocol == 'https')
+        is_http  = not is_udp and not is_https
+        if proto == 'tcp'   and is_udp:                continue  # TCP含HTTP+HTTPS
+        if proto == 'udp'   and not is_udp:            continue
+        if proto == 'https' and not is_https:          continue
+        if proto == 'http'  and (is_udp or is_https):  continue
+        # IP版本过滤（检查该域名下是否有符合版本的非暂停IP）
         if ip_ver != 'all':
-            has_ver = any(ip.get('version') == ip_ver for ip in ips if not ip.get('removed'))
+            has_ver = any(ip.get('version') == ip_ver for ip in ips if not ip.get('removed') and not ip.get('paused'))
             if not has_ver: continue
         # 构造 URL
         if protocol == 'https':

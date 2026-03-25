@@ -115,6 +115,8 @@ window.__i18n_fr = {
     apiEx2: 'Disponibilité 30j ≥ 90%, uniquement TCP, uniquement IPv4',
     apiEx3: 'Disponibilité 30j ≥ 90%, tous protocoles, uniquement IPv6',
     apiEx4: '24h ≥ 90%, UDP, IPv4, suffixe personnalisé',
+    apiEx6: 'HTTP uniquement (exclut UDP et HTTPS)',
+    apiEx7: 'HTTPS uniquement',
     apiEx5: 'Enregistrer dans un fichier (URL héritée redirige automatiquement)'
   },
   logs: {

@@ -13444,7 +13444,63 @@ HTTPS 金色同样加了 !important，所有皮肤下一致。日间模式也不
 --------------------------------------
 
 
+//获取tracker的API新增协议暂停过滤(被暂停的ip会以协议被过滤筛选)
+//可用率排行和获取trackerAPI新增net协议字段http+https过滤支持
 
+C:\Users\Administrator\Desktop>curl "http://localhost:443/api/tracker?uptime=90&net=udp&ip=ipv4&url=/announce"
+udp://ipv4announce.sktorrent.eu:6969/announce
+udp://open.stealth.si:80/announce
+排行榜 获取tracker的API没有判断是否是暂停的ip有的域名暂停了ipv4的ip只剩下ipv6了
+提取的时候 限制ipv4协议 依然能提取到这个域名 缺少暂停IP判断
+比如某个域名中 有ipv4和ipv6但是 暂停了所有ipv4 那API提取的时候 就应该只能ipv6才能获取该域名 缺少这个判断
+现在API应该是有在线判断了吧？补个暂停判断
+
+----------------
+
+好的，我已经读取了两个文件。现在来看核心问题：
+问题所在：api_trackers_export() 函数（/api/tracker 接口）在过滤 IP 版本时，
+只检查了该域名下是否有对应版本的在线 IP，但没有检查这些 IP 是否已暂停。
+当一个域名的所有 IPv4 地址都被暂停了，API 仍然可能输出该域名，
+因为 online_ips 的过滤用的是 ip.get('status') == 'online'，而已暂停的 IP 理论上其 status 字段可能还残留为 'online'。
+修复方案：在 api_trackers_export() 里过滤 online_ips 时，增加 not ip.get('paused') 的判断。
+
+根本原因：原来只过滤了 removed（已删除）的 IP，遗漏了 paused（已暂停）的 IP。
+所以当一个域名的所有 IPv4 都被暂停时，用 ip=ipv4 参数请求 API，
+仍然能找到该域名（因为暂停 IP 的 status 字段可能还是 online），
+导致错误地输出了这条记录。加上 not ip.get('paused') 后，暂停的 IP 不再被计入在线统计，行为与前端展示一致。
+
+----------------
+
+Q：
+可用率排行那边 网页前端筛选 只有TCP和UDP 增加2个选项 http和https
+TCP依旧 包含：TCP+HTTP+HTTPS
+导出API(api/tracker)同理 net字段新增 http和https
+
+----------------
+
+A：
+index.html 变更
+1. 前端导出筛选下拉菜单（约第2297行）— 增加 HTTP/HTTPS 选项（已完成）
+2. filteredRanking computed（约第3118行）— HTTP/HTTPS过滤逻辑已经写好了（if (p === 'https') 和 if (p === 'http') 分支已在代码里），
+所以前端过滤逻辑不需要改，只需加下拉选项。
+3. API 参数表格（第2355行）— net 字段的可选值说明增加 http https：
+
+app.py 变更
+api_trackers_export()（约第3255行）— 扩展 proto 过滤逻辑：
+
+index.html 改动汇总：
+排行榜导出筛选器下拉菜单新增 HTTP / HTTPS 选项（第2301行）
+API 参数表 net 字段可选值增加 http https（第2357行）
+apiExamples 数组新增 apiEx6（HTTP only）和 apiEx7（HTTPS only）示例（第3168-3169行）
+模板继续使用 t('ranking.'+ex.descKey) — 配合语言文件中新增的 key 自动翻译
+
+app.py 改动汇总：
+api_trackers_export() 协议过滤扩展：http/https 独立判断，tcp 仍包含所有非 UDP（第3255-3262行）
+api_ranking_export() 同样扩展（第3748-3757行）
+docstring 注释更新为 net = all | tcp | udp | http | https（第3222行）
+
+
+--------------------------------------
 
 
 

@@ -115,6 +115,8 @@ window.__i18n_en = {
     apiEx2: '30-day uptime ≥ 90%, TCP only, IPv4 only',
     apiEx3: '30-day uptime ≥ 90%, all protocols, IPv6 only',
     apiEx4: '24h ≥ 90%, UDP, IPv4, custom suffix',
+    apiEx6: 'HTTP only (excludes UDP and HTTPS)',
+    apiEx7: 'HTTPS only',
     apiEx5: 'Save to file (legacy URL auto-redirects)'
   },
   logs: {

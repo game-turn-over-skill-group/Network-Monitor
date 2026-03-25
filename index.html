@@ -2298,6 +2298,8 @@
                                 <option value="all">ALL</option>
                                 <option value="tcp">TCP</option>
                                 <option value="udp">UDP</option>
+                                <option value="http">HTTP</option>
+                                <option value="https">HTTPS</option>
                             </select>
                             <select class="form-select form-select-sm" v-model="exportIpVer" style="width:auto;">
                                 <option value="all">ALL</option>
@@ -2352,7 +2354,7 @@
                         <tbody>
                             <tr><td><code>day</code></td><td><code>24h</code> <code>7d</code> <code>30d</code></td><td><code>24h</code></td><td>{{ t('ranking.apiParamDay') }}</td></tr>
                             <tr><td><code>uptime</code></td><td><code>0</code> <code>50</code> <code>80</code> <code>90</code> <code>100</code></td><td><code>0</code></td><td>{{ t('ranking.apiParamUptime') }}</td></tr>
-                            <tr><td><code>net</code></td><td><code>all</code> <code>tcp</code> <code>udp</code></td><td><code>all</code></td><td>{{ t('ranking.apiParamNet') }}</td></tr>
+                            <tr><td><code>net</code></td><td><code>all</code> <code>tcp</code> <code>udp</code> <code>http</code> <code>https</code></td><td><code>all</code></td><td>{{ t('ranking.apiParamNet') }}</td></tr>
                             <tr><td><code>ip</code></td><td><code>all</code> <code>ipv4</code> <code>ipv6</code></td><td><code>all</code></td><td>{{ t('ranking.apiParamIp') }}</td></tr>
                             <tr><td><code>url</code></td><td><i style="color:#64748b;">any string</i></td><td><code>/announce</code></td><td>{{ t('ranking.apiParamUrl') }}</td></tr>
                         </tbody>
@@ -3163,6 +3165,8 @@ createApp({
                 { descKey:'apiEx2', cmd: `curl "${b}/api/tracker?day=30d&uptime=90&net=tcp&ip=ipv4"` },
                 { descKey:'apiEx3', cmd: `curl "${b}/api/tracker?day=30d&uptime=90&ip=ipv6"` },
                 { descKey:'apiEx4', cmd: `curl "${b}/api/tracker?uptime=90&net=udp&ip=ipv4&url=/announce"` },
+                { descKey:'apiEx6', cmd: `curl "${b}/api/tracker?uptime=90&net=http"` },
+                { descKey:'apiEx7', cmd: `curl "${b}/api/tracker?uptime=90&net=https"` },
                 { descKey:'apiEx5', cmd: `curl "${b}/tracker.txt" -L -o trackers.txt` },
             ];
         });

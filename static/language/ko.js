@@ -115,6 +115,8 @@ window.__i18n_ko = {
     apiEx2: '30일 가동률 ≥ 90%, TCP만, IPv4만',
     apiEx3: '30일 가동률 ≥ 90%, 모든 프로토콜, IPv6만',
     apiEx4: '24시간 ≥ 90%, UDP, IPv4, 사용자 정의 접미사',
+    apiEx6: 'HTTP만 (UDP 및 HTTPS 제외)',
+    apiEx7: 'HTTPS만',
     apiEx5: '파일로 저장 (구 URL은 자동 리디렉션)'
   },
   logs: {
