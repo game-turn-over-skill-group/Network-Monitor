@@ -21,6 +21,10 @@ from functools import wraps
 from flask import Flask, jsonify, request, make_response, session, g, Response, redirect, send_from_directory
 from flask_cors import CORS
 import dns.resolver
+import dns.message
+import dns.query
+import dns.rdatatype
+import dns.exception
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests as req_lib
 from typing import Any, Dict, Optional, Tuple, List
@@ -1679,6 +1683,45 @@ _GEO_CACHE_CAPACITY = 10000  # 缓存容量
 _geo_cache = LRUCache(_GEO_CACHE_CAPACITY)
 _geo_cache_lock = threading.RLock()
 
+# ── ip-api.com 持久 HTTP Session ─────────────────────────────────────
+# requests.Session 内部维护 urllib3 连接池，同一主机的请求复用 TCP 连接，
+# 避免每次 get_geo 都触发 TCP 握手/挥手，减少 TIME_WAIT 和 SYN_SENT。
+_geo_http_session: Optional[req_lib.Session] = None
+_geo_http_session_lock = threading.Lock()
+
+def _get_geo_session() -> req_lib.Session:
+    """返回全局复用的 geo HTTP Session（含代理），不存在时懒建。"""
+    global _geo_http_session
+    with _geo_http_session_lock:
+        if _geo_http_session is None:
+            s = req_lib.Session()
+            proxies = make_proxy_dict()
+            if proxies:
+                s.proxies.update(proxies)
+            s.headers.update({'Connection': 'keep-alive'})
+            # pool_connections=1：只连接 ip-api.com 这一个主机，1 个连接池够用。
+            # pool_maxsize=4：允许最多 4 条并发连接（监控线程 + geo更新线程可能同时调用）。
+            # 不用 with response 后连接会被正确归还而非丢弃，不会再有 "pool is full" 警告。
+            adapter = req_lib.adapters.HTTPAdapter(
+                pool_connections=1,
+                pool_maxsize=4,
+                max_retries=0,
+            )
+            s.mount('http://',  adapter)
+            s.mount('https://', adapter)
+            _geo_http_session = s
+        return _geo_http_session
+
+def _reset_geo_session():
+    """代理配置变更后调用，重建 Session 以使新代理生效。"""
+    global _geo_http_session
+    with _geo_http_session_lock:
+        old = _geo_http_session
+        _geo_http_session = None
+    if old:
+        try: old.close()
+        except: pass
+
 def _is_safe_public_ip(ip: str) -> bool:
     """校验 IP 是否为可公开查询的公网地址（排除内网/回环/链路本地）"""
     import ipaddress
@@ -1711,10 +1754,17 @@ def get_geo(ip: str) -> dict:
         _geo_cache.put(ip, result)
         return result
     try:
-        s = get_requests_session()
         import urllib.parse
         safe_ip = urllib.parse.quote(ip, safe=':.[]')
-        r = s.get(f"http://ip-api.com/json/{safe_ip}?fields=country,countryCode,isp", timeout=5)
+        s = _get_geo_session()
+        # 不用 with，直接赋值：
+        # stream=False 时 urllib3 读完响应体后会自动把连接归还连接池（keep-alive复用）。
+        # 用 with response 反而会在 __exit__ 时调 r.close()，
+        # 导致连接被标记为废弃而不是归还，触发 "Connection pool is full" 警告。
+        r = s.get(
+            f"http://ip-api.com/json/{safe_ip}?fields=country,countryCode,isp",
+            timeout=5, stream=False
+        )
         if r.status_code == 200:
             d = r.json()
             if d.get('countryCode') and d['countryCode'] != 'XX':
@@ -1848,50 +1898,250 @@ def _dns_custom_try_order(servers: List[Tuple[str, bool]]) -> List[int]:
     start = _dns_rr_next(len(indices))
     return [indices[(start + j) % len(indices)] for j in range(len(indices))]
 
+
+# ==================== TCP DNS 长连接池 ====================
+import select as _select_mod
+
+class _TcpDnsConn:
+    """
+    单条 TCP DNS 持久长连接。
+    ─ 建立后不主动关闭，等对端发 FIN 才关闭（或探测到断连时重建）。
+    ─ 兼容 Windows 10 / Linux：
+        · Windows：用 SIO_KEEPALIVE_VALS ioctl 设置 keepalive 参数
+                   用 select() 替代 MSG_PEEK+setblocking 做存活探测
+                   （Windows 上 setblocking(False)+recv 会抛 WinError 10035，
+                    被误判为断连；select 更可靠）
+        · Linux：TCP_KEEPIDLE / TCP_KEEPINTVL / TCP_KEEPCNT
+    ─ 线程安全：持有自己的锁，同一连接的查询串行执行（防 TCP 流混淆）。
+    """
+    # Windows SIO_KEEPALIVE_VALS：一次 ioctl 设置 keepalive 开关+空闲时间+间隔
+    _SIO_KEEPALIVE_VALS = 0x98000004  # == socket.SIO_KEEPALIVE_VALS（Python 3.6+有）
+
+    def __init__(self, srv_ip: str, port: int = 53):
+        self.srv_ip = srv_ip
+        self.port   = port
+        self._sock  = None
+        self._lock  = threading.Lock()
+
+    # ── 建立/重建 socket ────────────────────────────────────────────────
+    def _make_sock(self, timeout: float) -> socket.socket:
+        af   = socket.AF_INET6 if ':' in self.srv_ip else socket.AF_INET
+        sock = socket.socket(af, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+
+        if hasattr(socket, 'TCP_KEEPIDLE'):
+            # Linux
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE,  10)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL,  5)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT,    3)
+        else:
+            # Windows：SIO_KEEPALIVE_VALS ioctl
+            # 格式：onoff(4B) + keepalivetime(ms,4B) + keepaliveinterval(ms,4B)
+            try:
+                import struct as _st
+                keepalive_vals = _st.pack('lll', 1, 10000, 5000)  # on, 10s空闲, 5s间隔
+                sock.ioctl(socket.SIO_KEEPALIVE_VALS, keepalive_vals)
+            except (AttributeError, OSError):
+                pass  # 旧版 Python / 特殊环境，跳过，SO_KEEPALIVE 已设
+
+        sock.connect((self.srv_ip, self.port))
+        return sock
+
+    # ── 存活探测（Windows/Linux 兼容） ─────────────────────────────────
+    def _check_alive(self) -> bool:
+        """
+        用 select() 探测连接状态，不消耗数据，Windows/Linux 均兼容。
+        逻辑：
+          · select 的 readable 集合中出现 self._sock ──说明有数据或对端关闭了连接。
+            再 recv(1, MSG_PEEK) 验证：空串 = 对端 FIN；非空 = 有未读数据（理论上不应有）。
+          · select 超时（0 秒）返回空 ──说明连接空闲，正常存活。
+          · 任何异常 ──认为连接不可用。
+        """
+        if self._sock is None:
+            return False
+        try:
+            rd, _, ex = _select_mod.select([self._sock], [], [self._sock], 0)
+            if ex:
+                return False  # 异常状态
+            if rd:
+                # 有可读事件：peek 1 字节确认是否是 FIN
+                try:
+                    data = self._sock.recv(1, socket.MSG_PEEK)
+                    return len(data) > 0  # b'' = FIN
+                except OSError:
+                    return False
+            return True  # select 超时 = 空闲，连接正常
+        except OSError:
+            return False
+
+    # ── 发包 / 收包 ─────────────────────────────────────────────────────
+    @staticmethod
+    def _send_recv(sock: socket.socket, req: dns.message.Message) -> dns.message.Message:
+        wire = req.to_wire()
+        sock.sendall(struct.pack('!H', len(wire)) + wire)
+        raw_len  = _TcpDnsConn._recv_exact(sock, 2)
+        resp_len = struct.unpack('!H', raw_len)[0]
+        raw_resp = _TcpDnsConn._recv_exact(sock, resp_len)
+        return dns.message.from_wire(raw_resp)
+
+    @staticmethod
+    def _recv_exact(sock: socket.socket, n: int) -> bytes:
+        buf = b''
+        while len(buf) < n:
+            chunk = sock.recv(n - len(buf))
+            if not chunk:
+                raise OSError('TCP DNS：对端关闭连接')
+            buf += chunk
+        return buf
+
+    # ── 公开查询接口 ────────────────────────────────────────────────────
+    def query(self, domain: str, rtype: str, timeout: float) -> dns.message.Message:
+        """
+        发送 DNS 查询，返回响应。
+        · 查询前检测连接存活；断了则重建（最多重建1次）。
+        · 连接对象一直持有 socket，不主动关闭。
+        """
+        rdtype = dns.rdatatype.from_text(rtype)
+        req    = dns.message.make_query(domain, rdtype)
+
+        with self._lock:
+            for attempt in range(2):
+                # step1: 确保连接存活
+                if not self._check_alive():
+                    if self._sock:
+                        try: self._sock.close()
+                        except: pass
+                        self._sock = None
+                    # 建连失败直接抛给调用方
+                    self._sock = self._make_sock(timeout)
+
+                # step2: 发包收包
+                try:
+                    self._sock.settimeout(timeout)
+                    return _TcpDnsConn._send_recv(self._sock, req)
+                except OSError:
+                    # IO 错误：本次连接失效，清理后 attempt=1 时重连再试
+                    try: self._sock.close()
+                    except: pass
+                    self._sock = None
+                    if attempt == 1:
+                        raise
+                except socket.timeout:
+                    # 超时：连接本身可能还好，直接上抛让调用方记录失败
+                    raise
+
+    def close(self):
+        with self._lock:
+            if self._sock:
+                try: self._sock.close()
+                except: pass
+                self._sock = None
+
+
+class _TcpDnsPool:
+    """
+    按 srv_ip 维护一个 _TcpDnsConn 实例（每 DNS 服务器一条持久连接）。
+    线程安全：池的增删加锁，查询由连接对象自己的锁串行化。
+    """
+    def __init__(self):
+        self._conns: Dict[str, _TcpDnsConn] = {}
+        self._lock  = threading.Lock()
+
+    def get(self, srv_ip: str) -> _TcpDnsConn:
+        with self._lock:
+            if srv_ip not in self._conns:
+                self._conns[srv_ip] = _TcpDnsConn(srv_ip)
+            return self._conns[srv_ip]
+
+    def invalidate(self, srv_ip: str):
+        """连接彻底不可用时清理，下次 get 重建。"""
+        with self._lock:
+            conn = self._conns.pop(srv_ip, None)
+        if conn:
+            conn.close()
+
+
+# 全局 TCP DNS 连接池单例
+_tcp_dns_pool = _TcpDnsPool()
+
+
 def _query_single_server(domain: str, rtype: str, srv_ip: str, use_tcp: bool):
     """向单台 DNS 服务器查询。
+    TCP 模式：使用全局长连接池，不在每次查询时新建/断开连接。
+    UDP 模式：走原有 dnspython resolver（短连接，UDP 无连接开销）。
+
     返回值：
       [ip, ...]  —— 查询成功，有记录
       []         —— 域名不存在（NXDOMAIN / NoAnswer），确定性结果
       None       —— 超时 / 网络错误，此服务器本次失败
     """
-    proto = 'TCP' if use_tcp else 'UDP'
+    proto   = 'TCP' if use_tcp else 'UDP'
     timeout = _dns_query_timeout()
+
+    def _log_noresult():
+        now = time.time()
+        key = (domain, rtype)
+        with _dns_noresult_lock:
+            last = _dns_noresult_logged.get(key, 0)
+            if now - last > 86400:
+                _dns_noresult_logged[key] = now
+                msg = f"[custom DNS] {srv_ip}({proto}) 查询 {rtype} {domain} 失败: 无结果"
+                db.add_log(msg, 'debug')
+                cprint(msg, 'debug')
+
+    def _log_error(e):
+        msg = f"[custom DNS] {srv_ip}({proto}) 查询 {rtype} {domain} 失败: {type(e).__name__}: {e}"
+        db.add_log(msg, 'debug')
+        cprint(msg, 'debug')
+
+    # ── TCP 长连接路径 ──────────────────────────────────────────────────
+    if use_tcp:
+        try:
+            conn = _tcp_dns_pool.get(srv_ip)
+            resp = conn.query(domain, rtype, timeout)
+
+            # 解析响应
+            rdata_type = dns.rdatatype.from_text(rtype)
+            results = []
+            for rrset in resp.answer:
+                if rrset.rdtype == rdata_type:
+                    for r in rrset:
+                        results.append(r.address)
+
+            if resp.rcode() == dns.rcode.NXDOMAIN or (not results and resp.rcode() == dns.rcode.NOERROR):
+                # NXDOMAIN 或确实无此记录类型
+                _log_noresult()
+                return []
+
+            return results if results else []
+
+        except OSError as e:
+            # 连接/网络错误：清理连接，告知调用方此服务器失败
+            _tcp_dns_pool.invalidate(srv_ip)
+            _log_error(e)
+            return None
+        except dns.exception.Timeout as e:
+            # 超时：不清理连接（连接可能仍可用，只是这次慢），记录并返回 None
+            _log_error(e)
+            return None
+        except Exception as e:
+            _log_error(e)
+            return None
+
+    # ── UDP 路径（原有逻辑不变）────────────────────────────────────────
     try:
         resolver = dns.resolver.Resolver(configure=False)
         resolver.nameservers = [srv_ip]
         resolver.timeout  = timeout
         resolver.lifetime = timeout
-        return [str(r) for r in resolver.resolve(domain, rtype, tcp=use_tcp)]
+        return [str(r) for r in resolver.resolve(domain, rtype, tcp=False)]
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
-        # NXDOMAIN / NoAnswer / NoNameservers：属于确定性"无结果"
-        now = time.time()
-        key = (domain, rtype)
-        with _dns_noresult_lock:
-            last = _dns_noresult_logged.get(key, 0)
-            if now - last > 86400:  # 1天窗口内只记录一次
-                _dns_noresult_logged[key] = now
-                # 你希望像超时一样知道是哪个 DNS/IP、查询哪个记录类型（A/AAAA）
-                db.add_log(
-                    f"[custom DNS] {srv_ip}({proto}) 查询 {rtype} {domain} 失败: 无结果",
-                    'debug'
-                )
-                cprint(
-                    f"[custom DNS] {srv_ip}({proto}) 查询 {rtype} {domain} 失败: 无结果",
-                    'debug'
-                )
+        _log_noresult()
         return []
     except Exception as e:
-        # 超时 / 连接失败 / 协议错误 —— debug 级别，控制台 调试模式才能看到，Web 日志能看到
-        db.add_log(
-            f"[custom DNS] {srv_ip}({proto}) 查询 {rtype} {domain} 失败: {type(e).__name__}: {e}",
-            'debug'
-        )
-        cprint(
-            f"[custom DNS] {srv_ip}({proto}) 查询 {rtype} {domain} 失败: {type(e).__name__}: {e}",
-            'debug'
-        )
-        return None  # 告知调用方此服务器本次失败，继续尝试其他服务器
+        _log_error(e)
+        return None
 
 # ── DNS 轮询状态（全局，所有 domain 共用，线程安全） ─────────────────────
 # 记录"当前轮到哪台服务器"的游标，原子递增取模实现 Round-Robin。
@@ -4284,8 +4534,6 @@ if __name__ == '__main__':
 
     def _get_geo_force(ip: str) -> dict:
         """强制查询 IP 归属地，跳过缓存，并更新缓存（用于批量刷新）"""
-        # 先查缓存（仅用于防止短时间内重复查询，此处可忽略）
-        # 直接发起网络请求
         result = {'country':'Unknown', 'country_code':'XX', 'isp':'Unknown'}
         # SSRF防护：仅对公网IP发起查询
         if not _is_safe_public_ip(ip):
@@ -4293,10 +4541,15 @@ if __name__ == '__main__':
                 _geo_cache[ip] = result
             return result
         try:
-            s = get_requests_session()
             import urllib.parse
             safe_ip = urllib.parse.quote(ip, safe=':.[]')
-            r = s.get(f"http://ip-api.com/json/{safe_ip}?fields=country,countryCode,isp", timeout=5)
+            s = _get_geo_session()
+            # 不用 with：stream=False 时 urllib3 读完响应体后自动归还连接到池子。
+            # with response 的 __exit__ 会调 r.close() 使连接被丢弃而非复用。
+            r = s.get(
+                f"http://ip-api.com/json/{safe_ip}?fields=country,countryCode,isp",
+                timeout=5, stream=False
+            )
             if r.status_code == 200:
                 d = r.json()
                 if d.get('countryCode') and d['countryCode'] != 'XX':
@@ -4341,14 +4594,25 @@ if __name__ == '__main__':
             return
         
         mode = "全部刷新" if refresh_all else "修复未知"
-        cprint(f"[geo] 开始{mode}，共 {len(targets)} 个 IP（间隔 0.8 秒，避免触发限流）", 'info')
+
+        # IP 去重：同一 IP 可能出现在多个 tracker 下，只查一次网络，
+        # 查完后统一更新所有引用它的 tracker。
+        seen_ips: set = set()
+        deduped = []
+        for domain, ip_obj in targets:
+            ip = ip_obj.get('ip', '')
+            if ip and ip not in seen_ips:
+                seen_ips.add(ip)
+                deduped.append((domain, ip_obj))
+        targets = deduped
+
+        cprint(f"[geo] 开始{mode}，共 {len(targets)} 个唯一 IP（间隔 0.8 秒，避免触发限流）", 'info')
 
         updated_count = 0
         for domain, ip_obj in targets:
             ip = ip_obj.get('ip', '')
             if not ip:
                 continue
-            new_geo = get_geo(ip)
             # 如果该 IP 已连续失败超过 MAX_FAIL 次，则跳过本次更新
             if fail_count.get(ip, 0) >= MAX_FAIL:
                 cprint(f"[geo] 跳过 {ip}（已连续失败 {MAX_FAIL} 次）", 'debug')
@@ -4363,12 +4627,11 @@ if __name__ == '__main__':
                 fail_count.pop(ip, None)
                 # 获取当前数据库中的旧值
                 old_geo = ip_obj.get('country', {})
-                old_cc = old_geo.get('country_code', 'XX')
+                old_cc = old_geo.get('country_code', 'XX') if isinstance(old_geo, dict) else 'XX'
                 new_cc = new_geo.get('country_code', 'XX')
-                # 如果不同，才更新
-                if old_cc != new_cc or old_geo.get('isp') != new_geo.get('isp'):
+                # 如果不同，才更新所有引用该 IP 的 tracker
+                if old_cc != new_cc or (isinstance(old_geo, dict) and old_geo.get('isp') != new_geo.get('isp')):
                     with db.lock:
-                        # 重新定位该 IP（防止列表在遍历过程中发生变化）
                         for td in db.trackers.values():
                             for obj in td.get('ips', []):
                                 if obj.get('ip') == ip:
@@ -4376,7 +4639,7 @@ if __name__ == '__main__':
                                     updated_count += 1
                                     break
                     if updated_count % 10 == 0:
-                        db._save_async() # 每更新 10 个 IP 异步保存一次
+                        db._save_async()
                     cprint(f"[geo] 更新 {ip}: {old_cc} -> {new_cc}", 'debug')
             else:
                 # 查询失败：增加失败计数
