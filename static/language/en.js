@@ -169,6 +169,8 @@ window.__i18n_en = {
     tabSwitchRefreshDesc: 'Re-fetch dashboard/tracker data when switching tabs',
     showRemovedIps: 'Show Removed IPs',
     showRemovedIpsDesc: 'Show removed historical IPs in tracker list (grayed out)',
+    allowPrivateIps: 'Allow Private/LAN IPs',
+    allowPrivateIpsDesc: 'Allow adding 192.168.x.x / 10.x.x.x etc (SSRF risk)',
     defaultLayoutWidth: 'Default Zoom',
     defaultLayoutWidthDesc: 'Default page width for new users; existing cookie takes priority',
     logToDisk: 'Log to Disk',

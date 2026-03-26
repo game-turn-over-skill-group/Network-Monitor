@@ -169,6 +169,8 @@ window.__i18n_zh = {
     tabSwitchRefreshDesc: '切换标签页时重新拉取仪表盘/监控数据',
     showRemovedIps: '显示历史IP',
     showRemovedIpsDesc: '开启后显示已移除的历史IP（灰色半透明）',
+    allowPrivateIps: '允许添加内网IP',
+    allowPrivateIpsDesc: '开启后允许添加 192.168.x.x / 10.x.x.x 等内网地址（存在 SSRF 风险）',
     defaultLayoutWidth: '默认页面视野',
     defaultLayoutWidthDesc: '新用户/未设置cookie时的默认视野宽度；已有cookie的用户不受影响',
     logToDisk: '日志存盘',

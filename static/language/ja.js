@@ -169,6 +169,8 @@ window.__i18n_ja = {
     tabSwitchRefreshDesc: 'タブ切り替え時にダッシュボード/Trackerデータを再取得',
     showRemovedIps: '削除済みIPを表示',
     showRemovedIpsDesc: 'Trackerリストに削除済みの履歴IPを表示（グレーアウト）',
+    allowPrivateIps: 'LAN/内網IPを許可',
+    allowPrivateIpsDesc: '有効にすると 192.168.x.x / 10.x.x.x などの内網アドレスを追加可能（SSRF リスク）',
     defaultLayoutWidth: 'デフォルトズーム',
     defaultLayoutWidthDesc: '新規ユーザーのデフォルトページ幅；既存クッキーが優先',
     logToDisk: 'ディスクにログを保存',

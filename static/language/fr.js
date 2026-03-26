@@ -169,6 +169,8 @@ window.__i18n_fr = {
     tabSwitchRefreshDesc: 'Récupérer à nouveau les données du tableau de bord/tracker lors du changement d\'onglet',
     showRemovedIps: 'Afficher les IP supprimées',
     showRemovedIpsDesc: 'Afficher les IP historiques supprimées dans la liste des trackers (grisées)',
+    allowPrivateIps: 'Autoriser les IP privées/LAN',
+    allowPrivateIpsDesc: 'Autoriser l’ajout d’adresses internes (192.168.x.x / 10.x.x.x et etc.) — risque SSRF.',
     defaultLayoutWidth: 'Zoom par défaut',
     defaultLayoutWidthDesc: 'Largeur de page par défaut pour les nouveaux utilisateurs ; le cookie existant a la priorité',
     logToDisk: 'Enregistrer les journaux sur disque',

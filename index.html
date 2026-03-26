@@ -2803,6 +2803,14 @@
                                 <i class="bi bi-trash me-1"></i>{{ t('config.clearRemovedIps') }}
                             </button>
                         </div>
+                        <!-- 允许内网IP开关（第四位） -->
+                        <div class="col-md-8">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" v-model="cfg.allow_private_ips" @change="saveCfg" id="allowPrivateIpsSwitch">
+                                <label class="form-check-label" for="allowPrivateIpsSwitch">{{ t('config.allowPrivateIps') }}</label>
+                            </div>
+                            <div class="form-text">{{ t('config.allowPrivateIpsDesc') }}</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3235,6 +3243,7 @@ createApp({
             stagger_delay_direct: 100,
             export_suffix: '/announce',
             show_removed_ips: true,
+            allow_private_ips: false,
             default_layout_width: '1700',
             listen_port: 443,
             listen_ipv4: 'global',
@@ -3877,6 +3886,7 @@ createApp({
                     stagger_delay_direct:cfg.value.stagger_delay_direct||100,
                     export_suffix:cfg.value.export_suffix||'/announce',
                     show_removed_ips:cfg.value.show_removed_ips !== false,
+                    allow_private_ips: cfg.value.allow_private_ips !== false,
                     default_layout_width:cfg.value.default_layout_width||'1700',
                     listen_port: cfg.value.listen_port,
                     listen_ipv4: cfg.value.listen_ipv4,

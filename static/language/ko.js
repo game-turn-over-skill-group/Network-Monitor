@@ -169,6 +169,8 @@ window.__i18n_ko = {
     tabSwitchRefreshDesc: '탭 전환 시 대시보드/Tracker 데이터 다시 가져오기',
     showRemovedIps: '삭제된 IP 표시',
     showRemovedIpsDesc: 'Tracker 목록에 삭제된 이력 IP 표시 (회색 표시)',
+    allowPrivateIps: 'LAN/내網 IP 허용',
+    allowPrivateIpsDesc: '활성화 시 192.168.x.x / 10.x.x.x 등 내부 주소를 추가할 수 있습니다(SSRF 위험).',
     defaultLayoutWidth: '기본 줌',
     defaultLayoutWidthDesc: '새 사용자의 기본 페이지 너비; 기존 쿠키가 우선',
     logToDisk: '디스크에 로그 저장',
