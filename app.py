@@ -1802,6 +1802,9 @@ def _resolve_dnspython(domain: str):
     seen = set()
     use_tcp = CONFIG.get('dns_use_tcp', False)
     for rtype, ver in [('A', 'ipv4'), ('AAAA', 'ipv6')]:
+        # 否定缓存命中：该记录类型已确认不存在，直接跳过
+        if _dns_neg_is_blocked(domain, rtype):
+            continue
         try:
             resolver = dns.resolver.Resolver()
             _dto = _dns_query_timeout()
@@ -1813,7 +1816,8 @@ def _resolve_dnspython(domain: str):
                     seen.add(ip)
                     ips.append({'ip': ip, 'version': ver, 'country': get_geo(ip)})
         except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
-            pass  # 无该类型记录，正常
+            # 确定性无记录，写入否定缓存
+            _dns_neg_add(domain, rtype)
         except Exception as e:
             db.add_log(f"[dnspython] DNS {rtype} {domain}: {type(e).__name__}: {e}", 'debug')
     return ips
@@ -2186,6 +2190,10 @@ def _resolve_custom(domain: str):
     seen    = set()
 
     for rtype, ver in [('A', 'ipv4'), ('AAAA', 'ipv6')]:
+        # 否定缓存命中：该记录类型已确认不存在，直接跳过，不向 DNS 发包
+        if _dns_neg_is_blocked(domain, rtype):
+            continue
+
         try_order = _dns_custom_try_order(servers)
         result_ips = None
 
@@ -2204,6 +2212,8 @@ def _resolve_custom(domain: str):
                 break
 
             # res == []：NXDOMAIN / NoAnswer —— 域名不存在，确定性结果，无需再问其他服务器
+            # 写入否定缓存，后续检测周期内跳过此记录类型查询
+            _dns_neg_add(domain, rtype)
             result_ips = []
             break
 
@@ -2224,6 +2234,39 @@ _dns_fail_lock = threading.Lock()
 _dns_noresult_logged = {}          # {(domain, rtype): last_time}
 _dns_noresult_lock = threading.Lock()
 
+# ── DNS 否定缓存（negative cache） ──────────────────────────────────────────
+# 当某域名的某记录类型（A/AAAA）被 DNS 服务器确认不存在（NXDOMAIN/NoAnswer），
+# 缓存 _DNS_NEG_TTL 秒，期间直接返回空列表，不再向 DNS 发包。
+# 重启应用后缓存清空，会重新查询一次。
+# 超时（None）不进入否定缓存——网络抖动不等于记录不存在。
+_DNS_NEG_TTL = 2 * 3600            # 2 小时：覆盖多个检测周期，又不让上线域名永远查不到
+_dns_neg_cache: dict = {}          # {(domain, rtype): expire_timestamp}
+_dns_neg_lock  = threading.Lock()
+
+def _dns_neg_is_blocked(domain: str, rtype: str) -> bool:
+    """返回 True 表示该记录类型在否定缓存中，本次应跳过查询直接返回空。"""
+    key = (domain, rtype)
+    with _dns_neg_lock:
+        exp = _dns_neg_cache.get(key)
+        if exp is None:
+            return False
+        if time.time() < exp:
+            return True
+        del _dns_neg_cache[key]   # 已过期，清除
+        return False
+
+def _dns_neg_add(domain: str, rtype: str):
+    """将 (domain, rtype) 写入否定缓存，TTL = _DNS_NEG_TTL 秒。"""
+    key = (domain, rtype)
+    with _dns_neg_lock:
+        _dns_neg_cache[key] = time.time() + _DNS_NEG_TTL
+
+def _dns_neg_clear(domain: str):
+    """DNS 解析恢复时清除该域名的否定缓存（A + AAAA 两条）。"""
+    with _dns_neg_lock:
+        _dns_neg_cache.pop((domain, 'A'),    None)
+        _dns_neg_cache.pop((domain, 'AAAA'), None)
+
 def _dns_fail_once(domain: str) -> bool:
     """返回 True 表示首次失败，应记录日志；False 表示已记录过，静默跳过。"""
     with _dns_fail_lock:
@@ -2233,7 +2276,8 @@ def _dns_fail_once(domain: str) -> bool:
         return True
 
 def _dns_fail_clear(domain: str):
-    """DNS 解析恢复时清除静默标记，下次失败重新提醒。"""
+    """DNS 解析恢复时清除静默标记，下次失败重新提醒。
+    注意：否定缓存由 resolve() 按记录类型精确清除，此处不做全清以避免误清。"""
     with _dns_fail_lock:
         _dns_fail_logged.discard(domain)
 
@@ -2252,6 +2296,17 @@ def resolve(domain: str):
             cprint(f"DNS解析异常 {domain}: {e}", 'error')
             db.add_log(f"DNS解析异常 {domain}: {e}", 'error')
         return []
+    if ips:
+        # 解析成功：按实际返回的记录类型精确清除否定缓存
+        # 只清"本次真的查到了结果"的类型，避免把另一类型的否定缓存也误清掉
+        # 例如：域名有 A 记录无 AAAA 记录，不能因为拿到 A 就把 AAAA 的否定缓存清掉
+        got_versions = {ip_info['version'] for ip_info in ips}
+        with _dns_neg_lock:
+            if 'ipv4' in got_versions:
+                _dns_neg_cache.pop((domain, 'A'), None)
+            if 'ipv6' in got_versions:
+                _dns_neg_cache.pop((domain, 'AAAA'), None)
+        _dns_fail_clear(domain)
     if not ips:
         # custom 模式下：无结果/超时都会在 _query_single_server 内按「具体 DNS + 记录类型」记录；
         # 这里避免再输出一条通用的「无结果」重复日志。
