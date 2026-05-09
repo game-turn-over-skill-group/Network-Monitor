@@ -1816,8 +1816,13 @@ def _resolve_dnspython(domain: str):
                     seen.add(ip)
                     ips.append({'ip': ip, 'version': ver, 'country': get_geo(ip)})
         except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
-            # 确定性无记录，写入否定缓存
-            _dns_neg_add(domain, rtype)
+            # 确定性无记录：累加连续计数，达阈值进 CD
+            hit = _dns_neg_record_all_empty(domain, rtype)
+            if hit:
+                msg = (f"[dnspython] {domain} {rtype} 连续 {hit} 轮无结果，"
+                       f"进入否定缓存 CD {_DNS_NEG_TTL//3600}h")
+                cprint(msg, 'debug')
+                db.add_log(msg, 'debug')
         except Exception as e:
             db.add_log(f"[dnspython] DNS {rtype} {domain}: {type(e).__name__}: {e}", 'debug')
     return ips
@@ -2196,26 +2201,45 @@ def _resolve_custom(domain: str):
 
         try_order = _dns_custom_try_order(servers)
         result_ips = None
+        had_timeout  = False   # 本轮是否有任何一台 DNS 超时
+        empty_count  = 0       # 本轮返回无结果的 DNS 台数
+        queried      = 0       # 本轮实际发包的 DNS 台数
 
         for i in range(count):
             idx = try_order[i]
             srv_ip, use_tcp = servers[idx]
             res = _query_single_server(domain, rtype, srv_ip, use_tcp)
+            queried += 1
 
             if res is None:
+                # 超时/网络错误：不算无结果，标记 had_timeout
                 _dns_note_srv_result(srv_ip, use_tcp, False)
+                had_timeout = True
                 continue
 
             _dns_note_srv_result(srv_ip, use_tcp, True)
             if res:
+                # 拿到真实 IP：重置无结果计数，结束本记录类型查询
                 result_ips = res
+                _dns_neg_record_has_result(domain, rtype)
                 break
 
-            # res == []：NXDOMAIN / NoAnswer —— 域名不存在，确定性结果，无需再问其他服务器
-            # 写入否定缓存，后续检测周期内跳过此记录类型查询
-            _dns_neg_add(domain, rtype)
+            # res == []：此台 DNS 确认无记录，继续问下一台（收集全部意见）
+            empty_count += 1
+
+        if result_ips is None and not had_timeout and empty_count == queried and queried > 0:
+            # 本轮所有 DNS 均返回无结果（无超时、无成功）——累加计数
+            hit = _dns_neg_record_all_empty(domain, rtype)
+            if hit:
+                msg = (f"[custom DNS] {domain} {rtype} 连续 {hit} 轮全部无结果，"
+                       f"进入否定缓存 CD {_DNS_NEG_TTL//3600}h")
+                cprint(msg, 'debug')
+                db.add_log(msg, 'debug')
             result_ips = []
-            break
+        elif result_ips is None and had_timeout:
+            # 有超时：重置连续无结果计数，本轮结果不确定
+            _dns_neg_record_timeout(domain, rtype)
+            result_ips = []
 
         if result_ips:
             for ip in result_ips:
@@ -2235,16 +2259,19 @@ _dns_noresult_logged = {}          # {(domain, rtype): last_time}
 _dns_noresult_lock = threading.Lock()
 
 # ── DNS 否定缓存（negative cache） ──────────────────────────────────────────
-# 当某域名的某记录类型（A/AAAA）被 DNS 服务器确认不存在（NXDOMAIN/NoAnswer），
-# 缓存 _DNS_NEG_TTL 秒，期间直接返回空列表，不再向 DNS 发包。
-# 重启应用后缓存清空，会重新查询一次。
-# 超时（None）不进入否定缓存——网络抖动不等于记录不存在。
-_DNS_NEG_TTL = 2 * 3600            # 2 小时：覆盖多个检测周期，又不让上线域名永远查不到
-_dns_neg_cache: dict = {}          # {(domain, rtype): expire_timestamp}
-_dns_neg_lock  = threading.Lock()
+# 触发条件（两者同时满足）：
+#   1. 本轮所有 DNS 服务器对该记录类型都返回"无结果"（没有任何一台超时或返回 IP）
+#   2. 满足条件1的情况已连续出现 _DNS_NEG_THRESHOLD 次
+# 进入 CD 后缓存 _DNS_NEG_TTL 秒，期间跳过查询；重启后计数和缓存均清空。
+# 超时（None）不计入无结果次数——网络抖动不等于记录不存在。
+_DNS_NEG_TTL       = 24 * 3600   # CD 时长：24 小时
+_DNS_NEG_THRESHOLD = 3           # 连续全部无结果多少次才进 CD
+_dns_neg_cache: dict = {}        # {(domain, rtype): expire_timestamp}  —— CD 中的条目
+_dns_neg_miss:  dict = {}        # {(domain, rtype): consecutive_count} —— 连续全无结果计数
+_dns_neg_lock   = threading.Lock()
 
 def _dns_neg_is_blocked(domain: str, rtype: str) -> bool:
-    """返回 True 表示该记录类型在否定缓存中，本次应跳过查询直接返回空。"""
+    """返回 True 表示该记录类型正处于 CD 中，本次应跳过查询直接返回空。"""
     key = (domain, rtype)
     with _dns_neg_lock:
         exp = _dns_neg_cache.get(key)
@@ -2252,20 +2279,41 @@ def _dns_neg_is_blocked(domain: str, rtype: str) -> bool:
             return False
         if time.time() < exp:
             return True
-        del _dns_neg_cache[key]   # 已过期，清除
+        del _dns_neg_cache[key]   # CD 已过期，清除；计数器保留，让下一轮重新积累
         return False
 
-def _dns_neg_add(domain: str, rtype: str):
-    """将 (domain, rtype) 写入否定缓存，TTL = _DNS_NEG_TTL 秒。"""
+def _dns_neg_record_all_empty(domain: str, rtype: str):
+    """本轮所有 DNS 均返回无结果时调用。
+    累加连续计数；达到阈值时写入 CD，并记录一条 debug 日志。
+    """
     key = (domain, rtype)
     with _dns_neg_lock:
-        _dns_neg_cache[key] = time.time() + _DNS_NEG_TTL
+        count = _dns_neg_miss.get(key, 0) + 1
+        _dns_neg_miss[key] = count
+        if count >= _DNS_NEG_THRESHOLD:
+            _dns_neg_cache[key] = time.time() + _DNS_NEG_TTL
+            return count  # 返回计数供日志使用
+    return 0  # 未达阈值，不进 CD
+
+def _dns_neg_record_has_result(domain: str, rtype: str):
+    """本轮查到了真实 IP 时调用：重置计数、清除 CD。"""
+    key = (domain, rtype)
+    with _dns_neg_lock:
+        _dns_neg_miss.pop(key, None)
+        _dns_neg_cache.pop(key, None)
+
+def _dns_neg_record_timeout(domain: str, rtype: str):
+    """本轮至少有一台 DNS 超时时调用：重置连续无结果计数（超时≠无结果）。"""
+    key = (domain, rtype)
+    with _dns_neg_lock:
+        _dns_neg_miss.pop(key, None)
 
 def _dns_neg_clear(domain: str):
-    """DNS 解析恢复时清除该域名的否定缓存（A + AAAA 两条）。"""
+    """解析恢复时清除该域名所有否定状态（A + AAAA 的计数和 CD）。"""
     with _dns_neg_lock:
-        _dns_neg_cache.pop((domain, 'A'),    None)
-        _dns_neg_cache.pop((domain, 'AAAA'), None)
+        for rtype in ('A', 'AAAA'):
+            _dns_neg_cache.pop((domain, rtype), None)
+            _dns_neg_miss.pop((domain, rtype), None)
 
 def _dns_fail_once(domain: str) -> bool:
     """返回 True 表示首次失败，应记录日志；False 表示已记录过，静默跳过。"""
@@ -2297,15 +2345,13 @@ def resolve(domain: str):
             db.add_log(f"DNS解析异常 {domain}: {e}", 'error')
         return []
     if ips:
-        # 解析成功：按实际返回的记录类型精确清除否定缓存
+        # 解析成功：按实际返回的记录类型精确清除否定缓存（计数 + CD）
         # 只清"本次真的查到了结果"的类型，避免把另一类型的否定缓存也误清掉
-        # 例如：域名有 A 记录无 AAAA 记录，不能因为拿到 A 就把 AAAA 的否定缓存清掉
         got_versions = {ip_info['version'] for ip_info in ips}
-        with _dns_neg_lock:
-            if 'ipv4' in got_versions:
-                _dns_neg_cache.pop((domain, 'A'), None)
-            if 'ipv6' in got_versions:
-                _dns_neg_cache.pop((domain, 'AAAA'), None)
+        if 'ipv4' in got_versions:
+            _dns_neg_record_has_result(domain, 'A')
+        if 'ipv6' in got_versions:
+            _dns_neg_record_has_result(domain, 'AAAA')
         _dns_fail_clear(domain)
     if not ips:
         # custom 模式下：无结果/超时都会在 _query_single_server 内按「具体 DNS + 记录类型」记录；
@@ -3041,7 +3087,20 @@ def _check_one_and_record(domain, ip_info, temp_results, round_ok, round_fail, r
         auto_pause_enabled   = CONFIG.get('auto_pause_enabled', True)
         auto_pause_threshold = int(CONFIG.get('auto_pause_threshold', 30))
         key = (domain, ip)
-        if status == 'offline' and auto_pause_enabled:
+        # 网络不可用时跳过连续失败计数（避免网络中断误触发自动暂停）
+        # 判断当前 IP 是 IPv6 还是 IPv4，分别对应探针状态
+        _is_ipv6_ip = ':' in ip
+        with _probe_lock:
+            _cur_v4_ok = _probe_ok_v4
+            _cur_v6_ok = _probe_ok_v6  # None=未配置
+        # 若该 IP 对应的网络栈探针不可用，跳过本次计数
+        # - IPv6 地址 且 IPv6 探针明确为 False → 网络异常，跳过
+        # - IPv4 地址 且 IPv4 探针为 False     → 网络异常，跳过
+        _net_unavailable = (
+            (_is_ipv6_ip and _cur_v6_ok is False) or
+            (not _is_ipv6_ip and not _cur_v4_ok)
+        )
+        if status == 'offline' and auto_pause_enabled and not _net_unavailable:
             with _consec_fail_lock:
                 _consec_fail_count[key] = _consec_fail_count.get(key, 0) + 1
                 cur_count = _consec_fail_count[key]
@@ -4269,7 +4328,8 @@ def api_query():
     if is_domain:
         ip_rows = []
         for ipi in matched_tr.get('ips', []):
-            if ipi.get('removed') or ipi.get('paused'):
+            #if ipi.get('removed') or ipi.get('paused'): #过滤 已暂停的域名
+            if ipi.get('removed'):
                 continue
             s_ip  = hdb.get_ip_summary(host, ipi.get('ip', ''), secs)
             up_ip = round(s_ip['ok'] / s_ip['total'] * 100, 1) if s_ip['total'] > 0 else None
@@ -4607,7 +4667,7 @@ if __name__ == '__main__':
         # SSRF防护：仅对公网IP发起查询
         if not _is_safe_public_ip(ip):
             with _geo_cache_lock:
-                _geo_cache[ip] = result
+                _geo_cache.put(ip, result)
             return result
         try:
             import urllib.parse
@@ -4627,7 +4687,7 @@ if __name__ == '__main__':
                     'isp': d.get('isp','Unknown')}
             # 更新缓存（无论成功与否，避免反复查询无法访问的IP）
             with _geo_cache_lock:
-                _geo_cache[ip] = result
+                _geo_cache.put(ip, result)
         except Exception:
             pass
         return result
@@ -4635,92 +4695,95 @@ if __name__ == '__main__':
     # ==================== 启动后 geo 更新线程 ====================
     def _geo_update_loop():
         """后台更新 IP 归属地信息（根据配置执行不同策略）"""
-        time.sleep(10)   # 等待服务完全启动
-        refresh_all = CONFIG.get('refresh_geo_on_restart', True)
-        # 用于记录连续失败的 IP，避免无限重试（仅本次启动有效）
-        fail_count = {}
-        MAX_FAIL = 3   # 连续失败超过此次数则跳过
+        try:
+            time.sleep(10)   # 等待服务完全启动
+            refresh_all = CONFIG.get('refresh_geo_on_restart', True)
+            # 用于记录连续失败的 IP，避免无限重试（仅本次启动有效）
+            fail_count = {}
+            MAX_FAIL = 3   # 连续失败超过此次数则跳过
 
-        with db.lock:
-            # 收集需要处理的 IP
-            targets = []
-            for domain, td in db.trackers.items():
-                for ip_obj in td.get('ips', []):
-                    ip = ip_obj.get('ip', '')
-                    if not ip:
-                        continue
-                    if refresh_all:
-                        # 全部刷新：所有IP都加入
-                        targets.append((domain, ip_obj))
-                    else:
-                        # 仅修复未知归属地
-                        c = ip_obj.get('country', {})
-                        if isinstance(c, dict) and c.get('country_code', 'XX') == 'XX':
+            with db.lock:
+                # 收集需要处理的 IP
+                targets = []
+                for domain, td in db.trackers.items():
+                    for ip_obj in td.get('ips', []):
+                        ip = ip_obj.get('ip', '')
+                        if not ip:
+                            continue
+                        if refresh_all:
+                            # 全部刷新：所有IP都加入
                             targets.append((domain, ip_obj))
-        
-        if not targets:
-            cprint("[geo] 没有需要更新归属地的 IP", 'info')
-            return
-        
-        mode = "全部刷新" if refresh_all else "修复未知"
+                        else:
+                            # 仅修复未知归属地
+                            c = ip_obj.get('country', {})
+                            if isinstance(c, dict) and c.get('country_code', 'XX') == 'XX':
+                                targets.append((domain, ip_obj))
 
-        # IP 去重：同一 IP 可能出现在多个 tracker 下，只查一次网络，
-        # 查完后统一更新所有引用它的 tracker。
-        seen_ips: set = set()
-        deduped = []
-        for domain, ip_obj in targets:
-            ip = ip_obj.get('ip', '')
-            if ip and ip not in seen_ips:
-                seen_ips.add(ip)
-                deduped.append((domain, ip_obj))
-        targets = deduped
+            if not targets:
+                cprint("[geo] 没有需要更新归属地的 IP", 'info')
+                return
 
-        cprint(f"[geo] 开始{mode}，共 {len(targets)} 个唯一 IP（间隔 0.8 秒，避免触发限流）", 'info')
+            mode = "全部刷新" if refresh_all else "修复未知"
 
-        updated_count = 0
-        for domain, ip_obj in targets:
-            ip = ip_obj.get('ip', '')
-            if not ip:
-                continue
-            # 如果该 IP 已连续失败超过 MAX_FAIL 次，则跳过本次更新
-            if fail_count.get(ip, 0) >= MAX_FAIL:
-                cprint(f"[geo] 跳过 {ip}（已连续失败 {MAX_FAIL} 次）", 'debug')
-                continue
-            
-            # 强制查询最新归属地（绕过缓存）
-            new_geo = _get_geo_force(ip)
+            # IP 去重：同一 IP 可能出现在多个 tracker 下，只查一次网络，
+            # 查完后统一更新所有引用它的 tracker。
+            seen_ips: set = set()
+            deduped = []
+            for domain, ip_obj in targets:
+                ip = ip_obj.get('ip', '')
+                if ip and ip not in seen_ips:
+                    seen_ips.add(ip)
+                    deduped.append((domain, ip_obj))
+            targets = deduped
 
-            # 判断是否成功获取到有效数据（country_code != 'XX'）
-            if new_geo.get('country_code', 'XX') != 'XX':
-                # 成功：重置失败计数
-                fail_count.pop(ip, None)
-                # 获取当前数据库中的旧值
-                old_geo = ip_obj.get('country', {})
-                old_cc = old_geo.get('country_code', 'XX') if isinstance(old_geo, dict) else 'XX'
-                new_cc = new_geo.get('country_code', 'XX')
-                # 如果不同，才更新所有引用该 IP 的 tracker
-                if old_cc != new_cc or (isinstance(old_geo, dict) and old_geo.get('isp') != new_geo.get('isp')):
-                    with db.lock:
-                        for td in db.trackers.values():
-                            for obj in td.get('ips', []):
-                                if obj.get('ip') == ip:
-                                    obj['country'] = new_geo
-                                    updated_count += 1
-                                    break
-                    if updated_count % 10 == 0:
-                        db._save_async()
-                    cprint(f"[geo] 更新 {ip}: {old_cc} -> {new_cc}", 'debug')
+            cprint(f"[geo] 开始{mode}，共 {len(targets)} 个唯一 IP（间隔 0.8 秒，避免触发限流）", 'info')
+
+            updated_count = 0
+            for domain, ip_obj in targets:
+                ip = ip_obj.get('ip', '')
+                if not ip:
+                    continue
+                # 如果该 IP 已连续失败超过 MAX_FAIL 次，则跳过本次更新
+                if fail_count.get(ip, 0) >= MAX_FAIL:
+                    cprint(f"[geo] 跳过 {ip}（已连续失败 {MAX_FAIL} 次）", 'debug')
+                    continue
+
+                # 强制查询最新归属地（绕过缓存）
+                new_geo = _get_geo_force(ip)
+
+                # 判断是否成功获取到有效数据（country_code != 'XX'）
+                if new_geo.get('country_code', 'XX') != 'XX':
+                    # 成功：重置失败计数
+                    fail_count.pop(ip, None)
+                    # 获取当前数据库中的旧值
+                    old_geo = ip_obj.get('country', {})
+                    old_cc = old_geo.get('country_code', 'XX') if isinstance(old_geo, dict) else 'XX'
+                    new_cc = new_geo.get('country_code', 'XX')
+                    # 如果不同，才更新所有引用该 IP 的 tracker
+                    if old_cc != new_cc or (isinstance(old_geo, dict) and old_geo.get('isp') != new_geo.get('isp')):
+                        with db.lock:
+                            for td in db.trackers.values():
+                                for obj in td.get('ips', []):
+                                    if obj.get('ip') == ip:
+                                        obj['country'] = new_geo
+                                        updated_count += 1
+                                        break
+                        if updated_count % 10 == 0:
+                            db._save_async()
+                        cprint(f"[geo] 更新 {ip}: {old_cc} -> {new_cc}", 'debug')
+                else:
+                    # 查询失败：增加失败计数
+                    fail_count[ip] = fail_count.get(ip, 0) + 1
+                    cprint(f"[geo] 查询失败 {ip}（失败 {fail_count[ip]}/{MAX_FAIL}）", 'debug')
+                time.sleep(0.8)   # 避免触发 ip-api 限流
+
+            if updated_count:
+                db._save_async()
+                cprint(f"[geo] 归属地更新完成，共更新 {updated_count} 个 IP", 'info')
             else:
-                # 查询失败：增加失败计数
-                fail_count[ip] = fail_count.get(ip, 0) + 1
-                cprint(f"[geo] 查询失败 {ip}（失败 {fail_count[ip]}/{MAX_FAIL}）", 'debug')
-            time.sleep(0.8)   # 避免触发 ip-api 限流
-        
-        if updated_count:
-            db._save_async()
-            cprint(f"[geo] 归属地更新完成，共更新 {updated_count} 个 IP", 'info')
-        else:
-            cprint("[geo] 没有 IP 的归属地发生更新", 'info')
+                cprint("[geo] 没有 IP 的归属地发生更新", 'info')
+        except Exception as e:
+            cprint(f"[geo] 归属地更新线程异常退出: {e}", 'error')
 
     geo_repair_t = threading.Thread(target=_geo_update_loop, daemon=True)
     geo_repair_t.start()

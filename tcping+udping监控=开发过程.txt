@@ -14144,6 +14144,7 @@ UDP 转发路径：
 
 //解决DNS查询不存在A或AAAA记录的域名重启前进入CD
 //查询DNS记录无结果后2小时再查
+//修正DNS查询无结果判定逻辑为所有DNS+累计无结果3次
 
 解决一下 老查询这些域名 不存在AAAA记录 或者 不存在A记录 查询多了 对方会直接丢超时 的问题
 就是连续对某个域名 查询A/AAAA记录 不存在的时候 重启应用前 直接跳过查询 我不知道设置多少合理 你决定
@@ -14275,8 +14276,432 @@ _dns_neg_clear 只在某个记录类型真的有新 IP 时清对应类型的缓�
 resolve() 里改为按实际返回的记录类型精确清缓存：拿到了 A 只清 A 的缓存，拿到了 AAAA 只清 AAAA 的缓存，互不干扰
 _dns_fail_clear() 里移除了误清全部否定缓存的调用
 
+----------------
+
+Q：
+我觉得 查询到无结果 就否定缓存 跳过查询 这个设计 不合理
+有的域名 正在更新的时候 或者DNS查询有时候有误差 部分域名返回的结果 就是空的
+这时候被记录了 那我在接下来的2小时内 都无法探测该域名的IP的状态了
+对无结果的A/AAAA记录 这个操作是对的 但是必须判断一个前提 再去进入查询CD
+就是历史查询无结果次数 达到多少次 设置一个合理的阈值 达到这个次数 再去进入设定的CD 比如2小时或重启后再查
+偶尔有个别域名 查询到无结果 是有可能的 你必须判断是真得无结果 还是偶尔查询的失败
+最好 能有个综合判定 所有DNS查询该域名的A/AAAA记录 都为无结果的时候 再触发进入CD（2小时）和重启后再查询
+
+----------------
+
+A：
+很好的思路。现在的逻辑是"一台 DNS 说无结果就进 CD"，但你要的是"所有 DNS 都说无结果，且达到一定次数才进 CD"。
+
+两个判断条件合并：
+1、本轮所有 DNS 服务器都返回无结果（没有一台超时或返回 IP）
+2、连续出现这种情况达到 N 次（阈值，我设 3 次）
+
+只要有任何一台 DNS 超时（None），说明可能是网络问题，不计入"无结果"次数，更不进 CD。
+
+新逻辑说明：
+进入 CD 的条件（两者同时满足）：
+
+本轮询问了所有 DNS 服务器，没有任何一台超时，且全部返回无结果
+上述情况连续出现 3 次（_DNS_NEG_THRESHOLD = 3）
+
+各种情况的处理：
+情况					行为
+某台 DNS 超时				重置连续无结果计数，本轮视为不确定
+某台 DNS 返回无结果，另一台超时		同上，超时优先，不累计
+所有 DNS 均返回无结果（无超时）		计数 +1，达到 3 次才进 CD
+任意一台 DNS 查到真实 IP		重置计数，清除 CD
+CD 期间（2h）				直接跳过查询
+CD 到期					自动恢复查询，但计数保留——下次再连续 3 轮全无结果才重新进 CD
+
+bandito.byterunner.io 这种"有 A 无 AAAA、且查 AAAA 会超时"的域名，由于超时会不断重置计数，永远不会进 CD——
+这是正确的，因为超时说明 DNS 服务器本身有问题，不代表 AAAA 记录不存在。
+
 
 --------------------------------------
+
+
+//解决连续失败xx次后自动暂停功能=模拟断网(禁用网卡)也会触发导致全部IP被暂停的问题
+
+给连续失败xx次自动暂停 加一个网络状态是否可用的判断 当网络状态不可用的时候 已经不会自动探测了才对
+但是这个连续失败xx次 自动暂停 还是会被触发。。
+代码中 已经有当前网络是否可用的状态判断了 而且是区分了ipv4和ipv6的 都需要判断 不管哪个不可用时 都跳过连续暂停
+
+----------------
+
+现在我已经找到了问题所在。在 _check_one_and_record 函数中（第3090行），
+自动暂停逻辑在 status == 'offline' 时直接触发，没有检查当前网络探针状态（_probe_ok_v4 / _probe_ok_v6）。
+需要在触发自动暂停之前，读取探针状态并判断：如果网络本身就不可用（IPv4 或 IPv6 不可用，视该 IP 的地址类型而定），就跳过计数累加。
+
+判断规则说明：
+IP 类型			条件					结果		
+IPv6 地址（含 :）	_probe_ok_v6 is False（已配置但不可达）	跳过计数
+IPv4 地址		_probe_ok_v4 == False			跳过计数
+IPv6 地址		_probe_ok_v6 is None（未配置探针）	不跳过，正常计数
+
+特别处理了 None 的情况——IPv6 探针未配置（None）时、不视为网络故障，只有明确探测到不可达（False）时才跳过。
+
+
+--------------------------------------
+
+
+//解决断网情况下GEO更新IP线程异常退出的问题
+
+我手动禁用网卡的时候 这个报错 是什么意思？需要修复吗 还是断网后的正常的异常提示？
+
+Exception in thread Thread-1 (_geo_update_loop):
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1043, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Github\Network-Monitor\app.py", line 4750, in _geo_update_loop
+    new_geo = _get_geo_force(ip)
+  File "E:\Github\Network-Monitor\app.py", line 4669, in _get_geo_force
+    _geo_cache[ip] = result
+    ~~~~~~~~~~^^^^
+TypeError: 'LRUCache' object does not support item assignment
+
+----------------
+
+这是两个独立的 bug，都需要修复：
+1、TypeError: 'LRUCache' object does not support item assignment — _geo_cache 是 LRUCache 对象，
+不能用 [] 赋值，应该调用 .put() 方法。这是代码 bug，断网时触发了这个路径才暴露出来。
+
+2、线程崩溃 — _geo_update_loop 线程因未捕获的异常直接退出，之后 IP 归属地将永远不再更新，需要加 try/except 保护。
+
+问题找到了。_geo_cache 是 LRUCache 实例，第4669行和第4689行错误地用了 [] 赋值（应该是 .put()），而其他地方都用的 .put()。
+同时给整个 _geo_update_loop 加上 try/except 防止线程崩溃。
+
+try/except 的缩进结构出了问题，需要重新整理整个函数体的缩进：
+这是真实的代码 bug，需要修复，不是正常的断网提示。 共修复了 3 处：
+
+Bug 1 & 2：_geo_cache[ip] = result → _geo_cache.put(ip, result)（第4669、4689行）
+_geo_cache 是 LRUCache 实例，该类只实现了 .get() / .put() 方法，没有实现 __setitem__，
+所以 [] 赋值会直接抛 TypeError。其他所有地方都正确地用了 .put()，这两处是遗漏。
+断网时 ip-api.com 请求失败走到了私有IP分支或 except 跳过了，恰好触发了这两处有问题的路径。
+
+Bug 3：_geo_update_loop 线程无保护
+整个函数没有顶层 try/except，任何未预期的异常都会导致线程静默崩溃，之后 IP 归属地永远不再更新。
+现在加上了 try/except Exception，异常会被记录到日志而不是打印到控制台后线程消失。
+
+
+--------------------------------------
+
+
+//修复新增tracker监控列表默认排序失效问题（未解决=先放着）
+
+新添加的tracker他在监控列表的 默认可用率排序 好像会失效 看看这是为什么？
+需要手动暂停 再启动一次 他才能正常按照默认的可用率排序
+
+----------------
+
+根因完全清楚了。问题链如下：
+问题根因：
+1、新 tracker 添加时，hdb 没有历史数据，uptime_24h = null（total=0，返回 None）
+2、由于 cache_history=True，这个 null 被写进了 uptime_cache，TTL=30 秒
+3、后台 bg 线程虽然会立刻调用 check_ip，但 check_ip 调的是不走 update_status 的路径（update_db=False），不会触发 _clear_uptime_cache
+4、真正的 monitor_loop 完成第一轮检测后会调 update_status → _clear_uptime_cache，缓存才失效
+5、但在缓存 TTL（30 秒）内，前端拿到的 uptime_24h 一直是 null，排序时被 uv() 映射为 -1，自然沉底
+
+"暂停再恢复"为什么能修复：暂停/恢复会触发 _clear_uptime_cache(domain)（第842行），缓存失效，
+下次 get_trackers 重新从 hdb 算，此时已有探测数据，uptime_24h 有值了。
+修复方案： add_tracker 时主动清除该域名的 uptime_cache，且后台 bg 线程在检测完后也要刷新缓存。
+
+根因分析：
+新 tracker 添加后，uptime_24h 计算结果为 null（hdb 没有历史数据，total=0），这个 null 被立刻缓存进 uptime_cache（TTL=30秒）。
+后台 bg 线程虽然会马上做首次检测，但它调用的是 check_ip(..., update_db=False) 路径，不走 update_status，所以不会触发 _clear_uptime_cache。
+结果是：
+在最多 30 秒的缓存 TTL 内，前端始终拿到 uptime_24h=null，排序函数 uv() 把 null 映射为 -1 沉底。
+"暂停再恢复"恰好触发了第842行的 _clear_uptime_cache(domain)，缓存失效后重算就有值了。
+
+修复了两处（add_tracker 附近）：
+
+修复1 — add_tracker 方法中（第533行附近）：
+python
+# 新增：添加时主动清除旧缓存，防止 null 被缓存
+self._clear_uptime_cache(domain)
+self._save_async()
+
+修复2 — api_add 的后台 bg 线程末尾：
+python
+for ipi in ipl:
+    try: check_ip(d, ipi, retry=False)
+    except Exception: pass
+# 新增：首次检测完后清除缓存，让结果立即参与排序
+db._clear_uptime_cache(d)
+
+两处配合：添加时清除防止 null 入缓存；首次检测跑完后再清一次，确保新鲜的可用率数据能立即被 get_trackers 算出并正确排序。
+
+----------------
+
+好像没用。。而且又发现了个ip-api查询归属地的报错。。我才启动程序后 就点添加tracker看他卡了半天才添加成功
+然后过了一段时间 我手动重试1次探测 他的排序 还是不对。。
+
+::1 - - - - [09/May/2026:08:12:54 +0800] "POST /api/tracker/add HTTP/1.1" 200 127  # add UDP://tracker.filemail.com:6969 (1 IPs) by ::1 [rer]
+::1 - - - - [09/May/2026:08:12:54 +0800] "GET /api/datas HTTP/1.1" 200 12310
+::1 - - - - [09/May/2026:08:12:54 +0800] "GET /api/count HTTP/1.1" 200 886
+::1 - - - - [09/May/2026:08:13:04 +0800] "GET /api/auth/whoami HTTP/1.1" 200 51
+::1 - - - - [09/May/2026:08:13:04 +0800] "GET /api/config HTTP/1.1" 200 563
+::1 - - - - [09/May/2026:08:13:04 +0800] "GET /api/datas HTTP/1.1" 200 12351
+::1 - - - - [09/May/2026:08:13:05 +0800] "GET /api/users HTTP/1.1" 200 152
+  2026/5/9 08:13:32 [ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.188) 离线 | 超时(>5s)
+::1 - - - - [09/May/2026:08:13:35 +0800] "GET /api/datas HTTP/1.1" 200 12497
+WARNING:urllib3.connectionpool:Connection pool is full, discarding connection: ip-api.com. Connection pool size: 4
+WARNING:urllib3.connectionpool:Connection pool is full, discarding connection: ip-api.com. Connection pool size: 4
+
+----------------
+
+问题1：排序仍然失效（上次修复不彻底）
+上次的修复在 bg 所有 IP 跑完后才清一次缓存，但有个循环陷阱：
+bg线程跑UDP超时（5s）→ 前端30s轮询 → get_trackers() 发现缓存过期
+→ hdb还没数据 → 算出null → null又被缓存30s
+→ bg跑完清缓存 → 但30s内前端不会重算 → 排序还是错的
+
+修复：每检测完一个 IP 就立即清一次缓存（从循环末尾移到循环体内）：
+python
+for ipi in ipl:
+    try: check_ip(d, ipi, retry=False)
+    except Exception: pass
+    db._clear_uptime_cache(d)  # ← 每个IP检测完立即清，而不是全部跑完才清
+这样 hdb 刚写入数据，缓存就同步失效，前端下次轮询必然拿到真实值。
+
+问题2：Connection pool is full 警告
+pool_maxsize=4 太小。monitor_loop 里 DNS 解析是 32 线程并发（ThreadPoolExecutor(max_workers=32)），
+每个线程里 resolve() 会调 get_geo()，所以瞬间可能有 32 个并发 geo 请求，4 个池位严重不足，超出的连接用完即丢，触发 urllib3 警告。
+
+修复：pool_maxsize 从 4 改为 32，与 DNS 并发线程数对齐。
+
+----------------
+
+感觉你在忽悠我？你没有做任何实质性的改动。。问题并没有解决
+我重启app后 他的排序就对了 然后我重新删除 再添加 再手动刷新 他的排序 还是不对？
+这是为什么？
+  2026/5/9 08:22:56 [INFO] HTTP服务器启动在 http://localhost:443
+  2026/5/9 08:23:05 [INFO] [geo] 开始全部刷新，共 190 个唯一 IP（间隔 0.8 秒，避免触发限流）
+::1 - - - - [09/May/2026:08:23:11 +0800] "GET /api/datas HTTP/1.1" 200 12046
+::1 - - - - [09/May/2026:08:23:13 +0800] "GET /api/auth/whoami HTTP/1.1" 200 51
+::1 - - - - [09/May/2026:08:23:13 +0800] "GET /api/config HTTP/1.1" 200 563
+::1 - - - - [09/May/2026:08:23:13 +0800] "GET /api/datas HTTP/1.1" 200 11988
+::1 - - - - [09/May/2026:08:23:13 +0800] "GET /api/users HTTP/1.1" 200 152
+::1 - - - - [09/May/2026:08:23:36 +0800] "GET /api/config HTTP/1.1" 200 563
+::1 - - - - [09/May/2026:08:23:36 +0800] "GET /api/datas HTTP/1.1" 200 14559
+::1 - - - - [09/May/2026:08:23:36 +0800] "GET /api/users HTTP/1.1" 200 152
+::1 - - - - [09/May/2026:08:23:48 +0800] "POST /api/tracker/delete HTTP/1.1" 200 17  # delete tracker.filemail.com by ::1 [rer]
+::1 - - - - [09/May/2026:08:23:48 +0800] "GET /api/datas HTTP/1.1" 200 12251
+::1 - - - - [09/May/2026:08:23:48 +0800] "GET /api/count HTTP/1.1" 200 886
+::1 - - - - [09/May/2026:08:24:06 +0800] "POST /api/tracker/add HTTP/1.1" 200 127  # add UDP://tracker.filemail.com:6969 (1 IPs) by ::1 [rer]
+::1 - - - - [09/May/2026:08:24:07 +0800] "GET /api/datas HTTP/1.1" 200 12248
+::1 - - - - [09/May/2026:08:24:07 +0800] "GET /api/count HTTP/1.1" 200 886
+::1 - - - - [09/May/2026:08:24:07 +0800] "GET /api/datas HTTP/1.1" 200 12282
+  2026/5/9 08:24:24 [ERROR] ✗ UDP://tr4ck3r.duckdns.org:6969 (185.146.233.150) 离线 | 超时(>5s)
+2026/5/9 08:24:33 [INFO] 重试结果: UDP://tracker.filemail.com:6969 (52.58.128.163) → offline N/A | 超时(>5s)
+::1 - - - - [09/May/2026:08:24:33 +0800] "POST /api/tracker/check HTTP/1.1" 200 173
+::1 - - - - [09/May/2026:08:24:33 +0800] "GET /api/datas HTTP/1.1" 200 12363
+  2026/5/9 08:24:34 [ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.188) 离线 | 超时(>5s)
+::1 - - - - [09/May/2026:08:24:36 +0800] "GET /api/datas HTTP/1.1" 200 12280
+::1 - - - - [09/May/2026:08:24:38 +0800] "GET /api/auth/whoami HTTP/1.1" 200 51
+::1 - - - - [09/May/2026:08:24:38 +0800] "GET /api/config HTTP/1.1" 200 563
+::1 - - - - [09/May/2026:08:24:38 +0800] "GET /api/datas HTTP/1.1" 200 14563
+::1 - - - - [09/May/2026:08:24:38 +0800] "GET /api/users HTTP/1.1" 200 152
+  2026/5/9 08:24:49 [ERROR] ✗ UDP://tracker.dler.com:6969 (60.249.37.20) 离线 | 超时(>5s)
+2026/5/9 08:24:52 [INFO] 重试结果: UDP://tracker.filemail.com:6969 (52.58.128.163) → offline N/A | 超时(>5s)
+::1 - - - - [09/May/2026:08:24:52 +0800] "POST /api/tracker/check HTTP/1.1" 200 173
+::1 - - - - [09/May/2026:08:24:52 +0800] "GET /api/datas HTTP/1.1" 200 12506
+
+----------------
+
+真正的根因：_get_uptime_cached 无法区分「缓存了 None」和「缓存未命中」
+python
+# 原来的代码：
+def _get_uptime_cached(self, domain, period):
+    entry = self.uptime_cache.get((domain, period))
+    if entry and time.time() - entry['time'] < self.cache_ttl:
+        return entry['value']   # ← 如果 value 是 None，这里返回 None
+    return None                 # ← 缓存未命中也返回 None
+
+# 调用方：
+cached = self._get_uptime_cached(domain, pk)
+if cached is not None:   # ← 无法区分两种 None，每次都当作「未命中」重算
+    ...
+问题链：
+
+新 tracker 没有历史数据 → uptime_val = None → 写入缓存
+下次 get_trackers 取缓存 → 拿到 None → if cached is not None 为 False → 误判为未命中 → 重新计算
+还是没数据 → 还是 None → 再次写缓存 → 无限循环
+即使之后 hdb 有数据了，只要 _clear_uptime_cache 没被调到，就永远拿不到新值
+
+修复： 新增哨兵对象 _CACHE_MISS = object()，用 is _CACHE_MISS 精确区分「未命中」和「命中了 None 值」：
+python
+_CACHE_MISS = object()   # 唯一对象，永远不等于任何其他值
+
+def _get_uptime_cached(self, domain, period):
+    entry = self.uptime_cache.get((domain, period))
+    if entry is None: return _CACHE_MISS          # 键不存在
+    if time.time() - entry['time'] >= self.cache_ttl: return _CACHE_MISS  # 已过期
+    return entry['value']                          # 命中，值可能是 None 或数值
+
+# 调用方改为：
+if cached is not _CACHE_MISS:   # ← 精确判断，None 值也能被正确缓存
+    t_copy[f'uptime_{pk}'] = cached
+    continue
+
+----------------
+
+self._clear_uptime_cache(domain)  # 新增tracker时清除旧缓存，防止null被缓存30s导致排序失效
+            # 初始检测完成后清除缓存，使第一轮结果立即参与排序
+            db._clear_uptime_cache(d)
+那之前添加的这2行 清空cache的 还有必要保留吗？
+
+----------------
+
+保留第1行，删除第2行。保留第1行，删除第2行。
+第1行（add_tracker 里）：有必要保留。
+新 tracker 刚创建，万一之前同名 domain 的旧缓存还在（比如删了再加），清一下确保干净。无害。
+第2行（bg 线程里）：没必要了，删掉。
+bg 里的 check_ip 默认 update_db=True，走 update_status → 已经会调 _clear_uptime_cache(domain)。
+第2行是重复清除，而且现在根本问题（哨兵修复）已经解决，这行是之前错误排查时的补丁，留着只是噪音。
+
+----------------
+
+我感觉问题还是没有解决。。我看他添加成功了 探测也结束了 可用率是0% 但是排序还是不对。。
+::1 - - - - [09/May/2026:08:34:09 +0800] "GET /api/count HTTP/1.1" 200 885
+::1 - - - - [09/May/2026:08:34:34 +0800] "GET /api/datas HTTP/1.1" 200 14520
+::1 - - - - [09/May/2026:08:35:03 +0800] "POST /api/tracker/add HTTP/1.1" 200 127  # add UDP://tracker.filemail.com:6969 (1 IPs) by ::1 [rer]
+::1 - - - - [09/May/2026:08:35:03 +0800] "GET /api/datas HTTP/1.1" 200 12407
+::1 - - - - [09/May/2026:08:35:04 +0800] "GET /api/count HTTP/1.1" 200 884
+::1 - - - - [09/May/2026:08:35:05 +0800] "GET /api/datas HTTP/1.1" 200 14719
+::1 - - - - [09/May/2026:08:35:21 +0800] "GET /api/auth/whoami HTTP/1.1" 200 51
+::1 - - - - [09/May/2026:08:35:21 +0800] "GET /api/config HTTP/1.1" 200 563
+::1 - - - - [09/May/2026:08:35:21 +0800] "GET /api/datas HTTP/1.1" 200 12377
+::1 - - - - [09/May/2026:08:35:21 +0800] "GET /api/users HTTP/1.1" 200 152
+::1 - - - - [09/May/2026:08:35:25 +0800] "GET /api/config HTTP/1.1" 200 563
+::1 - - - - [09/May/2026:08:35:25 +0800] "GET /api/datas HTTP/1.1" 200 12333
+::1 - - - - [09/May/2026:08:35:25 +0800] "GET /api/users HTTP/1.1" 200 152
+::1 - - - - [09/May/2026:08:35:51 +0800] "GET /api/config HTTP/1.1" 200 563
+::1 - - - - [09/May/2026:08:35:51 +0800] "GET /api/datas HTTP/1.1" 200 12384
+::1 - - - - [09/May/2026:08:35:51 +0800] "GET /api/users HTTP/1.1" 200 152
+
+----------------
+
+Claude陷入头脑风暴死循环。。
+
+----------------
+
+deepseek帮我看看
+新添加的tracker他在监控列表的 默认可用率排序 好像会失效 看看这是为什么？
+需要手动暂停 再启动一次 他才能正常按照默认的可用率排序
+是app的问题 还是html的问题？只有新增的tracker他不会按照 默认的可用率排序。。好像是按名称随机插入一样
+哪怕有数据了 都不是按照可用率排序到下面
+
+----------------
+
+解决方案
+在后端添加 tracker 或更新监控数据时，主动清除该域名的缓存，避免过期旧值残留。
+
+需要修改 app.py 两处地方：
+
+在 TrackerDB.add_tracker 方法中，当添加新域名时立即清除其缓存：
+
+python
+def add_tracker(self, domain, port, protocol, ip_list=None):
+    with self.lock:
+        if domain not in self.trackers:
+            ...
+            # 新添加域名 -> 立即清除缓存
+            self._clear_uptime_cache(domain)
+        else:
+            ...
+在 api_add 路由中（位于 @app.route('/api/tracker/add')），在调用 db.add_tracker 之后也主动清除一次缓存（双保险）：
+
+python
+db.add_tracker(host, port, protocol, ips)
+db._clear_uptime_cache(host)   # 新增这一行
+
+----------------
+
+我看了API
+http://localhost:443/api/datas
+部分内容：
+14T23:33:28.978555","dns_error":false,"domain":"tracker.exe.in.th","fail_24h":0,"fail_7d":0,"ips":[{"added_time":"2026-03-14T23:33:28.978567","consec_fail":0,"country":{"country":"Thailand","country_code":"TH","isp":"Electronics Extreme Co., Ltd"},"ip":"103.41.58.131","ip_uptime":null,"last_check":"2026-05-02T01:42:00.888661","latency":-1,"paused":true,"status":"offline","uptime_24h":null,"uptime_30d":93.9,"uptime_7d":null,"version":"ipv4"}],"ok_24h":0,"ok_7d":0,"paused":true,"port":6969,"protocol":"tcp","total_24h":0,"total_7d":0,"uptime_24h":null,"uptime_30d":93.9,"uptime_7d":null},"tracker.filemail.com":{"added_time":"2026-05-09T08:55:08.569867","dns_error":false,"domain":"tracker.filemail.com","fail_24h":1,"fail_30d":1,"fail_7d":1,"ips":[{"added_time":"2026-05-09T08:55:08.569876","consec_fail":1,"country":{"country":"Germany","country_code":"DE","isp":"Amazon Technologies Inc."},"ip":"52.58.128.163","ip_uptime":0.0,"last_check":"2026-05-
+是有数据的。。问题我对网页刷新了 他排序还是不对……
+
+----------------
+
+总结
+是 app.py 的问题（缓存生命周期 + 前端排序对 null 的处理）。
+你添加的 _clear_uptime_cache 是正确的，但还需要在 api_add 中再调用一次。
+前端排序没有问题，只是 null 被映射为 -1 导致 0.0 被夹在中间。
+按上述方案修改后，新添加的 tracker 排序就会立即生效（无需等待 30 秒，也无需手动暂停/恢复）。
+
+
+--------------------------------------
+
+
+//恢复已暂停IP查询
+
+监控列表 查询tracker的API：api/query 之前暂停的IP会不显示 如何取消？
+
+----------------
+
+问题定位
+在 app.py 的 /api/query 路由中，构造域名级的 ips 列表时，有这样一段代码：
+
+python
+if is_domain:
+    ip_rows = []
+    for ipi in matched_tr.get('ips', []):
+        if ipi.get('removed') or ipi.get('paused'):
+            continue   # <-- 这里跳过了 paused 的 IP
+        ...
+因此，只要 IP 被标记为 paused，就不会出现在返回结果中。
+
+如何取消这个限制
+最简单的方法：删除对 paused 的过滤
+将 if ipi.get('removed') or ipi.get('paused'): continue 改为只过滤 removed 的 IP，保留 paused 的 IP：
+
+python
+if ipi.get('removed'):
+    continue
+这样，所有未被移除的 IP（无论是否暂停）都会出现在 ips 数组里，并且每个 IP 的对象中本来就有 paused 字段（true 或 false），前端可以根据该字段自行决定如何展示。
+
+更灵活的方法：增加查询参数控制
+如果你希望保留默认行为，同时允许调用方选择是否显示暂停的 IP，可以增加一个参数，例如 show_paused：
+
+python
+show_paused = request.args.get('show_paused', 'false').lower() == 'true'
+...
+if ipi.get('removed'):
+    continue
+if not show_paused and ipi.get('paused'):
+    continue
+然后调用时加上 &show_paused=true 即可。
+
+修改后的代码示例
+以最简单的方式修改（直接让暂停的 IP 出现）：
+
+python
+if is_domain:
+    ip_rows = []
+    for ipi in matched_tr.get('ips', []):
+        if ipi.get('removed'):
+            continue
+        # 不再跳过 paused
+        ...
+修改后重启服务，再次访问 /api/query?host=xxx&list=ips 就能看到暂停的 IP 了。
+
+注意事项
+返回的 IP 对象中本身就包含 paused 字段，前端可以根据它来标记“已暂停”状态。
+
+如果前端展示时不希望用户看到暂停 IP，可以自行过滤，不必依赖后端。
+
+这个修改只影响 /api/query 接口，不影响监控列表的展示界面（监控列表的展示由前端控制，使用的数据源是 /api/datas，它本来就返回所有 IP 并带 paused 标记，只是前端在列 IP 行时加了 if ip.paused 样式控制显示灰色，但列表仍然会显示暂停 IP 的行）。
+
+
+--------------------------------------
+
+
 
 
 
