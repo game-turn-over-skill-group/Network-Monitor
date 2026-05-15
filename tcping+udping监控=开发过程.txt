@@ -15466,6 +15466,596 @@ python
 --------------------------------------
 
 
+//修复域名IP探测间隔为默认30秒(之前错误改成DNS间隔的2分钟)
+//修正重试间隔失效没按照预期轮询
+
+为什么现在探测域名IP的间隔 也变成2分钟了？
+首先我设置的是IP级 他们应该根据最后一次探测的时间 先做轮询重试 然后才是 根据周期 默认的30秒啊
+看看是不是哪里改错了？
+2026/5/15 23:25:52[SUCCESS] ✓ UDP://tracker.qu.ax:6969 (185.171.202.111) 239ms
+2026/5/15 23:23:52[SUCCESS] ✓ UDP://tracker.qu.ax:6969 (185.171.202.111) 211ms
+2026/5/15 23:21:52[SUCCESS] ✓ UDP://tracker.qu.ax:6969 (185.171.202.111) 258ms
+2026/5/15 23:19:51[SUCCESS] ✓ UDP://tracker.qu.ax:6969 (185.171.202.111) 214ms
+2026/5/15 23:17:51[SUCCESS] ✓ UDP://tracker.qu.ax:6969 (185.171.202.111) 237ms
+2026/5/15 23:14:46[SUCCESS] ✓ UDP://tracker.qu.ax:6969 (185.171.202.111) 266ms
+2026/5/15 23:12:46[SUCCESS] ✓ UDP://tracker.qu.ax:6969 (185.171.202.111) 236ms
+
+----------------
+
+你在 _ip_monitor_thread 里不小心把 探测间隔 也改成了 dns_interval（120 秒），而不是原来的 check_interval（30 秒）。
+这就是为什么 IP 探测变成了 2 分钟一次 的原因。
+
+错误代码位置（app.py 中 _ip_monitor_thread 函数）
+找到这段（大约在 _ip_monitor_thread 的末尾）：
+
+python
+        stop_event.wait(timeout=dns_interval)   # ❌ 错误
+你之前把原来的 CONFIG.get('check_interval', 30) 替换成了 dns_interval。
+而 dns_interval 在前面被定义为：
+
+python
+dns_interval = CONFIG.get('dns_refresh_interval', CONFIG.get('check_interval', 30))
+当 dns_refresh_interval 为 120 时，dns_interval 就等于 120，所以 IP 探测也变成了 2 分钟一次。
+
+正确逻辑
+DNS 刷新线程：应该用 dns_refresh_interval（你新增的配置，默认 120 秒）
+
+IP 探测线程：应该用 check_interval（用户配置的探测间隔，默认 30 秒）
+
+两者必须分开，不能混用。
+
+修正方法
+1. 恢复 IP 探测线程的间隔
+把 _ip_monitor_thread 中的 stop_event.wait(timeout=dns_interval) 改回：
+
+python
+        stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+完整的 _ip_monitor_thread 循环尾部应类似：
+
+python
+        except Exception as e:
+            cprint(f"[IP线程异常] {domain}({ip}): {type(e).__name__}: {e}", 'error')
+
+        stop_event.wait(timeout=CONFIG.get('check_interval', 30))   # ✅ 使用探测间隔
+2. DNS 刷新线程保持不变
+_dns_refresh_thread 中继续使用 dns_interval（120 秒）：
+
+python
+        stop_event.wait(timeout=dns_interval)
+3. （可选）确保 dns_interval 不在 IP 线程中定义
+在 _ip_monitor_thread 里删除或注释掉定义 dns_interval 的行，因为不再需要它。
+
+修改后效果
+IP 探测：每隔 check_interval 秒（你设为 30 秒）执行一次 ✅
+
+DNS 刷新：每隔 dns_refresh_interval 秒（120 秒）刷新一次域名解析 ✅
+
+重启服务后，日志中的探测间隔就会恢复为 30 秒。
+
+----------------
+Q：
+我改好了 你帮我看看 还有现在改成了 线程独立域名IP查询 超时后 重试的延迟 轮询机制 好像失效了？
+看看是为什么 以及要改动哪里？
+
+----------------
+A：
+
+我仔细检查了你提供的 app.py 代码，重试轮询机制的逻辑本身并没有被破坏，它仍然存在于 _ip_monitor_thread 中。
+你感觉“失效了”，很可能是以下原因之一造成的。
+
+1. 重试机制仍然存在，代码正确
+在 _ip_monitor_thread 中，探测失败后会执行：
+
+python
+if not ok:
+    wait = get_retry_wait(domain)          # 获取本次重试等待秒数（polling序列或固定值）
+    cprint(f"首次失败 {domain}:{port} ({ip}) 等待{wait}s重试 | {err}", 'debug')
+    stop_event.wait(timeout=wait)          # 等待
+    if stop_event.is_set(): break
+    ok, lat, err = fn(ip, port)            # 重试一次
+    if not ok and _is_proxy_unavail(err):
+        stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+        continue
+get_retry_wait() 会根据 retry_mode 返回等待秒数：
+
+retry_mode = 'polling' → 返回 5, 15, 30, 60, 5, 15 …（每个域名独立）
+
+否则返回固定 retry_interval 秒（默认5）
+
+第一次失败后会等待 wait 秒，然后重试一次。
+第二次失败后不再重试，直接标记离线（符合“只重试一次”的设计）。
+
+2. 为什么你可能觉得“失效”了？
+2.1 日志级别不是 debug
+重试等待的日志是 cprint(..., 'debug')。
+如果你的 log_level 配置是 info（默认）或 error，控制台不会显示 首次失败 ... 等待Xs重试 这一行。
+你只看到最终 ✗ ... 离线 的日志，所以误以为没有重试。
+
+解决方法：临时将 log_level 改为 debug（在 Web 配置页面或 config.json 中设置），重启后就能看到重试日志。
+
+2.2 代理不可用导致跳过了重试
+如果探测失败的原因是 代理不可用（错误消息以 PROXY_UNAVAIL: 开头），代码会直接跳过重试：
+
+python
+if not ok and _is_proxy_unavail(err):
+    stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+    continue   # ← 不会进入重试逻辑
+请检查你的日志中是否有 代理不可用 或 PROXY_UNAVAIL: 字样。
+如果确实代理故障，轮询重试不会触发，你需要先解决代理问题。
+
+2.3 retry_mode 配置不符合预期
+确认 Web 配置页面中 retry_mode 是否选择了 polling。
+
+检查 config.json 中 retry_mode 的值。
+
+如果 retry_mode 被误设为固定秒数（如 5），那么每次失败后都只等 5 秒，不会有递增序列。
+
+2.4 polling 序列的域名独立计数器是否正常
+每个域名的轮询步骤记录在全局字典 _poll_step 中，不同域名独立。
+如果 _poll_step 被意外重置（例如程序重启后丢失），序列会从 5 秒重新开始，但这不是“失效”，只是序列不连续。
+
+3. 如何确认重试确实在工作？
+你可以通过以下方式验证：
+
+临时关闭代理（或者故意让代理超时），观察是否出现重试日志。
+
+在 _ip_monitor_thread 的 if not ok: 分支中加入一个 print 语句（即使非 debug 级别也输出），重启后观察控制台。
+
+查看 数据库日志（Web 界面“日志”页）中是否有 首次失败 相关内容（目前日志只记录最终结果，不记录中间重试过程）。
+
+4. 如果你希望重试机制更“可见”（强制打印）
+修改 cprint 的级别，例如改为 'info'：
+
+python
+cprint(f"首次失败 {domain}:{port} ({ip}) 等待{wait}s重试 | {err}", 'info')
+这样即使在 info 日志级别下也会显示。
+
+5. 总结
+代码没有错误，重试机制依然完整。
+
+最大可能原因：日志级别不是 debug，你看不到重试等待信息。
+
+建议：
+
+将 log_level 改为 debug，观察是否有 首次失败 日志。
+检查 retry_mode 配置是否为 polling。
+排查代理是否正常（如果启用了代理）。
+如果你希望我帮你写一个简单的测试补丁，强制打印重试信息，我可以提供。
+
+----------------
+Q：
+我看了好多 超时重试 失败到成功的间隔 几乎没有小于30秒的。。首先 他这个轮询 是所有域名都用这个轮询间隔？
+这个显然就不太对吧？正确的逻辑 应该是先读取这个域名最后探测 是成功还是失败
+如果是成功 就正常 默认的30秒一次的线程循环
+如果是失败 首次失败 5秒 再失败15秒 然后失败按照：5, 15, 30, 60 这样来轮询
+而且应该是要每个IP字典来算的 每个IP的连续失败 的轮询 而不是所有失败共享轮询
+而且我看日志 现在的失败 好像最低都是30秒 或者更久 这样显然不太对？现在等于几乎是没有重试间隔了一样……所以我才问你
+2026/5/15 23:50:08[SUCCESS] ✓ UDP://t.overflow.biz:6969 (189.18.162.12) 415ms
+2026/5/15 23:48:32[SUCCESS] ✓ UDP://t.overflow.biz:6969 (189.18.162.12) 382ms
+2026/5/15 23:48:02[SUCCESS] ✓ UDP://t.overflow.biz:6969 (189.18.162.12) 391ms
+2026/5/15 23:47:32[ERROR] ✗ UDP://t.overflow.biz:6969 (189.18.162.12) 离线 | 超时(>5s)
+2026/5/15 23:46:22[SUCCESS] ✓ UDP://t.overflow.biz:6969 (189.18.162.12) 488ms
+2026/5/15 23:45:51[SUCCESS] ✓ UDP://t.overflow.biz:6969 (189.18.162.12) 445ms
+2026/5/15 23:41:58[ERROR] ✗ UDP://t.overflow.biz:6969 (189.18.162.12) 离线 | 超时(>5s)
+
+----------------
+A：
+
+你的观察非常敏锐！当前代码的重试逻辑并没有实现你期望的“每次失败后递增等待直到成功”的轮询机制。
+实际上，当前的设计是：
+
+正常探测间隔固定为 check_interval（默认30秒），无论成功还是失败，每次探测结束后都会睡眠 check_interval 秒。
+
+“重试”只在一次失败后额外做一次，且这次重试的等待时间由 retry_mode 决定（polling 序列 5/15/30/60 秒中的下一个值）。重试后如果依然失败，就会回到正常 30 秒的周期。
+
+你看到的日志中失败后大约 30 秒才有下一次探测，正是因为：
+
+失败发生 → 等待 5 秒重试 → 重试仍失败 → 线程睡眠 30 秒 → 下一次探测。
+
+如果重试成功了，也会睡眠 30 秒后再探测，所以成功后的间隔也是 30 秒（没有因为成功而缩短）。
+
+为什么你觉得“轮询间隔”没有生效？
+因为 polling 序列只用于“失败后的单次重试等待”，而不是“连续失败时的探测间隔递增”。
+你期望的行为（例如：第一次失败等 5 秒，再失败等 15 秒，再失败等 30 秒，再失败等 60 秒，如此循环）当前代码并未实现。
+
+当前代码的重试流程（_ip_monitor_thread 中）
+……
+所以无论成功还是失败（即使重试后成功），都会在最后等待 check_interval 秒。
+这就是为什么你看到成功和失败的间隔都接近 30 秒（或略大于 30 秒，因为探测本身耗时）。
+
+如何实现你想要的“连续失败轮询间隔递增”？
+你需要修改 _ip_monitor_thread 的逻辑，使得：
+
+探测成功时，下次等待 check_interval 秒。
+
+探测失败时，根据该 IP 的连续失败次数决定下次等待时间，并且不要在一次循环中做额外重试，而是直接让下一次探测的间隔随失败次数递增。
+
+建议修改方案
+1、移除循环内的 if not ok: ... 重试 块，因为轮询机制本身就包含了“失败后等待递增时间再试”的概念，不需要额外的一次立即重试。
+2、增加一个连续失败计数器（每个 IP 独立），成功时重置为 0，失败时递增。
+3、根据失败计数决定下一次探测的等待时间：
+失败计数 1 → 等待 5 秒
+失败计数 2 → 等待 15 秒
+失败计数 3 → 等待 30 秒
+失败计数 ≥4 → 等待 60 秒
+也可以循环使用 POLLING_SEQUENCE[ (失败计数-1) % len(POLLING_SEQUENCE) ]。
+4、探测成功后恢复等待 check_interval。
+
+注意：当前代码中 _consec_fail_count 的作用
+现有代码中已经有 _consec_fail_count 字典，用于自动暂停（连续失败达到阈值后暂停该 IP）。但它当前仅在探测失败后累加，成功时清除。你可以直接复用这个计数器作为失败次数，来决定下一次探测的等待时间。
+
+总结
+你感觉“重试间隔没有生效”是因为当前设计不是你期望的连续失败轮询。
+当前设计是：失败 → 快速重试一次（等待 5/15/30/60）→ 然后回到 30 秒固定间隔。
+要改成真正的递增轮询，需要修改 _ip_monitor_thread 中的循环睡眠逻辑，使其根据连续失败次数动态调整下一次探测间隔。
+如果你需要我帮你写出完整的修改代码（直接可用的函数替换），请告诉我，我可以提供。
+本回答由 AI 生成，内容仅供参考，请仔细甄别。
+
+----------------
+Q：
+
+我把现在 _ip_monitor_thread 函数代码给你 你给我修改后的代码
+
+----------------
+A：
+
+好的，根据你的需求，我将重写 _ip_monitor_thread 函数，实现以下逻辑：
+
+探测成功 → 下次等待 check_interval 秒（默认 30 秒），并清除该 IP 的连续失败计数。
+
+探测失败（且不是代理不可用、不是网络探针异常）→ 连续失败计数 +1，根据计数从 POLLING_SEQUENCE 中取对应的等待秒数（5, 15, 30, 60, 5, 15…），然后等待该秒数后再进行下一次探测。
+
+探测失败但代理不可用 → 不计入失败计数，下次仍等待 check_interval 秒。
+
+网络探针异常（IPv4/IPv6不可达） → 跳过探测，不计入失败计数，下次等待 check_interval 秒。
+
+自动暂停：连续失败达到阈值（如 30 次）后自动暂停该 IP，然后下次等待 check_interval 秒（实际上暂停后 should_skip 会生效，循环会直接进入等待）。
+
+注意：原来的“失败后快速重试一次”逻辑被移除，因为轮询机制本身就实现了“失败后等待递增时间再试”，不需要额外立即重试。
+
+下面是修改后的完整函数代码，你可以直接替换 app.py 中的原函数。
+……
+
+主要改动说明：
+移除了原来的 if not ok: 内部的快速重试逻辑，不再调用 get_retry_wait 和第二次探测。
+
+新增 next_wait 变量：根据本次探测结果（成功/失败）计算下一次等待的秒数。
+
+成功：next_wait = check_interval（默认 30 秒）。
+
+失败：根据连续失败次数 cur 从 [5,15,30,60] 中循环取一个值。
+
+连续失败计数 复用了原有的 _consec_fail_count，成功时清除，失败时增加，自动暂停后重置为 0。
+
+代理不可用（_is_proxy_unavail）和网络探针异常（skip_net）时，不累加失败计数，下次等待 check_interval。
+
+自动暂停逻辑不变，但暂停后会将 next_wait 设为 check_interval，然后进入等待（暂停后的 should_skip 会在下一轮循环生效）。
+
+这样修改后，每个 IP 独立拥有轮询状态，成功时恢复 30 秒，失败时按 5→15→30→60→5… 循环等待，符合你的期望。
+
+注意事项：
+
+你之前设置的 dns_refresh_interval 和 check_interval 仍然分别控制 DNS 刷新和探测基础间隔，互不影响。
+
+如果你希望失败轮询的序列使用全局配置 retry_mode 中的值（而不是硬编码 [5,15,30,60]），可以改为从 POLLING_SEQUENCE 读取（该常量已在文件开头定义）。上面的代码为了清晰直接写了列表，实际可以使用 POLLING_SEQUENCE 常量。
+
+如果需要我帮你把上述代码整合到你的 app.py 中（包括替换原函数），请告知。
+
+----------------
+Q：
+
+还是不太对 现在改后 好像变成 会一直持续探测了 这我某个域名的IP的结果 其他控制台我还看到一堆超时。。就不贴出来了
+2026/5/16 00:09:51[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.210.221) 离线 | 超时(>5s)
+2026/5/16 00:09:47[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.189) 75ms
+2026/5/16 00:09:46[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.187) 离线 | 超时(>5s)
+2026/5/16 00:09:41[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.189) 离线 | 超时(>5s)
+2026/5/16 00:09:21[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.188) 59ms
+2026/5/16 00:09:16[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.210.221) 59ms
+2026/5/16 00:09:16[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.188) 离线 | 超时(>5s)
+2026/5/16 00:09:11[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.187) 离线 | 超时(>5s)
+2026/5/16 00:09:06[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.189) 70ms
+2026/5/16 00:08:51[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.187) 离线 | 超时(>5s)
+2026/5/16 00:08:46[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.210.221) 63ms
+2026/5/16 00:08:41[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.188) 67ms
+2026/5/16 00:08:41[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.187) 离线 | 超时(>5s)
+2026/5/16 00:08:36[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.189) 65ms
+2026/5/16 00:08:16[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.210.221) 69ms
+2026/5/16 00:08:11[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.188) 离线 | 超时(>5s)
+2026/5/16 00:08:06[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.189) 58ms
+2026/5/16 00:08:06[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.187) 89ms
+2026/5/16 00:07:51[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.188) 离线 | 超时(>5s)
+2026/5/16 00:07:46[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.210.221) 64ms
+2026/5/16 00:07:41[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.210.221) 离线 | 超时(>5s)
+2026/5/16 00:07:41[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.188) 离线 | 超时(>5s)
+2026/5/16 00:07:36[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.189) 67ms
+2026/5/16 00:07:36[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.187) 66ms
+
+----------------
+A：
+
+明白问题了：你的日志显示某些 IP 在成功之后几秒内又进行了下一次探测（例如 00:08:41 失败，00:08:46 成功，间隔仅 5 秒）。
+这说明 next_wait 在成功分支中没有被正确设置为 30 秒，或者有多个线程在同时探测同一个 IP。
+
+主要问题分析
+_consec_fail_count 可能没有被成功清除
+如果 _consec_fail_count.pop(key, None) 因为某种原因（例如 key 不存在）没有重置，那么下一次循环中失败计数仍然保留，导致 next_wait 使用失败序列中的值。
+
+同一 IP 可能启动了多个监控线程
+由于 _ensure_ip_threads 可能存在并发竞态，导致同一个 IP 被启动多个线程。多线程同时探测会使日志看起来“间隔很短”。
+
+stop_event.wait 在 next_wait 很小时导致高频探测
+如果 next_wait 被误设为 0 或很小的值（比如 0.0），线程会疯狂循环。
+
+解决方案
+我为你提供一个更健壮的 _ip_monitor_thread 函数，主要改进：
+
+成功时强制重置失败计数，并打印调试信息。
+
+每次循环结束前，确保 next_wait 不小于 5 秒（避免 0 秒）。
+
+增加线程重复启动检测（如果同一个 IP 的线程已存在，直接退出，避免重复）。
+
+使用独立的锁保护 _consec_fail_count 的访问（原本已有，但确保正确）。
+
+请将下面的代码完整替换你当前的 _ip_monitor_thread 函数。
+……
+
+额外注意事项
+检查是否有多个线程启动
+在 _ensure_ip_threads 中已经做了检查（if t and t.is_alive(): continue），但可能在启动瞬间有竞态。你可以在 _ip_monitor_thread 开头添加一行：
+
+python
+cprint(f"[线程启动] {domain}({ip})", 'info')
+如果同一个 IP 出现多条 “线程启动” 日志，说明重复启动了。
+
+确认 check_interval 没有被意外修改
+在配置页面或 config.json 中，check_interval 应为 30（秒）。你可以通过日志或 API 查看。
+
+如果依然频繁探测，请暂时将日志级别调为 debug，观察 [失败计数] 和 [下次等待] 的输出，确认 next_wait 的值是否正确。
+
+清理残留线程：重启服务后，所有线程会重新创建，可以解决可能存在的僵尸线程问题。
+
+请替换函数后重启服务，观察日志是否恢复正常（成功探测间隔 30 秒，失败探测间隔 5/15/30/60 秒循环）。
+如果仍有问题，请提供新的日志片段（包含 [失败计数] 和 [下次等待] 的调试输出）。
+
+----------------
+Q：
+
+目前来看 似乎是部分修复成功了……
+2026/5/16 00:20:59[SUCCESS] ✓ UDP://tracker.ccp.ovh:6969 (51.81.222.188) 347ms
+2026/5/16 00:20:28[SUCCESS] ✓ UDP://tracker.ccp.ovh:6969 (51.81.222.188) 352ms
+2026/5/16 00:20:23[ERROR] ✗ UDP://tracker.ccp.ovh:6969 (51.81.222.188) 离线 | 超时(>5s)
+2026/5/16 00:19:48[SUCCESS] ✓ UDP://tracker.ccp.ovh:6969 (51.81.222.188) 381ms
+2026/5/16 00:19:42[ERROR] ✗ UDP://tracker.ccp.ovh:6969 (51.81.222.188) 离线 | 超时(>5s)
+2026/5/16 00:19:07[SUCCESS] ✓ UDP://tracker.ccp.ovh:6969 (51.81.222.188) 349ms
+2026/5/16 00:18:37[SUCCESS] ✓ UDP://tracker.ccp.ovh:6969 (51.81.222.188) 333ms
+2026/5/16 00:18:32[ERROR] ✗ UDP://tracker.ccp.ovh:6969 (51.81.222.188) 离线 | 超时(>5s)
+2026/5/16 00:17:57[SUCCESS] ✓ UDP://tracker.ccp.ovh:6969 (51.81.222.188) 388ms
+2026/5/16 00:17:26[SUCCESS] ✓ UDP://tracker.ccp.ovh:6969 (51.81.222.188) 362ms
+
+有的还是不行？这是为什么？
+2026/5/16 00:22:39[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.189) 离线 | 超时(>5s)
+2026/5/16 00:22:39[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.210.221) 离线 | 超时(>5s)
+2026/5/16 00:22:29[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.188) 离线 | 超时(>5s)
+2026/5/16 00:22:24[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.187) 62ms
+2026/5/16 00:22:19[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.188) 离线 | 超时(>5s)
+2026/5/16 00:22:09[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.187) 离线 | 超时(>5s)
+2026/5/16 00:22:04[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.189) 57ms
+2026/5/16 00:22:04[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.210.221) 62ms
+2026/5/16 00:21:59[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.189) 离线 | 超时(>5s)
+2026/5/16 00:21:59[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.187) 离线 | 超时(>5s)
+2026/5/16 00:21:44[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.188) 53ms
+2026/5/16 00:21:34[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.210.221) 61ms
+2026/5/16 00:21:29[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.210.221) 离线 | 超时(>5s)
+2026/5/16 00:21:24[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.189) 60ms
+2026/5/16 00:21:24[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.187) 58ms
+2026/5/16 00:21:14[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.188) 70ms
+2026/5/16 00:20:54[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.189) 72ms
+2026/5/16 00:20:54[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.210.221) 71ms
+2026/5/16 00:20:54[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.187) 64ms
+2026/5/16 00:20:49[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.189) 离线 | 超时(>5s)
+2026/5/16 00:20:44[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.188) 62ms
+2026/5/16 00:20:39[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.188) 离线 | 超时(>5s)
+2026/5/16 00:20:24[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.210.221) 离线 | 超时(>5s)
+2026/5/16 00:20:24[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.187) 74ms
+2026/5/16 00:20:14[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.189) 78ms
+2026/5/16 00:20:04[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.210.221) 离线 | 超时(>5s)
+2026/5/16 00:20:04[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.188) 67ms
+2026/5/16 00:19:54[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.210.221) 离线 | 超时(>5s)
+2026/5/16 00:19:54[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.187) 67ms
+2026/5/16 00:19:49[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.188) 离线 | 超时(>5s)
+2026/5/16 00:19:44[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.189) 73ms
+2026/5/16 00:19:39[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.188) 离线 | 超时(>5s)
+2026/5/16 00:19:24[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.187) 79ms
+2026/5/16 00:19:19[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.210.221) 63ms
+2026/5/16 00:19:19[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.187) 离线 | 超时(>5s)
+2026/5/16 00:19:14[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.210.221) 离线 | 超时(>5s)
+2026/5/16 00:19:04[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.188) 53ms
+2026/5/16 00:18:44[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.189) 离线 | 超时(>5s)
+2026/5/16 00:18:44[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.187) 63ms
+2026/5/16 00:18:39[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.210.221) 54ms
+2026/5/16 00:18:34[SUCCESS] ✓ UDP://tracker.dler.com:6969 (211.75.205.188) 57ms
+2026/5/16 00:18:09[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.189) 离线 | 超时(>5s)
+2026/5/16 00:18:09[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.210.221) 离线 | 超时(>5s)
+2026/5/16 00:18:08[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.187) 离线 | 超时(>5s)
+2026/5/16 00:17:49[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.189) 离线 | 超时(>5s)
+2026/5/16 00:17:49[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.210.221) 离线 | 超时(>5s)
+2026/5/16 00:17:39[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.205.189) 离线 | 超时(>5s)
+2026/5/16 00:17:39[ERROR] ✗ UDP://tracker.dler.com:6969 (211.75.210.221) 离线 | 超时(>5s)
+
+----------------
+A：
+
+从你最新的日志来看，修复已经基本成功，各个 IP 的探测间隔已经符合预期：
+
+成功后的间隔：大约 30 秒（如 tracker.ccp.ovh 的 00:20:28 → 00:20:59 间隔 31 秒）
+失败后的间隔：出现 5 秒、15 秒等短间隔（如 tracker.dler.com 的 00:22:39 失败，00:22:04 成功？注意时间顺序，实际是失败后 5 秒内重试成功）
+
+你感觉“有的还是不行”，主要是因为多个 IP 的日志混在一起，看起来间隔不规律。实际上每个 IP 都是独立线程，遵循各自的轮询状态。
+以 tracker.dler.com 为例，它有多个 IP（187、188、189、210.221），每个 IP 都有自己的失败计数器和等待时间。
+日志中短时间内出现多个成功/失败，是因为这些 IP 的探测时间点错开，并非同一个 IP 高频探测。
+
+结论：当前代码逻辑正确，无需进一步修改。如果仍有疑虑，可以通过以下方式验证：
+过滤单个 IP：在日志中搜索 211.75.205.189 或 211.75.205.188，单独观察它的时间间隔。
+开启 debug 日志：将 log_level 设为 debug，重启后查看 [重置失败计数] 和 [下次等待] 输出，确认成功时 next_wait 为 30，失败时为轮询值。
+
+如果你愿意，我可以帮你写一个简单的脚本，从日志中提取单个 IP 的时间线，一目了然。
+
+----------------
+Q：
+
+不是的。。我拿了个连续成功的IP 我看了 变成一直探测了。。（这时候我忘记看IP结尾了实际上是对的了，上面的dler.com也是）
+你得告诉我 现在的原理是什么？读取缓存history.json的？还是读取内存的？
+如果是缓存硬盘的 他要1分钟才写入……如果是内存的 才有可能是正常的。。
+2026/5/16 00:23:56[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.23) 171ms
+2026/5/16 00:23:55[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.27) 167ms
+2026/5/16 00:23:54[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.31) 174ms
+2026/5/16 00:23:54[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.22) 1190ms
+2026/5/16 00:23:54[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.29) 170ms
+2026/5/16 00:23:53[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.28) 172ms
+2026/5/16 00:23:53[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.25) 174ms
+2026/5/16 00:23:53[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.30) 165ms
+2026/5/16 00:23:52[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.24) 171ms
+2026/5/16 00:23:52[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.26) 179ms
+2026/5/16 00:23:26[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.23) 154ms
+2026/5/16 00:23:25[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.27) 167ms
+2026/5/16 00:23:24[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.31) 163ms
+2026/5/16 00:23:24[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.29) 184ms
+2026/5/16 00:23:23[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.28) 168ms
+2026/5/16 00:23:23[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.30) 174ms
+2026/5/16 00:23:23[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.25) 179ms
+2026/5/16 00:23:23[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.22) 161ms
+2026/5/16 00:23:22[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.24) 177ms
+2026/5/16 00:23:22[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.26) 180ms
+2026/5/16 00:22:56[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.23) 168ms
+2026/5/16 00:22:54[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.27) 172ms
+2026/5/16 00:22:54[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.31) 161ms
+2026/5/16 00:22:54[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.29) 183ms
+2026/5/16 00:22:53[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.28) 183ms
+2026/5/16 00:22:53[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.30) 159ms
+2026/5/16 00:22:53[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.25) 177ms
+2026/5/16 00:22:53[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.22) 176ms
+2026/5/16 00:22:52[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.24) 175ms
+2026/5/16 00:22:52[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.26) 186ms
+2026/5/16 00:22:25[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.23) 1245ms
+2026/5/16 00:22:24[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.27) 1179ms
+2026/5/16 00:22:24[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.31) 1188ms
+2026/5/16 00:22:23[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.29) 175ms
+2026/5/16 00:22:23[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.28) 176ms
+2026/5/16 00:22:22[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.30) 181ms
+2026/5/16 00:22:22[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.22) 187ms
+2026/5/16 00:22:22[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.25) 170ms
+2026/5/16 00:22:22[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.24) 170ms
+2026/5/16 00:22:21[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.26) 178ms
+2026/5/16 00:21:54[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.23) 153ms
+2026/5/16 00:21:53[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.29) 175ms
+2026/5/16 00:21:53[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.27) 159ms
+2026/5/16 00:21:53[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.28) 171ms
+2026/5/16 00:21:52[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.31) 160ms
+2026/5/16 00:21:52[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.30) 165ms
+2026/5/16 00:21:52[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.25) 1170ms
+2026/5/16 00:21:52[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.22) 176ms
+2026/5/16 00:21:51[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.24) 167ms
+2026/5/16 00:21:51[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.26) 174ms
+2026/5/16 00:21:24[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.23) 162ms
+2026/5/16 00:21:23[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.29) 186ms
+2026/5/16 00:21:23[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.27) 202ms
+2026/5/16 00:21:22[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.28) 188ms
+2026/5/16 00:21:22[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.31) 171ms
+2026/5/16 00:21:22[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.30) 1172ms
+2026/5/16 00:21:22[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.22) 201ms
+2026/5/16 00:21:21[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.24) 186ms
+2026/5/16 00:21:21[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.25) 175ms
+2026/5/16 00:21:21[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.26) 174ms
+2026/5/16 00:20:54[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.23) 154ms
+2026/5/16 00:20:53[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.29) 180ms
+2026/5/16 00:20:53[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.27) 168ms
+2026/5/16 00:20:52[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.28) 202ms
+2026/5/16 00:20:52[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.31) 203ms
+2026/5/16 00:20:52[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.22) 187ms
+2026/5/16 00:20:51[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.24) 172ms
+2026/5/16 00:20:51[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.30) 177ms
+2026/5/16 00:20:51[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.25) 173ms
+2026/5/16 00:20:51[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.26) 170ms
+2026/5/16 00:20:24[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.23) 158ms
+2026/5/16 00:20:23[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.29) 203ms
+2026/5/16 00:20:23[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.27) 171ms
+2026/5/16 00:20:22[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.28) 169ms
+2026/5/16 00:20:22[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.31) 186ms
+2026/5/16 00:20:22[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.22) 175ms
+2026/5/16 00:20:21[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.24) 169ms
+2026/5/16 00:20:21[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.30) 164ms
+2026/5/16 00:20:21[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.25) 174ms
+2026/5/16 00:20:21[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.26) 180ms
+2026/5/16 00:19:54[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.23) 157ms
+2026/5/16 00:19:52[SUCCESS] ✓ TCP://tracker1.itzmx.com:8080 (104.19.22.27) 171ms
+
+----------------
+A：
+
+我仔细分析了你的日志，发现 tracker1.itzmx.com 的日志看起来“连续成功”是因为该域名下有多个不同的 IP 地址，
+而它们的探测时间点被错开，导致整体的日志非常密集。实际上，每个 IP 的探测间隔仍然是 30 秒。
+
+证据
+以 IP 104.19.22.23 为例，过滤出它的日志：
+时间	IP
+00:23:56	104.19.22.23
+00:23:26	104.19.22.23
+00:22:56	104.19.22.23
+00:22:25	104.19.22.23
+00:21:54	104.19.22.23
+00:21:24	104.19.22.23
+00:20:54	104.19.22.23
+00:20:24	104.19.22.23
+00:19:54	104.19.22.23
+
+相邻两次探测的时间差分别为：30秒、30秒、31秒、30秒、30秒、30秒、30秒、30秒。完美遵循 check_interval = 30 秒。
+其他 IP（如 104.19.22.27、104.19.22.31 等）的探测时间点也类似，但因为它们被错峰启动（启动时加了 initial_delay），
+所以探测时刻分散在 30 秒窗口内的不同位置，导致你看到“每秒钟都有成功日志”的错觉。实际上，每个 IP 都是独立 30 秒一次。
+
+原理说明
+1. 探测间隔如何决定？
+在 _ip_monitor_thread 中，成功探测后：
+python
+if status == 'online':
+    with _consec_fail_lock:
+        _consec_fail_count.pop(key, None)
+    next_wait = CONFIG.get('check_interval', 30)   # 固定 30 秒
+然后线程会调用 stop_event.wait(timeout=next_wait) 睡眠 30 秒，之后才进行下一次探测。这个睡眠时间完全由内存中的变量控制，不依赖任何磁盘缓存。
+
+2. 缓存（history.json）与探测频率无关
+history.json 用于记录每次探测的历史结果（时间戳 + 在线/离线），以便前端计算可用率等统计。
+写入 history.json 是异步的（通过 hdb.push_ip 写入内存，每隔一段时间或者 GC 时保存到文件），不会影响探测线程的睡眠计时。
+即使在最坏情况下（磁盘 I/O 阻塞），探测线程仍然按照内存中的 next_wait 独立运行，不会因为写缓存而延迟或提前。
+
+3. 为什么有多个 IP 同时探测？
+一个域名（如 tracker1.itzmx.com）可能通过 DNS 解析出多个 IP 地址。每个 IP 都会启动一个独立的监控线程。
+在启动时，这些线程会加上随机的 initial_delay（错峰），避免所有 IP 在同一时刻发起探测。
+这导致不同 IP 的探测时间点均匀分布在 30 秒周期内，从而产生“日志不断”的观感。
+
+如何验证单个 IP 的间隔？
+你可以使用以下命令（假设日志输出到控制台或文件）来过滤特定 IP：
+bash
+grep "104.19.22.23" your_log_file
+或者在你的程序日志中搜索 104.19.22.23，会看到每次成功的时间戳严格相差 30 秒左右。
+
+结论
+你的代码修改是正确的，成功后的探测间隔就是 30 秒。
+你看到的“一直探测”是多个 IP 日志叠加的效果，并非单个 IP 高频探测。
+如果你仍然怀疑，可以临时将 check_interval 改为 60 秒，重启服务后观察单个 IP 的日志间隔是否变为 60 秒。
+如果你还有其他困惑（例如某个 IP 确实出现了 <30 秒的间隔），请提供过滤后的单个 IP 日志，我可以进一步分析。
+
+
+--------------------------------------
+
+
+
+
+
+
+
+
+
 
 
 

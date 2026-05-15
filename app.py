@@ -3177,8 +3177,10 @@ def _get_probe_net_status(ip_str: str):
 def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                        initial_delay: float = 0.0):
     """每个IP独立监控线程。
-    - 启动时先睡 initial_delay 秒（错峰），之后每隔 check_interval 秒探测一次。
-    - 探测前检查网络状态（探针），网络异常时跳过本次探测，不写历史。
+    - 启动时先睡 initial_delay 秒（错峰）。
+    - 探测成功：等待 check_interval 秒后再次探测。
+    - 探测失败：根据连续失败次数递增等待 5/15/30/60 秒（循环），不再额外立即重试。
+    - 探测前检查网络状态（探针），网络异常时跳过本次探测，不写历史，不计入失败计数。
     - DNS查询由对应 domain 的 DNS 线程负责，IP线程只做探测。
     """
     # 首次启动错峰延迟
@@ -3187,9 +3189,10 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
         if stop_event.is_set():
             return
 
-    _warned_net = False    # 初始为 False，仅表示“尚未打印过网络异常警告”
-    # 读取独立 DNS 刷新间隔，如果没有则回退到 check_interval
-    dns_interval = CONFIG.get('dns_refresh_interval', CONFIG.get('check_interval', 30))
+    _warned_net = False   # 网络异常去重标记
+
+    # 使用全局 POLLING_SEQUENCE
+    # POLLING_SEQUENCE = [5, 15, 30, 60]
 
     while not stop_event.is_set():
         try:
@@ -3211,8 +3214,9 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                     protocol = td.get('protocol', 'tcp')
 
             if should_skip:
-                # 暂停状态：等待后继续，不持锁
-                stop_event.wait(timeout=dns_interval)
+                # 暂停状态：等待正常间隔后继续
+                next_wait = CONFIG.get('check_interval', 30)
+                stop_event.wait(timeout=next_wait)
                 continue
 
             # ── 探测前检查网络状态 ──────────────────────────────
@@ -3221,46 +3225,50 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                 if not _warned_net:
                     cprint(f"[跳过探测] {domain}({ip}) 网络异常: {net_reason}", 'debug')
                     _warned_net = True
-                stop_event.wait(timeout=dns_interval)
+                next_wait = CONFIG.get('check_interval', 30)
+                stop_event.wait(timeout=next_wait)
                 continue
             if _warned_net:
                 _warned_net = False
 
-            # ── 实际探测 ────────────────────────────────────────
+            # ── 实际探测（不再做立即重试）────────────────────────
             fn = udp_ping if protocol == 'udp' else tcp_ping
             ok, lat, err = fn(ip, port)
 
+            # 代理不可用 → 跳过，保留上次状态，不计入失败计数
             if not ok and _is_proxy_unavail(err):
-                # 代理不可用，跳过，保留上次状态
-                stop_event.wait(timeout=dns_interval)
+                next_wait = CONFIG.get('check_interval', 30)
+                stop_event.wait(timeout=next_wait)
                 continue
-
-            if not ok:
-                # 首次失败重试
-                wait = get_retry_wait(domain)
-                cprint(f"首次失败 {domain}:{port} ({ip}) 等待{wait}s重试 | {err}", 'debug')
-                stop_event.wait(timeout=wait)
-                if stop_event.is_set():
-                    break
-                ok, lat, err = fn(ip, port)
-                if not ok and _is_proxy_unavail(err):
-                    stop_event.wait(timeout=dns_interval)
-                    continue
 
             status = 'online' if ok else 'offline'
 
             # ── 再次检查探针（探测期间可能网络已故障） ──────────
             skip_net2, net_reason2 = _get_probe_net_status(ip)
 
-            # ── 连续失败计数 & 自动暂停 ────────────────────────
+            # ── 连续失败计数 & 自动暂停 & 动态轮询等待 ──────────
             key = (domain, ip)
             auto_pause_enabled = CONFIG.get('auto_pause_enabled', True)
             auto_pause_threshold = CONFIG.get('auto_pause_threshold', 30)
-            if status == 'offline' and not skip_net2:
+
+            # 处理成功/失败状态，更新失败计数并计算下次等待时间
+            if status == 'online':
+                # 成功：清除失败计数，下次等待正常间隔
+                with _consec_fail_lock:
+                    if key in _consec_fail_count:
+                        old = _consec_fail_count[key]
+                        _consec_fail_count.pop(key, None)
+                        cprint(f"[重置失败计数] {domain}({ip}) 从 {old} 重置为 0", 'debug')
+                next_wait = CONFIG.get('check_interval', 30)
+            else:
+                # 失败（且不是代理不可用/网络探针异常）：累加失败计数
                 with _consec_fail_lock:
                     cur = _consec_fail_count.get(key, 0) + 1
                     _consec_fail_count[key] = cur
-                if auto_pause_enabled and cur >= auto_pause_threshold:
+                cprint(f"[失败计数] {domain}({ip}) 当前连续失败: {cur}", 'debug')
+
+                # 自动暂停检查（仅在未跳过网络探针时）
+                if auto_pause_enabled and cur >= auto_pause_threshold and not skip_net2:
                     with db.lock:
                         for ip_obj2 in db.trackers.get(domain, {}).get('ips', []):
                             if ip_obj2.get('ip') == ip:
@@ -3272,12 +3280,19 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                     cprint(pause_msg, 'info')
                     with _consec_fail_lock:
                         _consec_fail_count[key] = 0
-                    db._save_async()  # 暂停事件需要立即持久化
-                    stop_event.wait(timeout=dns_interval)
-                    continue
-            elif status == 'online':
-                with _consec_fail_lock:
-                    _consec_fail_count.pop(key, None)
+                    db._save_async()
+                    # 暂停后等待正常间隔，然后继续循环（但 should_skip 会生效）
+                    next_wait = CONFIG.get('check_interval', 30)
+                else:
+                    # 根据连续失败次数计算轮询等待时间（循环使用 5/15/30/60）
+                    idx = (cur - 1) % len(POLLING_SEQUENCE)
+                    next_wait = POLLING_SEQUENCE[idx]
+                    cprint(f"[下次等待] {domain}({ip}) 失败次数 {cur}，等待 {next_wait} 秒", 'debug')
+
+            # 防御：确保等待时间至少为 1 秒，避免疯狂循环
+            if next_wait <= 0:
+                next_wait = 5
+                cprint(f"[警告] next_wait 异常 ({next_wait})，强制设为 5 秒", 'error')
 
             check_time = datetime.now().isoformat()
 
@@ -3309,9 +3324,6 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                                 if ip_obj3.get('ip') == ip:
                                     ip_obj3['country'] = new_geo
                                     break
-                # 不在这里调 _save_async()，由全局定时保存线程负责，避免高频保存持锁阻塞 API
-                #if CONFIG.get('cache_history', True):
-                    #db._save_async()
             else:
                 # 网络故障，只更新状态不写历史
                 db.update_status(domain, ip, status, lat, check_time)
@@ -3319,8 +3331,11 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
 
         except Exception as e:
             cprint(f"[IP线程异常] {domain}({ip}): {type(e).__name__}: {e}", 'error')
+            # 异常时也等待正常间隔，避免疯狂重试
+            next_wait = CONFIG.get('check_interval', 30)
 
-        stop_event.wait(timeout=dns_interval)
+        # 按照计算出的等待时间进入下一次循环
+        stop_event.wait(timeout=next_wait)
 
 
 def _dns_refresh_thread(name: str, domain: str, port: int, protocol: str,
