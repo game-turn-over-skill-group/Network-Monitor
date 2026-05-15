@@ -61,7 +61,8 @@ DEFAULT_CONFIG = {
     'dns_custom': '8.8.8.8',           # 自定义DNS时使用，支持多个用逗号分隔
     'dns_use_tcp': False,              # 自定义/dnspython 模式下强制使用 TCP 53（国内UDP丢包时开启）
     'dns_timeout': 0,                  # DNS 单次查询超时（秒）。0=与 timeout 相同；可设为 2~4 加快多 DNS 故障转移
-    'dns_lb_enabled': False,           # DNS服务器负载均衡/权重排序开关（默认关闭）；关闭时始终按配置顺序顺序尝试
+    'dns_lb_enabled': True,            # DNS服务器负载均衡/权重排序开关（默认关闭）；关闭时始终按配置顺序顺序尝试
+    'dns_refresh_interval': 120,       # DNS 刷新间隔（秒），默认 2 分钟
     'max_log_entries': 1000,           # 日志最大条目数（兼容旧版，以下三项优先）
     'max_log_info': 1000,              # Info 级日志最大条目数
     'max_log_success': 1000,           # Success 级日志最大条目数
@@ -3186,7 +3187,10 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
         if stop_event.is_set():
             return
 
-    _warned_net = False
+    _warned_net = False    # 初始为 False，仅表示“尚未打印过网络异常警告”
+    # 读取独立 DNS 刷新间隔，如果没有则回退到 check_interval
+    dns_interval = CONFIG.get('dns_refresh_interval', CONFIG.get('check_interval', 30))
+
     while not stop_event.is_set():
         try:
             # 检查该 IP 是否被暂停或移除（持锁时间尽量短）
@@ -3208,7 +3212,7 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
 
             if should_skip:
                 # 暂停状态：等待后继续，不持锁
-                stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+                stop_event.wait(timeout=dns_interval)
                 continue
 
             # ── 探测前检查网络状态 ──────────────────────────────
@@ -3217,7 +3221,7 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                 if not _warned_net:
                     cprint(f"[跳过探测] {domain}({ip}) 网络异常: {net_reason}", 'debug')
                     _warned_net = True
-                stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+                stop_event.wait(timeout=dns_interval)
                 continue
             if _warned_net:
                 _warned_net = False
@@ -3228,7 +3232,7 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
 
             if not ok and _is_proxy_unavail(err):
                 # 代理不可用，跳过，保留上次状态
-                stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+                stop_event.wait(timeout=dns_interval)
                 continue
 
             if not ok:
@@ -3240,7 +3244,7 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                     break
                 ok, lat, err = fn(ip, port)
                 if not ok and _is_proxy_unavail(err):
-                    stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+                    stop_event.wait(timeout=dns_interval)
                     continue
 
             status = 'online' if ok else 'offline'
@@ -3269,7 +3273,7 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                     with _consec_fail_lock:
                         _consec_fail_count[key] = 0
                     db._save_async()  # 暂停事件需要立即持久化
-                    stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+                    stop_event.wait(timeout=dns_interval)
                     continue
             elif status == 'online':
                 with _consec_fail_lock:
@@ -3316,7 +3320,7 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
         except Exception as e:
             cprint(f"[IP线程异常] {domain}({ip}): {type(e).__name__}: {e}", 'error')
 
-        stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+        stop_event.wait(timeout=dns_interval)
 
 
 def _dns_refresh_thread(name: str, domain: str, port: int, protocol: str,
@@ -3335,6 +3339,9 @@ def _dns_refresh_thread(name: str, domain: str, port: int, protocol: str,
         if stop_event.is_set():
             return
 
+    # 读取独立 DNS 刷新间隔
+    dns_interval = CONFIG.get('dns_refresh_interval', CONFIG.get('check_interval', 30))
+
     while not stop_event.is_set():
         try:
             paused = False
@@ -3344,7 +3351,7 @@ def _dns_refresh_thread(name: str, domain: str, port: int, protocol: str,
                 paused = db.trackers[name].get('paused', False)
 
             if paused:
-                stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+                stop_event.wait(timeout=dns_interval)
                 continue
 
             new_ips = resolve(domain)
@@ -3360,7 +3367,7 @@ def _dns_refresh_thread(name: str, domain: str, port: int, protocol: str,
                 pass
             cprint(f"[DNS线程异常] {name}: {type(e).__name__}: {e}", 'debug')
 
-        stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+        stop_event.wait(timeout=dns_interval)
 
 
 def _ensure_ip_threads(name: str):
@@ -3444,6 +3451,9 @@ def _start_all_tracker_threads():
         port     = td.get('port', 80)
         protocol = td.get('protocol', 'tcp')
 
+        dns_interval = CONFIG.get('dns_refresh_interval', CONFIG.get('check_interval', 30))
+        # DNS 线程的错峰延迟使用 dns_interval，让 DNS 查询均匀散布在 dns_interval 秒内
+        dns_initial_delay = (idx / max(domain_count, 1)) * dns_interval
         # 均匀错峰：每个域名的启动延迟在 [0, check_interval) 内均匀分布
         initial_delay = (idx / max(domain_count, 1)) * check_interval
 
@@ -3457,7 +3467,7 @@ def _start_all_tracker_threads():
                     _tracker_stop_events[dns_key] = stop_ev
                     t = threading.Thread(
                         target=_dns_refresh_thread,
-                        args=(name, domain, port, protocol, stop_ev, initial_delay),
+                        args=(name, domain, port, protocol, stop_ev, dns_initial_delay),
                         daemon=True,
                         name=f"dns-{name[:30]}"
                     )
@@ -4742,7 +4752,8 @@ def api_config():
                 'cleanup_interval','trust_cf_ip',
                 'probe_fail_threshold','probe_ipv6_targets',
                 'probe_timeout','probe_ipv4_targets',
-                'auto_pause_enabled','auto_pause_threshold']
+                'auto_pause_enabled','auto_pause_threshold',
+                'dns_refresh_interval']
         labels = {
             'check_interval':        '监控间隔',
             'timeout':               '连接超时',
@@ -4838,7 +4849,8 @@ def api_config():
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
                 'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width',
                 'allow_private_ips','min_password_length','cleanup_interval','trust_cf_ip',
-                'probe_fail_threshold','probe_ipv6_targets','probe_timeout','probe_ipv4_targets','auto_pause_enabled','auto_pause_threshold']
+                'probe_fail_threshold','probe_ipv6_targets','probe_timeout','probe_ipv4_targets','auto_pause_enabled','auto_pause_threshold',
+                'dns_refresh_interval']
     return jsonify({k: CONFIG.get(k) for k in all_keys})
 
 @app.route('/api/users', methods=['GET'])

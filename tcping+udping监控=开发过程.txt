@@ -14703,7 +14703,7 @@ if is_domain:
 
 
 //移除批量探测→独立线程延迟探测
-//修复线程死锁导致前端返回空/等待
+//修复线程死锁导致前端返回空.等待
 //修复频繁写入日志到硬盘每一秒都在覆盖
 
 Claude，帮我改代码 这次可能要大刀阔斧的改革了
@@ -15183,6 +15183,298 @@ A：
 
 
 --------------------------------------
+
+
+//修改查询DNS请求频率从30秒改为固定2分钟
+
+deepseek，你看 我请求谷歌DNS 疯狂被断开连接 各种超时 是不是我30秒查询一轮 所有tracker 频率太高了？
+被对方限制了？我国内的DNS也是这么请求 建立稳定连接 要好几小时才出现一次超时 就谷歌疯狂断开连接和超时
+我不知道是运营商限制 还是谷歌限制的 怎么把我的 30秒查询DNS 改成1分钟或者2分钟？
+2026/5/15 22:27:03[DEBUG] [custom DNS] 8.8.8.8(TCP) 查询 A tracker.004430.xyz 失败: TimeoutError: timed out
+2026/5/15 22:25:50[DEBUG] [custom DNS] 8.8.8.8(TCP) 查询 A tracker.torrentclaw.com 失败: TimeoutError: timed out
+2026/5/15 22:24:54[DEBUG] [custom DNS] 8.8.8.8(TCP) 查询 AAAA tracker.nekomi.cn 失败: TimeoutError: timed out
+2026/5/15 22:22:22[DEBUG] [custom DNS] 8.8.4.4(TCP) 查询 A tracker.wildkat.net 失败: TimeoutError: timed out
+2026/5/15 22:21:35[DEBUG] [custom DNS] 2001:4860:4860::8844(TCP) 查询 A open.ftorrent.com 失败: TimeoutError: timed out
+2026/5/15 22:17:59[DEBUG] [custom DNS] 8.8.4.4(TCP) 查询 A tracker.dler.com 失败: TimeoutError: timed out
+2026/5/15 22:17:40[DEBUG] [custom DNS] 8.8.4.4(TCP) 查询 A tr.nyacat.pw 失败: TimeoutError: timed out
+2026/5/15 22:15:08[DEBUG] [custom DNS] 8.8.8.8(TCP) 查询 A tracker.qu.ax 失败: TimeoutError: timed out
+2026/5/15 22:13:25[DEBUG] [custom DNS] 8.8.8.8(TCP) 查询 A ns575949.ip-51-222-82.net 失败: TimeoutError: timed out
+2026/5/15 22:10:45[DEBUG] [custom DNS] 8.8.8.8(TCP) 查询 AAAA tracker.tryhackx.org 失败: TimeoutError: timed out
+2026/5/15 22:10:06[DEBUG] [custom DNS] 8.8.4.4(TCP) 查询 A tracker.xn--djrq4gl4hvoi.top 失败: TimeoutError: timed out
+2026/5/15 22:08:26[DEBUG] [custom DNS] 8.8.8.8(TCP) 查询 AAAA archive.torrentonline.cc 失败: TimeoutError: timed out
+2026/5/15 22:08:23[DEBUG] [custom DNS] 8.8.4.4(TCP) 查询 AAAA udp.tracker.projectk.org 失败: TimeoutError: timed out
+2026/5/15 22:05:49[DEBUG] [custom DNS] 8.8.8.8(TCP) 查询 A tr4ck3r.duckdns.org 失败: TimeoutError: timed out
+2026/5/15 21:58:13[DEBUG] [custom DNS] 8.8.4.4(TCP) 查询 A pybittrack.retiolus.net 失败: TimeoutError: timed out
+2026/5/15 21:58:13[DEBUG] [custom DNS] 8.8.8.8(TCP) 查询 AAAA tracker.qu.ax 失败: TimeoutError: timed out
+2026/5/15 21:55:34[DEBUG] [custom DNS] 8.8.8.8(TCP) 查询 A tracker.dhitechnical.com 失败: TimeoutError: timed out
+
+----------------
+
+问题分析
+你遇到的谷歌 DNS（8.8.8.8、8.8.4.4 等）频繁超时/断开连接，而国内 DNS 正常，根本原因确实是查询频率过高触发了谷歌的速率限制或防火墙策略。
+
+为什么会这样？
+1、每 30 秒一轮 DNS 查询
+你的代码中 DNS 刷新线程的间隔直接使用了 check_interval（30 秒）。
+如果你有几十甚至上百个 tracker 域名，每个域名都独立启动一个 DNS 线程，那么每隔 30 秒就会对所有域名同时发起 A/AAAA 查询。
+→ 短时间内大量 TCP 53 请求涌向谷歌 DNS，触发其基于源 IP 的限流（RRL，Response Rate Limiting）。谷歌会直接拒绝或丢包，表现为超时或连接断开。
+
+2、TCP 模式加剧问题
+你开启了 dns_use_tcp = true。TCP 53 的每次查询都要建立三次握手和四次挥手，消耗更多资源，限流阈值通常比 UDP 更低。
+国内运营商对 114DNS 的 TCP 限制较宽松，所以没有异常。
+
+3、长连接池复用失效
+你的代码虽然实现了 TCP 长连接池（_TcpDnsPool），但谷歌 DNS 端可能会因为空闲或检测到异常流量主动发送 RST 断开连接，
+导致连接池中的连接频繁失效，每次都要重新建连，进一步加重了超时。
+
+解决方案
+方案一：关闭 TCP 强制 UDP（推荐立即尝试）
+在 Web 配置页面或 config.json 中设置：
+json
+"dns_use_tcp": false
+同时保持 dns_mode 为 custom。UDP 查询开销小，谷歌 DNS 的 UDP 限额远高于 TCP，超时现象会大幅减少。
+
+方案二：增加 DNS 刷新间隔（更彻底）
+你希望将 30 秒改成 1 分钟或 2 分钟。可以新增一个独立配置项 dns_refresh_interval，不依赖 check_interval。
+
+步骤 1：修改 app.py
+找到 _dns_refresh_thread 函数中的循环睡眠部分：
+python
+while not stop_event.is_set():
+    # ... 执行 DNS 解析 ...
+    stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+改为：
+python
+dns_interval = CONFIG.get('dns_refresh_interval', CONFIG.get('check_interval', 30))
+while not stop_event.is_set():
+    # ... 执行 DNS 解析 ...
+    stop_event.wait(timeout=dns_interval)
+同时修改 _start_all_tracker_threads 中计算 initial_delay 的逻辑（将 check_interval 替换为 dns_refresh_interval），因为错峰延迟需要根据新的 DNS 间隔来均匀分布。
+
+步骤 2：在配置中添加新参数
+在 DEFAULT_CONFIG 和 CONFIG 加载/保存逻辑中加入：
+python
+'dns_refresh_interval': 120,   # 默认 2 分钟
+并在 api_config 的 POST/GET 处理中添加该键。
+
+步骤 3：热重载配置
+修改 saveCfg 方法，使其在保存配置后能够通知 DNS 线程重启（最简单的办法是重启整个服务，或者让每个 DNS 线程监听配置变化）。
+
+方案三：限制并发 DNS 查询量（辅助方案）
+即使延长了间隔，如果 tracker 数量很多（比如 200+），所有 DNS 线程仍会在同一时间窗口内集体发起查询。可以引入一个全局信号量，限制同时进行 DNS 查询的线程数。
+
+在 resolve() 函数外层加一个线程池或 Semaphore（例如允许 5 个并发查询），避免瞬间打爆谷歌 DNS。
+
+方案四：改用国内公共 DNS 作为首选
+如果只是需要解析 tracker 域名，国内 114DNS、阿里 DNS 对 TCP 53 的限制更宽松，且延迟更低。你可以将自定义 DNS 列表改为：
+
+json
+"dns_custom": "114.114.114.114, 223.5.5.5",
+"dns_use_tcp": true
+这样既能保持 TCP 查询的可靠性，又不会被限流。
+
+快速上手（修改间隔）
+如果你不想改代码，可以通过以下方式临时降低频率：
+
+在 Web 配置页面将“监控间隔”从 30 改为 60 或 120 —— 但这会影响 TCP/UDP 连接探测 的频率，可能不是你想要的。
+注意：当前架构下 DNS 刷新和探测共用了 check_interval，没有独立配置。
+
+直接修改 config.json，添加 "dns_refresh_interval": 120，然后手动修改 app.py 中对应位置（需重启服务）。
+
+推荐操作顺序：
+
+立即 关闭 dns_use_tcp（设为 false），观察是否还有大量超时。
+
+如果仍有少量超时，再按上述代码修改方案增加独立 DNS 间隔，并重启服务。
+
+关于“疯狂断开连接”的特殊说明
+谷歌 DNS 对 TCP 长连接池可能会主动发送 RST 包（重置连接），这是为了防止滥用。
+你的日志中 TimeoutError: timed out 也可能是因为连接在 waiting 阶段被对端关闭导致的。
+代码中的 _TcpDnsConn._check_alive() 使用 select 和 recv(1, MSG_PEEK) 检测，当对端发 RST 时，recv 会抛出异常，连接被丢弃。
+这会导致每次查询都要重连，进一步拖慢响应。因此强烈建议先切到 UDP 模式。
+
+如果你需要我提供完整可用的补丁代码（包含新增 dns_refresh_interval 配置、修改 DNS 线程睡眠逻辑、调整错峰偏移），
+请告诉我，我可以直接给出修改后的函数代码段，你只需替换 app.py 中相应部分即可。
+
+----------------
+Q：
+疯狂报错，看看是什么问题？
+  2026/5/15 23:00:34 [INFO] [监控启动] 共 77 个tracker，已启动独立线程，错峰分布在 30s 内
+  使用 waitress 生产服务器
+
+  2026/5/15 23:00:34 [INFO] HTTP服务器启动在 http://localhost:443
+Exception in thread dns-tracker.torrentclaw.com:
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1043, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Github\Network-Monitor\app.py", line 3366, in _dns_refresh_thread
+    stop_event.wait(timeout=dns_interval)
+                            ^^^^^^^^^^^^
+NameError: name 'dns_interval' is not defined
+  2026/5/15 23:00:44 [INFO] [geo] 开始全部刷新，共 155 个唯一 IP（间隔 0.8 秒，避免触发限流）
+Exception in thread dns-tracker.breizh.pm:
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1043, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Github\Network-Monitor\app.py", line 3366, in _dns_refresh_thread
+    stop_event.wait(timeout=dns_interval)
+                            ^^^^^^^^^^^^
+NameError: name 'dns_interval' is not defined
+Exception in thread dns-6ahddutb1ucc3cp.ru:
+Exception in thread dns-obey.torrentonline.cc:
+Exception in thread dns-uabits.today:
+Exception in thread dns-tracker.gmi.gd:
+Traceback (most recent call last):
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1043, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+Traceback (most recent call last):
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1043, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1043, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1043, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Github\Network-Monitor\app.py", line 3366, in _dns_refresh_thread
+    stop_event.wait(timeout=dns_interval)
+                            ^^^^^^^^^^^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Github\Network-Monitor\app.py", line 3366, in _dns_refresh_thread
+    stop_event.wait(timeout=dns_interval)
+                            ^^^^^^^^^^^^
+  File "E:\Github\Network-Monitor\app.py", line 3366, in _dns_refresh_thread
+    stop_event.wait(timeout=dns_interval)
+                            ^^^^^^^^^^^^
+NameError: name 'dns_interval' is not defined
+  File "E:\Github\Network-Monitor\app.py", line 3366, in _dns_refresh_thread
+    stop_event.wait(timeout=dns_interval)
+                            ^^^^^^^^^^^^
+NameError: name 'dns_interval' is not defined
+NameError: name 'dns_interval' is not defined
+NameError: name 'dns_interval' is not defined
+Exception in thread dns-tracker.sharebro.in:
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1043, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Github\Network-Monitor\app.py", line 3366, in _dns_refresh_thread
+    stop_event.wait(timeout=dns_interval)
+                            ^^^^^^^^^^^^
+NameError: name 'dns_interval' is not defined
+Exception in thread dns-tracker.004430.xyz:
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1043, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Github\Network-Monitor\app.py", line 3366, in _dns_refresh_thread
+    stop_event.wait(timeout=dns_interval)
+                            ^^^^^^^^^^^^
+NameError: name 'dns_interval' is not defined
+  2026/5/15 23:00:50 [ERROR] ✗ UDP://obey.torrentonline.cc:42069 (92.112.126.181) 离线 | 超时(>5s)
+Exception in thread dns-tracker.dhitechnical.com:
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1043, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Github\Network-Monitor\app.py", line 3366, in _dns_refresh_thread
+    stop_event.wait(timeout=dns_interval)
+                            ^^^^^^^^^^^^
+NameError: name 'dns_interval' is not defined
+Exception in thread dns-tracker.xn--djrq4gl4hvoi.top:
+Traceback (most recent call last):
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 1043, in _bootstrap_inner
+    self.run()
+    ~~~~~~~~^^
+  File "C:\Program Files\WindowsApps\PythonSoftwareFoundation.Python.3.13_3.13.2544.0_x64__qbz5n2kfra8p0\Lib\threading.py", line 994, in run
+    self._target(*self._args, **self._kwargs)
+    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "E:\Github\Network-Monitor\app.py", line 3366, in _dns_refresh_thread
+    stop_event.wait(timeout=dns_interval)
+                            ^^^^^^^^^^^^
+NameError: name 'dns_interval' is not defined
+
+----------------
+A：
+错误原因很清楚：_dns_refresh_thread 函数中使用了变量 dns_interval，但从未定义。
+你之前只修改了 stop_event.wait(timeout=dns_interval)，却没有在函数内定义 dns_interval 的值。
+
+修复方法
+在 _dns_refresh_thread 函数中，在 while not stop_event.is_set(): 循环之前，添加一行从配置读取 dns_refresh_interval 的代码。
+
+定位函数（大约在 app.py 的第 3350 行附近）
+原函数头部：
+
+python
+def _dns_refresh_thread(name: str, domain: str, port: int, protocol: str,
+                        stop_event: threading.Event, initial_delay: float = 0.0):
+    """每个域名独立DNS刷新线程。"""
+    is_ip = bool(re.match(r'^\d{1,3}(?:\.\d{1,3}){3}$', domain)) or (':' in domain and '.' not in domain)
+    if is_ip:
+        return
+    if initial_delay > 0:
+        stop_event.wait(timeout=initial_delay)
+        if stop_event.is_set():
+            return
+    while not stop_event.is_set():
+        # ... 原有逻辑 ...
+        stop_event.wait(timeout=dns_interval)  # ← 这里报错
+修改后的正确代码
+在 while 循环之前，添加读取配置的行：
+
+python
+    # 读取独立 DNS 刷新间隔
+    dns_interval = CONFIG.get('dns_refresh_interval', CONFIG.get('check_interval', 30))
+    
+    while not stop_event.is_set():
+        # ... 原有代码（包括暂停检查、DNS解析等） ...
+        stop_event.wait(timeout=dns_interval)
+
+
+--------------------------------------
+
+
+
+
+
+
+
+
+
+
+
 
 
 
