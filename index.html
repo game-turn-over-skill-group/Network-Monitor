@@ -3672,24 +3672,54 @@ createApp({
         };
         const loadStats = async () => { try { stats.value = (await axios.get('/api/count')).data; } catch(e){} };
         const loadRanking = async () => { try { const min = filterEnabled.value ? filterThreshold.value : 0; ranking.value = (await axios.get(`/api/ranking/${rankPeriod.value}?min_uptime=${min}`)).data.ranking; } catch(e){} };
+
+        let _logReqId = 0; // 竞态防护：每次请求递增，旧请求返回后直接丢弃
         const loadLogs = async (forceLevel) => {
+            const reqId = ++_logReqId;
             try {
-                const lvl = forceLevel || logLvl.value || 'all';
-                // 仪表盘首页只加载 error 日志（节省流量）
-                const reqLevel = (currentTab.value === 'dashboard') ? 'error' : lvl;
-                const limKey = reqLevel === 'error' ? 'max_log_error' : reqLevel === 'success' ? 'max_log_success' : reqLevel === 'info' ? 'max_log_info' : 'max_log_entries';
-                const lim = cfg.value[limKey] || cfg.value.max_log_entries || 1000;
-                const resp = await axios.get(`/api/logs?limit=${lim}&level=${reqLevel}`);
-                // 如果是按级别加载，只替换对应级别的日志（all全替换）
+                // forceLevel 仅在明确需要强制指定级别时传入（如仪表盘定时刷新）
+                // 但若当前 tab 已不是 dashboard，忽略 forceLevel，以当前 tab 逻辑为准
+                const isDashboard = (currentTab.value === 'dashboard');
+                let lvl = (isDashboard && forceLevel) ? forceLevel : (logLvl.value || 'all');
+                let reqLevel = isDashboard ? 'error' : lvl;
+                let limit = 5000;  // 日志页面固定 5000
+
+                if (isDashboard) {
+                    // 仪表盘只拉 error，使用 max_log_error
+                    const limKey = 'max_log_error';
+                    limit = cfg.value[limKey] || cfg.value.max_log_entries || 1000;
+                } else {
+                    // 日志页面：根据级别决定 limit
+                    if (reqLevel === 'all') {
+                        limit = 5000;   // 全部日志固定5000
+                    } else if (reqLevel === 'info') {
+                        limit = cfg.value.max_log_info || cfg.value.max_log_entries || 1000;
+                    } else if (reqLevel === 'success') {
+                        limit = cfg.value.max_log_success || cfg.value.max_log_entries || 1000;
+                    } else if (reqLevel === 'error') {
+                        limit = cfg.value.max_log_error || cfg.value.max_log_entries || 1000;
+                    } else {
+                        limit = cfg.value.max_log_entries || 1000;
+                    }
+                }
+
+                // 强制构造带 limit 的 URL
+                const resp = await axios.get(`/api/logs?limit=${limit}&level=${reqLevel}`);
+
+                // 竞态防护：若此期间有更新的请求已发出，丢弃本次结果
+                if (reqId !== _logReqId) return;
+
                 if (reqLevel === 'all') {
                     logs.value = resp.data;
                 } else {
-                    // 替换内存中对应级别的条目，保留其他级别
                     const others = logs.value.filter(l => l.level !== reqLevel);
                     logs.value = [...others, ...resp.data].sort((a,b) => a.time < b.time ? -1 : 1);
                 }
-            } catch(e){}
+            } catch(e) {
+                console.error('loadLogs error', e);
+            }
         };
+
         const loadCfg = async () => { 
             try { 
                 const data = (await axios.get('/api/config')).data;
@@ -4653,7 +4683,7 @@ createApp({
                 // 仪表盘额外加载 stats 和 error 日志
                 if (tab === 'dashboard') {
                     await loadStats();
-                    await loadLogs('error');
+                    await loadLogs(); // 不传 forceLevel，由函数内部根据当前 tab 自动判断级别，避免竞态污染
                 }
                 // 排行榜页面加载 ranking
                 if (tab === 'ranking') {
@@ -4740,18 +4770,22 @@ createApp({
             if (tab === 'dashboard') { await nextTick(); buildCharts(); }
         });
 
-        // 标记初始 tab，watch 首次触发时跳过（onMounted 已加载）
-        let _initialTabLoaded = false;
+        // watch(currentTab)：每次切换 tab 时加载对应数据
+        // Vue 3 的 watch 默认 lazy，不会在注册时触发；onMounted 已按初始 tab 加载过数据
+        // 因此不需要任何跳过逻辑，直接处理每一次真实切换即可
         watch(currentTab, async (tab) => {
-            if (!_initialTabLoaded) { _initialTabLoaded = true; return; }
             // 切到仪表盘/监控列表：按后端配置决定是否刷新
             if ((tab === 'dashboard' || tab === 'trackers') && cfg.value.tab_switch_refresh !== false) {
                 await loadTrackers();
-                if (tab === 'dashboard') { await Promise.all([loadStats(), loadLogs()]); await nextTick(); buildCharts(); }
+                if (tab === 'dashboard') {
+                    await Promise.all([loadStats(), loadLogs()]);
+                    await nextTick();
+                    buildCharts();
+                }
             }
-            if (tab==='ranking') await loadRanking();
-            if (tab==='logs') await loadLogs();
-            if (tab==='config' && authUser.value.role==='admin') loadUsers();
+            if (tab === 'ranking') await loadRanking();
+            if (tab === 'logs') await loadLogs(); // 确保使用当前选择的级别加载，且不再额外请求 error
+            if (tab === 'config' && authUser.value.role === 'admin') loadUsers();
         });
 
         return {

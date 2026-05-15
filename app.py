@@ -114,7 +114,7 @@ DEFAULT_CONFIG = {
         {"username": "viewer",   "password": "d35ca5051b82ffc326a3b0b6574a9a3161dee16b9478a199ee39cd803ce5b799",  "role": "viewer"},
     ],
 }
-POLLING_SEQUENCE = [5, 15, 30, 60]
+POLLING_SEQUENCE = [5, 10, 25, 55]
 
 def load_config():
     cfg = dict(DEFAULT_CONFIG)
