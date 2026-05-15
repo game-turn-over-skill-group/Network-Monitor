@@ -61,6 +61,7 @@ DEFAULT_CONFIG = {
     'dns_custom': '8.8.8.8',           # 自定义DNS时使用，支持多个用逗号分隔
     'dns_use_tcp': False,              # 自定义/dnspython 模式下强制使用 TCP 53（国内UDP丢包时开启）
     'dns_timeout': 0,                  # DNS 单次查询超时（秒）。0=与 timeout 相同；可设为 2~4 加快多 DNS 故障转移
+    'dns_lb_enabled': False,           # DNS服务器负载均衡/权重排序开关（默认关闭）；关闭时始终按配置顺序顺序尝试
     'max_log_entries': 1000,           # 日志最大条目数（兼容旧版，以下三项优先）
     'max_log_info': 1000,              # Info 级日志最大条目数
     'max_log_success': 1000,           # Success 级日志最大条目数
@@ -125,7 +126,7 @@ def load_config():
                       'log_to_disk','log_level','console_log_level','debug_save_trace',
                       'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                       'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
-                      'dns_mode','dns_custom','dns_use_tcp','dns_timeout','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                      'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                       'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','export_suffix',
                       'show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
                       'cleanup_interval','trust_cf_ip',
@@ -151,7 +152,7 @@ def persist_config(cfg):
                                         'log_to_disk','log_level','debug_save_trace',
                                         'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                                         'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
-                                        'dns_mode','dns_custom','dns_use_tcp','dns_timeout','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                                        'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                                         'dashboard_stat_period','tracker_stat_period','cache_history',
                                         'tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width',
                                         'allow_private_ips','min_password_length','users',
@@ -544,7 +545,9 @@ class TrackerDB:
                 self._push_history(domain, ip, status)
                 self._recalc()
                 self._clear_uptime_cache(domain)
-                self._save_async()  # 异步保存
+                # 不在此处保存：探测结果由定时保存线程（60秒）统一落盘，
+                # 避免每次探测都写磁盘导致高频 I/O
+                #self._save_async()  # 异步保存
 
     def _push_history(self, domain, ip, status):
         """把探测结果写入 hdb（时间戳历史库）。
@@ -880,35 +883,45 @@ class TrackerDB:
 
     def _save(self):
         try:
-            data = {}
+            # ── 第一步：持锁期间只做纯内存拷贝（微秒级），不阻塞 API ────────
             with self.lock:
+                snapshot = []
                 for d, t in self.trackers.items():
-                    ips_to_save = []
+                    ips_snap = []
                     for ip_obj in t['ips']:
                         ip_entry = {k: v for k, v in ip_obj.items()
                                     if k not in ('history_24h','history_7d','history_30d')}
-                        # 如果 cache_history 为 True，才写入历史摘要
-                        if CONFIG.get('cache_history', True):
-                            # IP级摘要（供人工查看，不用于重启恢复）
-                            ip = ip_obj.get('ip', '')
-                            for pk, secs in HISTORY_WINDOWS.items():
-                                ip_entry[f'history_{pk}'] = hdb.get_ip_summary(d, ip, secs)
-                        ips_to_save.append(ip_entry)
-                    entry = {'domain':t.get('domain',d),'port':t.get('port',80),
-                             'protocol':t.get('protocol','tcp'),
-                             'ips':ips_to_save,'added_time':t['added_time'],
-                             'paused':t.get('paused',False)}
-                    if CONFIG.get('cache_history', True):
-                        # 域名级摘要：排除已暂停IP（与前端算法一致，供人工查看）
-                        paused_set = {ip.get('ip','') for ip in t['ips']
-                                      if ip.get('paused') and not ip.get('removed') and not t.get('paused')}
+                        ips_snap.append(ip_entry)
+                    paused_set = ({ip_obj.get('ip','') for ip_obj in t['ips']
+                                   if ip_obj.get('paused') and not ip_obj.get('removed')}
+                                  if not t.get('paused') else set())
+                    snapshot.append((d, t.get('domain', d), t.get('port', 80),
+                                     t.get('protocol', 'tcp'), t['added_time'],
+                                     t.get('paused', False), ips_snap, paused_set))
+
+            # ── 第二步：锁外做慢操作（读 hdb 历史、写文件），不阻塞任何 API ─
+            data = {}
+            do_history = CONFIG.get('cache_history', True)
+            for d, domain, port, protocol, added_time, paused, ips_snap, paused_set in snapshot:
+                ips_to_save = []
+                for ip_entry in ips_snap:
+                    if do_history:
+                        ip = ip_entry.get('ip', '')
                         for pk, secs in HISTORY_WINDOWS.items():
-                            s = hdb.get_domain_summary(d, secs, excluded_ips=paused_set if paused_set else None)
-                            entry[f'history_{pk}'] = {'total': s['total'], 'ok': s['ok'], 'fail': s['fail']}
-                    data[d] = entry
+                            ip_entry[f'history_{pk}'] = hdb.get_ip_summary(d, ip, secs)
+                    ips_to_save.append(ip_entry)
+                entry = {'domain': domain, 'port': port, 'protocol': protocol,
+                         'ips': ips_to_save, 'added_time': added_time, 'paused': paused}
+                if do_history:
+                    for pk, secs in HISTORY_WINDOWS.items():
+                        s = hdb.get_domain_summary(d, secs,
+                                                   excluded_ips=paused_set if paused_set else None)
+                        entry[f'history_{pk}'] = {'total': s['total'], 'ok': s['ok'], 'fail': s['fail']}
+                data[d] = entry
+
             with open(CONFIG['data_file'], 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            if CONFIG.get('cache_history', True):
+            if do_history:
                 hdb.save()
         except Exception as e:
             cprint(f"保存 data.json 失败: {e}", 'error')
@@ -1887,13 +1900,22 @@ def _dns_note_srv_result(srv_ip: str, use_tcp: bool, ok: bool):
         _dns_srv_stats[k] = st
 
 def _dns_custom_try_order(servers: List[Tuple[str, bool]]) -> List[int]:
-    """返回本轮尝试顺序（服务器下标）：非冷却、失败少者优先，再 Round-Robin 旋转。
+    """返回本轮尝试顺序（服务器下标）。
 
-    注意：健康度按「DNS 服务器 (IP+TCP)」统计，与域名无关；任意域名在该机上超时都会拉低其优先级。
+    dns_lb_enabled=True（负载均衡开启）：按健康度排序 + Round-Robin 旋转，
+        非冷却、失败少者优先；相同优先级内用 RR 旋转，分散负载。
+    dns_lb_enabled=False（默认关闭）：始终按配置顺序（0,1,2,...）顺序尝试，
+        不做任何重排，避免并发查询同时打到同一台 DNS 导致被限流。
     """
     count = len(servers)
     if count <= 0:
         return []
+
+    # 负载均衡关闭时：固定按配置顺序，不做 RR 旋转，不做健康度排序
+    if not CONFIG.get('dns_lb_enabled', False):
+        return list(range(count))
+
+    # 负载均衡开启时：健康度排序 + Round-Robin
     now = time.time()
     with _dns_srv_stats_lock:
         def sort_key(i: int):
@@ -2958,28 +2980,76 @@ _probe_details = {}   # 每个探针IP的最后探测结果 {ip: {'ok': bool, 'l
 _consec_fail_count = {}
 _consec_fail_lock  = threading.Lock()
 
+class ProbeTcpPool:
+    """网络探针 TCP 长连接池，每个目标保持一条长连接"""
+    def __init__(self):
+        self._conns: dict = {}          # (host, port) -> socket.socket
+        self._latency: dict = {}        # (host, port) -> int (ms)
+        self._lock = threading.RLock()
+
+    def check(self, host: str, port: int, timeout: float) -> tuple:
+        """返回 (可达: bool, 延迟ms: int)"""
+        key = (host, port)
+        with self._lock:
+            sock = self._conns.get(key)
+            alive = self._is_socket_alive(sock) if sock else False
+            if alive:
+                # 复用成功，直接返回 True 和上次记录的延迟（不新建连接）
+                return True, self._latency.get(key, 0)
+            # 连接无效或不存在 -> 新建
+            ok, lat, new_sock = self._connect(host, port, timeout)
+            if ok:
+                self._conns[key] = new_sock
+                self._latency[key] = lat
+            else:
+                self._conns.pop(key, None)
+                self._latency.pop(key, None)
+            return ok, lat
+
+    def _is_socket_alive(self, sock: socket.socket) -> bool:
+        """检查 socket 是否仍然处于已连接状态"""
+        if not sock:
+            return False
+        try:
+            err = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+            if err != 0:
+                return False
+            # 使用 select 检查是否有数据可读（不改变阻塞模式，Windows 兼容）
+            rlist, _, _ = _select_mod.select([sock], [], [], 0)
+            if rlist:
+                # 有数据可读，尝试 peek 一个字节，若为空则对端已关闭
+                data = sock.recv(1, socket.MSG_PEEK)
+                return data != b''
+            # 无数据可读，连接正常
+            return True
+        except OSError:
+            return False
+
+    def _connect(self, host: str, port: int, timeout: float) -> tuple:
+        """建立新连接并测量 RTT，返回 (ok, latency_ms, socket)"""
+        try:
+            infos = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            if not infos:
+                return False, -1, None
+            fam, _, _, _, sockaddr = infos[0]
+            s = socket.socket(fam, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            t_start = time.perf_counter()
+            s.connect(sockaddr)
+            t_end = time.perf_counter()
+            lat = int((t_end - t_start) * 1000)
+            # 启用 keepalive 防止中间设备清理空闲连接
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            return True, lat, s
+        except Exception:
+            return False, -1, None
+
+# 全局探针池实例（放在 _probe_one 定义之前）
+_probe_pool = ProbeTcpPool()
+
 def _probe_one(host, port, timeout=3):
-    """探测单个目标，返回 (reachable: bool, latency_ms: int)"""
-    try:
-        import ipaddress
-        addr = ipaddress.ip_address(host)
-        af = socket.AF_INET6 if isinstance(addr, ipaddress.IPv6Address) else socket.AF_INET
-    except ValueError:
-        af = socket.AF_UNSPEC
-    try:
-        infos = socket.getaddrinfo(host, port, af, socket.SOCK_STREAM)
-        if not infos:
-            return False, -1
-        fam, _, _, _, sockaddr = infos[0]
-        t = time.time()
-        s = socket.socket(fam, socket.SOCK_STREAM)
-        s.settimeout(timeout)
-        s.connect(sockaddr)
-        lat = int((time.time() - t) * 1000)
-        s.close()
-        return True, lat
-    except Exception:
-        return False, -1
+    """探测单个目标，返回 (reachable: bool, latency_ms: int) —— 使用长连接池复用"""
+    return _probe_pool.check(host, port, timeout)
 
 def _probe_loop():
     """后台探针线程：IPv4/IPv6 分组探测，分别维护可达状态和延迟。
@@ -2989,12 +3059,13 @@ def _probe_loop():
     - 每组中任一可达即认为该栈正常
     - _probe_ok = IPv4 可达（向后兼容，monitor_loop 用此判断是否丢弃本轮）
     - _probe_ok_v6 = IPv6 可达 / None（未配置）
+    - 探测间隔固定为1秒（不跟随 check_interval），确保检测前网络状态是最新的
     """
     global _probe_ok, _probe_ok_v4, _probe_ok_v6, _probe_details
     _warned_v4 = False
     _warned_v6 = False
     while True:
-        probe_interval = CONFIG.get('check_interval', 30)
+        PROBE_INTERVAL = 1   # 固定1秒，快速感知网络变化，与check_interval解耦
         PROBE_TIMEOUT  = int(CONFIG.get('probe_timeout', 5))
 
         # 每轮从 CONFIG 动态读取目标列表，支持运行时热更新
@@ -3064,90 +3135,23 @@ def _probe_loop():
                 cprint(msg, 'info')
                 _warned_v6 = False
 
-        time.sleep(probe_interval)
+        time.sleep(PROBE_INTERVAL)
 
-# 立即检测触发器：启动时或添加 tracker 后置位，monitor_loop 检测到后立即执行（不等待 check_interval）
+# 立即检测触发器（兼容旧接口，独立线程模式下不再使用，保留以避免其他代码引用报错）
 _check_now = threading.Event()
 
-def _check_one_and_record(domain, ip_info, temp_results, round_ok, round_fail, round_lock, temp_lock):
-    ip = ip_info['ip']
-    with db.lock:
-        td       = db.trackers.get(domain, {})
-        port     = td.get('port', 80)
-        protocol = td.get('protocol', 'tcp')
-    proto_s = protocol.upper()
-    try:
-        # 调用 check_ip 但不更新数据库
-        status, lat, err = check_ip(domain, ip_info, retry=True, update_db=False)
-        lat_s = f"{lat}ms" if lat >= 0 else "N/A"
-        if status == 'skipped':
-            cprint(f"⏭ {proto_s}://{domain}:{port} ({ip}) 跳过 | {err}", 'debug')
-            return
-        # ── 连续失败计数 & 自动暂停 ────────────────────────────────
-        auto_pause_enabled   = CONFIG.get('auto_pause_enabled', True)
-        auto_pause_threshold = int(CONFIG.get('auto_pause_threshold', 30))
-        key = (domain, ip)
-        # 网络不可用时跳过连续失败计数（避免网络中断误触发自动暂停）
-        # 判断当前 IP 是 IPv6 还是 IPv4，分别对应探针状态
-        _is_ipv6_ip = ':' in ip
-        with _probe_lock:
-            _cur_v4_ok = _probe_ok_v4
-            _cur_v6_ok = _probe_ok_v6  # None=未配置
-        # 若该 IP 对应的网络栈探针不可用，跳过本次计数
-        # - IPv6 地址 且 IPv6 探针明确为 False → 网络异常，跳过
-        # - IPv4 地址 且 IPv4 探针为 False     → 网络异常，跳过
-        _net_unavailable = (
-            (_is_ipv6_ip and _cur_v6_ok is False) or
-            (not _is_ipv6_ip and not _cur_v4_ok)
-        )
-        if status == 'offline' and auto_pause_enabled and not _net_unavailable:
-            with _consec_fail_lock:
-                _consec_fail_count[key] = _consec_fail_count.get(key, 0) + 1
-                cur_count = _consec_fail_count[key]
-            if cur_count >= auto_pause_threshold:
-                # 自动暂停该 IP
-                with db.lock:
-                    td2 = db.trackers.get(domain, {})
-                    for ip_obj in td2.get('ips', []):
-                        if ip_obj.get('ip') == ip and not ip_obj.get('paused'):
-                            ip_obj['paused'] = True
-                            break
-                pause_msg = (f"[自动暂停] {proto_s}://{domain}:{port} ({ip}) "
-                             f"累计失败 {cur_count} 次，已自动暂停监控")
-                db.add_log(pause_msg, 'info')
-                cprint(pause_msg, 'info')
-                # 重置计数，避免重复触发
-                with _consec_fail_lock:
-                    _consec_fail_count[key] = 0
-                db._save_async()
-                with round_lock: round_fail[0] += 1
-                return
-        elif status == 'online':
-            # 在线则清零连续失败计数
-            with _consec_fail_lock:
-                _consec_fail_count.pop(key, None)
-        # 记录检测完成的时间戳
-        check_time = datetime.now().isoformat()
-        # 存储结果（增加 check_time）
-        with temp_lock:
-            temp_results[(domain, ip)] = (status, lat, err, protocol, port, check_time)
-        # 更新计数（用于失败率判断）
-        if status == 'online':
-            with round_lock: round_ok[0] += 1
-        else:
-            with round_lock: round_fail[0] += 1
-        # 立即打印控制台日志，但不写入 db.logs
-        if status == 'online':
-            msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}"
-            cprint(msg, 'success')
-        else:
-            reason = f" | {err}" if err else ""
-            msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}"
-            cprint(msg, 'error')
-    except Exception as e:
-        msg = f"检查异常 {domain}:{port} ({ip}): {type(e).__name__}: {e}"
-        cprint(msg, 'error')
-        with round_lock: round_fail[0] += 1
+# ==================== 独立线程监控架构 ====================
+# 每个 (domain, ip) 和每个 domain（DNS刷新）都有独立线程，各自睡眠 check_interval 秒。
+# 启动时对所有 tracker 的线程加随机偏移（stagger），错峰探测和DNS查询，
+# 避免一次性大量并发触发运营商风控。
+#
+# 全局线程注册表：{key: threading.Thread}
+#   key = ('ip', domain, ip)   —— IP探测线程
+#   key = ('dns', domain)      —— DNS刷新线程
+_tracker_threads: Dict[tuple, threading.Thread] = {}
+_tracker_threads_lock = threading.Lock()
+# 停止信号：每个线程的停止事件
+_tracker_stop_events: Dict[tuple, threading.Event] = {}
 
 def _ip_ver(ip_str: str) -> str:
     """返回 IP 地址族字符串：'ipv6' 或 'ipv4'。解析失败默认视为 ipv4。"""
@@ -3157,209 +3161,437 @@ def _ip_ver(ip_str: str) -> str:
     except Exception:
         return 'ipv4'
 
-def _write_healthy_results(temp_results):
-    for (domain, ip), (status, lat, err, protocol, port, check_time) in temp_results.items():
-        # 更新状态和历史，传入 check_time
-        db.update_status(domain, ip, status, lat, check_time)
-        # 添加日志
-        proto_s = protocol.upper()
-        lat_s = f"{lat}ms" if lat >= 0 else "N/A"
-        if status == 'online':
-            msg = f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}"
-            db.add_log(msg, 'success')
-        else:
-            reason = f" | {err}" if err else ""
-            msg = f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}"
-            db.add_log(msg, 'error')
-        # 归属地补查（与原有逻辑相同）
-        need_geo = False
-        with db.lock:
-            for ip_obj in db.trackers.get(domain, {}).get('ips', []):
-                if ip_obj.get('ip') == ip:
-                    need_geo = ip_obj.get('country', {}).get('country_code', 'XX') == 'XX'
+def _get_probe_net_status(ip_str: str):
+    """返回 (skip: bool, reason: str)，True=应跳过本次探测（网络异常）"""
+    ver = _ip_ver(ip_str)
+    with _probe_lock:
+        probe_v4_ok = _probe_ok_v4
+        probe_v6_ok = _probe_ok_v6
+    if ver == 'ipv4' and not probe_v4_ok:
+        return True, 'IPv4探针不可达'
+    if ver == 'ipv6' and probe_v6_ok is False:
+        return True, 'IPv6探针不可达'
+    return False, ''
+
+def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
+                       initial_delay: float = 0.0):
+    """每个IP独立监控线程。
+    - 启动时先睡 initial_delay 秒（错峰），之后每隔 check_interval 秒探测一次。
+    - 探测前检查网络状态（探针），网络异常时跳过本次探测，不写历史。
+    - DNS查询由对应 domain 的 DNS 线程负责，IP线程只做探测。
+    """
+    # 首次启动错峰延迟
+    if initial_delay > 0:
+        stop_event.wait(timeout=initial_delay)
+        if stop_event.is_set():
+            return
+
+    _warned_net = False
+    while not stop_event.is_set():
+        try:
+            # 检查该 IP 是否被暂停或移除（持锁时间尽量短）
+            should_skip = False
+            skip_reason = ''
+            with db.lock:
+                td = db.trackers.get(domain, {})
+                if not td:
+                    return  # tracker 已删除，退出线程
+                ip_obj = next((x for x in td.get('ips', []) if x.get('ip') == ip), None)
+                if ip_obj is None or ip_obj.get('removed'):
+                    return  # IP 已移除，退出线程
+                if ip_obj.get('paused') or td.get('paused'):
+                    should_skip = True
+                    skip_reason = 'paused'
+                else:
+                    port     = td.get('port', 80)
+                    protocol = td.get('protocol', 'tcp')
+
+            if should_skip:
+                # 暂停状态：等待后继续，不持锁
+                stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+                continue
+
+            # ── 探测前检查网络状态 ──────────────────────────────
+            skip_net, net_reason = _get_probe_net_status(ip)
+            if skip_net:
+                if not _warned_net:
+                    cprint(f"[跳过探测] {domain}({ip}) 网络异常: {net_reason}", 'debug')
+                    _warned_net = True
+                stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+                continue
+            if _warned_net:
+                _warned_net = False
+
+            # ── 实际探测 ────────────────────────────────────────
+            fn = udp_ping if protocol == 'udp' else tcp_ping
+            ok, lat, err = fn(ip, port)
+
+            if not ok and _is_proxy_unavail(err):
+                # 代理不可用，跳过，保留上次状态
+                stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+                continue
+
+            if not ok:
+                # 首次失败重试
+                wait = get_retry_wait(domain)
+                cprint(f"首次失败 {domain}:{port} ({ip}) 等待{wait}s重试 | {err}", 'debug')
+                stop_event.wait(timeout=wait)
+                if stop_event.is_set():
                     break
-        if need_geo:
-            new_geo = get_geo(ip)
-            if new_geo.get('country_code', 'XX') != 'XX':
+                ok, lat, err = fn(ip, port)
+                if not ok and _is_proxy_unavail(err):
+                    stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+                    continue
+
+            status = 'online' if ok else 'offline'
+
+            # ── 再次检查探针（探测期间可能网络已故障） ──────────
+            skip_net2, net_reason2 = _get_probe_net_status(ip)
+
+            # ── 连续失败计数 & 自动暂停 ────────────────────────
+            key = (domain, ip)
+            auto_pause_enabled = CONFIG.get('auto_pause_enabled', True)
+            auto_pause_threshold = CONFIG.get('auto_pause_threshold', 30)
+            if status == 'offline' and not skip_net2:
+                with _consec_fail_lock:
+                    cur = _consec_fail_count.get(key, 0) + 1
+                    _consec_fail_count[key] = cur
+                if auto_pause_enabled and cur >= auto_pause_threshold:
+                    with db.lock:
+                        for ip_obj2 in db.trackers.get(domain, {}).get('ips', []):
+                            if ip_obj2.get('ip') == ip:
+                                ip_obj2['paused'] = True
+                                break
+                    pause_msg = (f"[自动暂停] {protocol.upper()}://{domain}:{port} ({ip}) "
+                                 f"累计失败 {cur} 次，已自动暂停监控")
+                    db.add_log(pause_msg, 'info')
+                    cprint(pause_msg, 'info')
+                    with _consec_fail_lock:
+                        _consec_fail_count[key] = 0
+                    db._save_async()  # 暂停事件需要立即持久化
+                    stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+                    continue
+            elif status == 'online':
+                with _consec_fail_lock:
+                    _consec_fail_count.pop(key, None)
+
+            check_time = datetime.now().isoformat()
+
+            # ── 写历史（探针正常才写）───────────────────────────
+            if not skip_net2:
+                db.update_status(domain, ip, status, lat, check_time)
+                # 日志
+                lat_s = f"{lat}ms" if lat >= 0 else "N/A"
+                proto_s = protocol.upper()
+                if status == 'online':
+                    db.add_log(f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}", 'success')
+                    cprint(f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}", 'success')
+                else:
+                    reason = f" | {err}" if err else ""
+                    db.add_log(f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}", 'error')
+                    cprint(f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}", 'error')
+                # 归属地补查
+                need_geo = False
                 with db.lock:
-                    for ip_obj in db.trackers.get(domain, {}).get('ips', []):
-                        if ip_obj.get('ip') == ip:
-                            ip_obj['country'] = new_geo
+                    for ip_obj3 in db.trackers.get(domain, {}).get('ips', []):
+                        if ip_obj3.get('ip') == ip:
+                            need_geo = ip_obj3.get('country', {}).get('country_code', 'XX') == 'XX'
                             break
+                if need_geo:
+                    new_geo = get_geo(ip)
+                    if new_geo.get('country_code', 'XX') != 'XX':
+                        with db.lock:
+                            for ip_obj3 in db.trackers.get(domain, {}).get('ips', []):
+                                if ip_obj3.get('ip') == ip:
+                                    ip_obj3['country'] = new_geo
+                                    break
+                # 不在这里调 _save_async()，由全局定时保存线程负责，避免高频保存持锁阻塞 API
+                #if CONFIG.get('cache_history', True):
+                    #db._save_async()
+            else:
+                # 网络故障，只更新状态不写历史
+                db.update_status(domain, ip, status, lat, check_time)
+                cprint(f"[跳过历史] {domain}({ip}) 探测完成但探针不可达({net_reason2})，历史不计入", 'debug')
+
+        except Exception as e:
+            cprint(f"[IP线程异常] {domain}({ip}): {type(e).__name__}: {e}", 'error')
+
+        stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+
+
+def _dns_refresh_thread(name: str, domain: str, port: int, protocol: str,
+                        stop_event: threading.Event, initial_delay: float = 0.0):
+    """每个域名独立DNS刷新线程。
+    - 启动时先睡 initial_delay 秒（错峰），之后每隔 check_interval 秒刷新一次 DNS。
+    - 刷新后若出现新IP，自动启动对应的IP监控线程。
+    - IP直连模式（domain是IP）则跳过，不做DNS查询。
+    """
+    is_ip = bool(re.match(r'^\d{1,3}(?:\.\d{1,3}){3}$', domain)) or (':' in domain and '.' not in domain)
+    if is_ip:
+        return  # IP 直连无需 DNS 线程
+
+    if initial_delay > 0:
+        stop_event.wait(timeout=initial_delay)
+        if stop_event.is_set():
+            return
+
+    while not stop_event.is_set():
+        try:
+            paused = False
+            with db.lock:
+                if name not in db.trackers:
+                    break  # tracker 已删除
+                paused = db.trackers[name].get('paused', False)
+
+            if paused:
+                stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+                continue
+
+            new_ips = resolve(domain)
+            db.update_ips(name, new_ips, dns_error=(not new_ips))
+            if new_ips:
+                cprint(f"DNS刷新 {name} ({domain}): {len(new_ips)}个IP", 'debug')
+                # 对新出现的IP自动启动独立监控线程
+                _ensure_ip_threads(name)
+        except Exception as e:
+            try:
+                db.update_ips(name, [], dns_error=True)
+            except Exception:
+                pass
+            cprint(f"[DNS线程异常] {name}: {type(e).__name__}: {e}", 'debug')
+
+        stop_event.wait(timeout=CONFIG.get('check_interval', 30))
+
+
+def _ensure_ip_threads(name: str):
+    """确保 tracker name 下所有活跃IP都有对应的监控线程，新增IP自动启动线程。"""
+    with db.lock:
+        td = db.trackers.get(name, {})
+        if not td:
+            return
+        active_ips = [
+            ip_obj.copy() for ip_obj in td.get('ips', [])
+            if not ip_obj.get('removed')
+        ]
+
+    for ip_obj in active_ips:
+        ip = ip_obj.get('ip', '')
+        if not ip:
+            continue
+        key = ('ip', name, ip)
+        with _tracker_threads_lock:
+            t = _tracker_threads.get(key)
+            if t and t.is_alive():
+                continue  # 线程已存在且活跃
+            # 启动新线程（无错峰延迟，因为是新加入的IP）
+            stop_ev = threading.Event()
+            _tracker_stop_events[key] = stop_ev
+            t = threading.Thread(
+                target=_ip_monitor_thread,
+                args=(name, ip, stop_ev, 0.0),
+                daemon=True,
+                name=f"mon-{name[:20]}-{ip}"
+            )
+            _tracker_threads[key] = t
+            t.start()
+            cprint(f"[线程启动] IP监控: {name}({ip})", 'debug')
+
+
+def _stop_tracker_threads(name: str, ip: str = None):
+    """停止指定 tracker（或其某个IP）的监控线程。
+    ip=None 表示停止该 tracker 下所有线程（含DNS刷新线程）。
+    """
+    with _tracker_threads_lock:
+        keys_to_stop = []
+        for key in list(_tracker_threads.keys()):
+            if ip is None:
+                if key[1] == name:
+                    keys_to_stop.append(key)
+            else:
+                if key == ('ip', name, ip):
+                    keys_to_stop.append(key)
+
+        for key in keys_to_stop:
+            ev = _tracker_stop_events.get(key)
+            if ev:
+                ev.set()
+            _tracker_threads.pop(key, None)
+            _tracker_stop_events.pop(key, None)
+            cprint(f"[线程停止] {key}", 'debug')
+
+
+def _start_all_tracker_threads():
+    """启动时为所有已加载的 tracker 创建线程，带随机错峰延迟。
+    目标：把 N 个 tracker 的首次探测和DNS查询均匀分散到 check_interval 秒内，
+    避免启动时一次性大量并发。
+    """
+    check_interval = CONFIG.get('check_interval', 30)
+    with db.lock:
+        all_trackers = {k: v for k, v in db.trackers.items()}
+
+    domain_count = len(all_trackers)
+    if domain_count == 0:
+        return
+
+    # 为每个域名分配一个固定偏移槽，错峰启动
+    # 均匀分布在 [0, check_interval) 秒内
+    domain_list = list(all_trackers.keys())
+    random.shuffle(domain_list)  # 随机打乱避免每次启动顺序一样
+
+    for idx, name in enumerate(domain_list):
+        td = all_trackers[name]
+        domain   = td.get('domain', name)
+        port     = td.get('port', 80)
+        protocol = td.get('protocol', 'tcp')
+
+        # 均匀错峰：每个域名的启动延迟在 [0, check_interval) 内均匀分布
+        initial_delay = (idx / max(domain_count, 1)) * check_interval
+
+        # 启动 DNS 刷新线程（域名有效时）
+        is_ip = bool(re.match(r'^\d{1,3}(?:\.\d{1,3}){3}$', domain)) or (':' in domain and '.' not in domain)
+        if not is_ip:
+            dns_key = ('dns', name)
+            with _tracker_threads_lock:
+                if dns_key not in _tracker_threads or not _tracker_threads[dns_key].is_alive():
+                    stop_ev = threading.Event()
+                    _tracker_stop_events[dns_key] = stop_ev
+                    t = threading.Thread(
+                        target=_dns_refresh_thread,
+                        args=(name, domain, port, protocol, stop_ev, initial_delay),
+                        daemon=True,
+                        name=f"dns-{name[:30]}"
+                    )
+                    _tracker_threads[dns_key] = t
+                    t.start()
+
+        # 启动所有IP的独立监控线程
+        active_ips = [
+            ip_obj for ip_obj in td.get('ips', [])
+            if not ip_obj.get('removed')
+        ]
+        ip_count = len(active_ips)
+        for ip_idx, ip_obj in enumerate(active_ips):
+            ip = ip_obj.get('ip', '')
+            if not ip:
+                continue
+            key = ('ip', name, ip)
+            with _tracker_threads_lock:
+                if key in _tracker_threads and _tracker_threads[key].is_alive():
+                    continue
+                # IP内部再细分错峰：同一域名下多IP均匀分布在该域名的时间槽内
+                if ip_count > 1:
+                    slot = check_interval / domain_count
+                    ip_delay = initial_delay + (ip_idx / ip_count) * slot
+                else:
+                    ip_delay = initial_delay
+
+                stop_ev = threading.Event()
+                _tracker_stop_events[key] = stop_ev
+                t = threading.Thread(
+                    target=_ip_monitor_thread,
+                    args=(name, ip, stop_ev, ip_delay),
+                    daemon=True,
+                    name=f"mon-{name[:20]}-{ip}"
+                )
+                _tracker_threads[key] = t
+                t.start()
+
+    cprint(f"[监控启动] 共 {domain_count} 个tracker，已启动独立线程，"
+           f"错峰分布在 {check_interval}s 内", 'info')
+
+
+# 旧的 monitor_loop 保留为存根（启动脚本引用），实际功能已迁移到独立线程
+# 这里只做线程清理/健康检查（死线程重启）
+def _periodic_save_loop():
+    """定时保存线程：每60秒将数据持久化到磁盘。
+    替代之前每次探测完都调 _save_async() 的高频保存方式，
+    彻底消除因频繁持 db.lock 写磁盘导致 API 响应阻塞的问题。
+    彻底消除因频繁写 history.json 导致磁盘 I/O 过高的问题。
+    """
+    while True:
+        time.sleep(60)
+        try:
+            if CONFIG.get('cache_history', True):
+                db._save_async()
+        except Exception as e:
+            cprint(f"[定时保存] 异常: {e}", 'error')
+
 
 def monitor_loop():
-    db.add_log("监控服务启动", 'info')
-    cprint("监控服务启动", 'info')
-    _net_warn_printed = False   # 本次网络异常告警只打一次，恢复后重置
+    """监控管理线程：定期检查死线程并重启，启动所有独立监控线程，不再做轮询探测。"""
+    db.add_log("监控服务启动（独立线程模式）", 'info')
+    cprint("监控服务启动（独立线程模式）", 'info')
+    _start_all_tracker_threads()
+    _check_now.set()
+
+    # 启动定时保存线程（60秒一次，替代每次探测后立即保存）
+    save_t = threading.Thread(target=_periodic_save_loop, daemon=True, name="periodic-save")
+    save_t.start()
+
     while True:
         try:
-            snapshot = db.get_trackers()
-            # ── 第一步：并行重新解析所有域名 DNS ─────────────────────────
-            with ThreadPoolExecutor(max_workers=32) as dns_pool:
-                dns_futures = {
-                    # name=外层key(备注), domain=data['domain']字段(实际连接地址，可以是IP或域名)
-                    dns_pool.submit(_resolve_and_update,
-                                    name,
-                                    data.get('domain', name),
-                                    data.get('port', 80),
-                                    data.get('protocol','tcp')): name
-                    for name, data in snapshot.items()
-                }
-                for f in as_completed(dns_futures):
-                    try: f.result()
-                    except Exception as e:
-                        cprint(f"DNS线程异常: {e}", 'error')
-            # ── 第二步：并行检测所有 IP（暂不更新数据库） ───────────────
-            snapshot = db.get_trackers()
-            tasks = []
-            for domain, data in snapshot.items():
-                if data.get('paused'):        # 整个域名暂停，跳过
-                    continue
-                for ip_info in data.get('ips', []):
-                    if not ip_info.get('removed') and not ip_info.get('paused'):
-                        tasks.append((domain, ip_info))
-            # 存储本轮结果的字典：{(domain, ip): (status, lat, err, protocol, port)}
-            temp_results = {}
-            temp_lock = threading.Lock()
-            # 用计数器收集本轮检测结果，检测完后判断网络健康度
-            round_ok  = [0]
-            round_fail = [0]
-            round_lock = threading.Lock()
-            # ── 发包错峰：分批提交避免瞬间高并发冲击本地网络/代理 ──────────
-            use_proxy_stagger = bool(CONFIG.get('udp_proxy_enabled') and CONFIG.get('udp_proxy','').strip())
-            if use_proxy_stagger:
-                STAGGER_BATCH = int(CONFIG.get('stagger_batch_proxy', 5))
-                STAGGER_DELAY = int(CONFIG.get('stagger_delay_proxy', 150)) / 1000.0
-            else:
-                STAGGER_BATCH = int(CONFIG.get('stagger_batch_direct', 5))
-                STAGGER_DELAY = int(CONFIG.get('stagger_delay_direct', 100)) / 1000.0
-            with ThreadPoolExecutor(max_workers=max(8, CONFIG.get('monitor_workers', 120))) as chk_pool:
-                futures = {}
-                if len(tasks) > STAGGER_BATCH:
-                    for i in range(0, len(tasks), STAGGER_BATCH):
-                        batch = tasks[i:i + STAGGER_BATCH]
-                        for d, ipi in batch:
-                            f = chk_pool.submit(_check_one_and_record, d, ipi, temp_results,
-                                                round_ok, round_fail, round_lock, temp_lock)
-                            futures[f] = (d, ipi['ip'])
-                        if i + STAGGER_BATCH < len(tasks):
-                            time.sleep(STAGGER_DELAY)
-                else:
-                    futures = {chk_pool.submit(_check_one_and_record, d, ipi, temp_results,
-                                               round_ok, round_fail, round_lock, temp_lock): (d, ipi['ip'])
-                               for d, ipi in tasks}
-                for f in as_completed(futures):
-                    try: f.result()
-                    except Exception as e:
-                        d, ip = futures[f]
-                        cprint(f"检测线程异常 {d} ({ip}): {e}", 'error')
-            # ── 第三步：网络健康判断（探针 + 失败率双重保障）────────────
-            # 细分策略：
-            #   IPv4 探针故障  → 跳过本轮 IPv4 IP 的 history 写入，IPv6 IP 正常写入
-            #   IPv6 探针故障  → 跳过本轮 IPv6 IP 的 history 写入，IPv4 IP 正常写入
-            #   双栈均故障     → 全轮丢弃（_net_bad=True，net_ok=False）
-            #   失败率超阈值   → 来源无法细分，仍全轮丢弃
-            total_checked = round_ok[0] + round_fail[0]
-            with _probe_lock:
-                probe_v4_ok = _probe_ok_v4
-                probe_v6_ok = _probe_ok_v6  # None=未配置（不参与判断）
-
-            # 确定哪些 IP 版本的结果需要跳过写入
-            skip_v4 = not probe_v4_ok                          # IPv4 探针故障 → 跳过 v4
-            skip_v6 = (probe_v6_ok is False)                   # IPv6 探针故障且已配置 → 跳过 v6
-            net_ok  = not (skip_v4 and (skip_v6 or probe_v6_ok is None))
-            # net_ok=False 仅在 IPv4 故障 且 (IPv6 也故障 或 IPv6 未配置) 时成立
-            # 即：只要有任一可用栈探针正常，net_ok 保持 True，允许该栈结果写入
-
-            net_reason = ''
-            if skip_v4 and skip_v6:
-                net_reason = '探针IPv4+IPv6均不可达'
-            elif skip_v4:
-                net_reason = '探针IPv4不可达'
-            elif skip_v6:
-                net_reason = '探针IPv6不可达'
-
-            # 方案B：本轮整体失败率 ≥ 配置阈值（仅在探针层面正常时追加判断，来源无法细分故全轮丢弃）
-            fail_threshold = CONFIG.get('probe_fail_threshold', 50) / 100.0
-            fail_rate_triggered = False
-            if net_ok and total_checked >= 5:
-                fail_rate = round_fail[0] / total_checked
-                if fail_rate >= fail_threshold:
-                    net_ok = False
-                    skip_v4 = skip_v6 = True
-                    fail_rate_triggered = True
-                    net_reason = f'失败率{fail_rate*100:.0f}%({round_fail[0]}/{total_checked})'
-
-            # ── 告警日志 ──────────────────────────────────────────────────
-            if not net_ok:
-                if not _net_warn_printed:
-                    warn_msg = (f"[网络异常] 疑似本地网络故障（{net_reason}），"
-                                f"本轮历史数据不计入统计")
-                    db.add_log(warn_msg, 'error')
-                    cprint(warn_msg, 'error')
-                    _net_warn_printed = True
-                with _probe_lock:
-                    _net_bad = True
-            elif skip_v4 or skip_v6:
-                # 部分栈故障：有选择地写入，输出细分告警
-                partial_msg = f"[网络部分异常] {net_reason}，仅跳过{'IPv4' if skip_v4 else ''}{'/' if skip_v4 and skip_v6 else ''}{'IPv6' if skip_v6 else ''}历史写入"
-                if not _net_warn_printed:
-                    db.add_log(partial_msg, 'error')
-                    cprint(partial_msg, 'error')
-                    _net_warn_printed = True
-                with _probe_lock:
-                    _net_bad = False  # 部分正常，不标记整体故障
-            else:
-                if _net_warn_printed:
-                    recover_msg = "[网络恢复] 探针与检测均正常，恢复历史数据统计"
-                    db.add_log(recover_msg, 'info')
-                    cprint(recover_msg, 'info')
-                    _net_warn_printed = False
-                with _probe_lock:
-                    _net_bad = False
-
-            # ── 写入历史（细分 IPv4/IPv6）──────────────────────────────────
-            if temp_results:
-                if not skip_v4 and not skip_v6:
-                    # 全部正常，直接写入
-                    _write_healthy_results(temp_results)
-                elif skip_v4 and skip_v6:
-                    pass  # 双栈均故障，全部丢弃
-                else:
-                    # 部分故障：只写入探针正常一侧的结果
-                    filtered = {
-                        (domain, ip): v
-                        for (domain, ip), v in temp_results.items()
-                        if not (skip_v4 and _ip_ver(ip) == 'ipv4')
-                        and not (skip_v6 and _ip_ver(ip) == 'ipv6')
-                    }
-                    if filtered:
-                        _write_healthy_results(filtered)
-                if CONFIG.get('cache_history', True):
-                    db._save_async()
-            elif net_ok or (not skip_v4 or not skip_v6):
-                if CONFIG.get('cache_history', True):
-                    db._save_async()
-
-            skipped_note = ''
-            if skip_v4 and skip_v6:
-                skipped_note = ' | ⚠ 双栈故障，历史全跳过'
-            elif skip_v4:
-                skipped_note = ' | ⚠ IPv4探针故障，v4历史跳过'
-            elif skip_v6:
-                skipped_note = ' | ⚠ IPv6探针故障，v6历史跳过'
-            s = db.get_stats()
-            summary = (f"轮检完成 | "
-                       f"总:{s['total']} [v4:{s['ipv4']} v6:{s['ipv6']}] | "
-                       f"在线:{s['alive']} [v4:{s['alive_v4']} v6:{s['alive_v6']}]"
-                       + skipped_note)
-            db.add_log(summary, 'info')
+            # 每分钟检查一次死线程并重启
+            time.sleep(60)
+            _restart_dead_threads()
         except Exception as e:
-            msg = f"监控线程错误: {type(e).__name__}: {e}"
-            db.add_log(msg, 'error')
-            cprint(msg, 'error')
-        _check_now.wait(timeout=CONFIG['check_interval'])
-        _check_now.clear()
+            cprint(f"监控管理线程错误: {type(e).__name__}: {e}", 'error')
+
+
+def _restart_dead_threads():
+    """检查并重启死掉的监控线程（线程崩溃后自动恢复）。"""
+    dead = []
+    with _tracker_threads_lock:
+        for key, t in _tracker_threads.items():
+            if not t.is_alive():
+                dead.append(key)
+
+    if not dead:
+        return
+
+    cprint(f"[线程恢复] 发现 {len(dead)} 个死线程，正在重启...", 'debug')
+    for key in dead:
+        kind = key[0]
+        name = key[1]
+        with db.lock:
+            td = db.trackers.get(name)
+            if not td:
+                with _tracker_threads_lock:
+                    _tracker_threads.pop(key, None)
+                    _tracker_stop_events.pop(key, None)
+                continue
+
+        if kind == 'ip':
+            ip = key[2]
+            with _tracker_threads_lock:
+                stop_ev = threading.Event()
+                _tracker_stop_events[key] = stop_ev
+                t = threading.Thread(
+                    target=_ip_monitor_thread,
+                    args=(name, ip, stop_ev, 0.0),
+                    daemon=True,
+                    name=f"mon-{name[:20]}-{ip}"
+                )
+                _tracker_threads[key] = t
+                t.start()
+            cprint(f"[线程恢复] IP监控线程重启: {name}({ip})", 'debug')
+        elif kind == 'dns':
+            with db.lock:
+                td = db.trackers.get(name, {})
+                domain   = td.get('domain', name)
+                port     = td.get('port', 80)
+                protocol = td.get('protocol', 'tcp')
+            with _tracker_threads_lock:
+                stop_ev = threading.Event()
+                _tracker_stop_events[key] = stop_ev
+                t = threading.Thread(
+                    target=_dns_refresh_thread,
+                    args=(name, domain, port, protocol, stop_ev, 0.0),
+                    daemon=True,
+                    name=f"dns-{name[:30]}"
+                )
+                _tracker_threads[key] = t
+                t.start()
+            cprint(f"[线程恢复] DNS刷新线程重启: {name}", 'debug')
 
 # ==================== 请求日志中间件 ====================
 # 批量请求去重：记录最近一次页面请求的时间戳，短时间内的 API 批量请求只打印一行摘要
@@ -3947,20 +4179,27 @@ def api_add():
         msg = f"添加 {protocol.upper()}://{host}:{port} 解析{len(ips)}个IP"
         db.add_log(f"{masked_ip} [{op_user}] {msg}", 'info')   # 脱敏后写入日志
         g.access_note = f"add {protocol.upper()}://{host}:{port} ({len(ips)} IPs) by {raw_ip} [{op_user}]"
-        def bg(d=host):
-            with db.lock:
-                # 后台检测保持不变
-                td  = db.trackers.get(d,{})
-                ipl = list(td.get('ips',[]))
-            for ipi in ipl:
-                try: check_ip(d, ipi, retry=False)
-                except Exception: pass
-        threading.Thread(target=bg, daemon=True).start()
+        # 为新增 tracker 启动独立监控线程（含DNS刷新和所有IP的探测线程）
+        def _start_new_tracker(name=host, domain=host, prt=port, proto=protocol):
+            time.sleep(0.3)  # 短暂延迟，等 add_tracker 落库完成
+            is_ip = bool(re.match(r'^\d{1,3}(?:\.\d{1,3}){3}$', domain)) or (':' in domain and '.' not in domain)
+            if not is_ip:
+                dns_key = ('dns', name)
+                with _tracker_threads_lock:
+                    stop_ev = threading.Event()
+                    _tracker_stop_events[dns_key] = stop_ev
+                    t = threading.Thread(
+                        target=_dns_refresh_thread,
+                        args=(name, domain, prt, proto, stop_ev, 0.0),
+                        daemon=True, name=f"dns-{name[:30]}"
+                    )
+                    _tracker_threads[dns_key] = t
+                    t.start()
+            _ensure_ip_threads(name)
+        threading.Thread(target=_start_new_tracker, daemon=True).start()
         results.append({'domain':host,'port':port,'protocol':protocol,'ip_count':len(ips)})
     if not results and errors:
         return jsonify({'error':'; '.join(errors)}), 400
-    # 触发 monitor_loop 立即进行下一轮全量检测（不等待 check_interval）
-    _check_now.set()
     return jsonify({'success':True,'added':len(results),'results':results,'errors':errors})
 
 @app.route('/api/tracker/delete', methods=['POST'])
@@ -3982,6 +4221,8 @@ def api_delete():
             msg = f"删除 {domain}"
             db.add_log(f"{masked_ip} [{op_user}] {msg}", 'info')   # 脱敏后写入日志
             g.access_note = f"delete {domain} by {raw_ip} [{op_user}]"
+            # 停止该tracker的所有监控线程
+            _stop_tracker_threads(domain)
             return jsonify({'success':True})
     return jsonify({'error':'不存在'}), 404
 
@@ -4495,7 +4736,7 @@ def api_config():
                 'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
                 'log_to_disk','log_level','console_log_level','debug_save_trace','http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                 'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
-                'dns_mode','dns_custom','dns_use_tcp','dns_timeout','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
                 'export_suffix','show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
                 'cleanup_interval','trust_cf_ip',
@@ -4529,6 +4770,7 @@ def api_config():
             'dns_custom':            '自定义DNS',
             'dns_use_tcp':           'DNS强制TCP',
             'dns_timeout':           'DNS查询超时',
+            'dns_lb_enabled':        'DNS负载均衡',
             'max_log_entries':       '最大日志条数',
             'max_log_info':          'Info日志最大条数',
             'max_log_success':       'Success日志最大条数',
@@ -4592,7 +4834,7 @@ def api_config():
         return jsonify({k: CONFIG.get(k) for k in public_keys})
     all_keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'log_to_disk','log_level','debug_save_trace','http_proxy','udp_proxy','http_proxy_enabled','udp_proxy_enabled',
-                'dns_mode','dns_custom','dns_use_tcp','dns_timeout','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
+                'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
                 'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width',
                 'allow_private_ips','min_password_length','cleanup_interval','trust_cf_ip',
@@ -4790,7 +5032,7 @@ if __name__ == '__main__':
 
     t = threading.Thread(target=monitor_loop, daemon=True)
     t.start()
-    _check_now.set()   # 启动后立即触发第一轮检测，不等待 check_interval
+    # 注：monitor_loop 内部会调用 _start_all_tracker_threads()，无需手动触发
 
     probe_t = threading.Thread(target=_probe_loop, daemon=True)
     probe_t.start()
