@@ -2827,6 +2827,9 @@
                                 <option :value="1000">1000 {{ t('logs.entries') }} （{{ t('config.default') }}）</option>
                                 <option :value="2000">2000 {{ t('logs.entries') }}</option>
                                 <option :value="5000">5000 {{ t('logs.entries') }}</option>
+                                <option :value="10000">10000 {{ t('logs.entries') }}</option>
+                                <option :value="20000">20000 {{ t('logs.entries') }}</option>
+                                <option :value="50000">50000 {{ t('logs.entries') }}</option>
                             </select>
                             <div class="form-text">{{ t('config.maxLogEntriesDesc') }}</div>
                         </div>
@@ -2837,6 +2840,9 @@
                                 <option :value="1000">1000 {{ t('logs.entries') }} （{{ t('config.default') }}）</option>
                                 <option :value="2000">2000 {{ t('logs.entries') }}</option>
                                 <option :value="5000">5000 {{ t('logs.entries') }}</option>
+                                <option :value="10000">10000 {{ t('logs.entries') }}</option>
+                                <option :value="20000">20000 {{ t('logs.entries') }}</option>
+                                <option :value="50000">50000 {{ t('logs.entries') }}</option>
                             </select>
                             <div class="form-text">{{ t('config.maxLogEntriesDesc') }}</div>
                         </div>
@@ -2847,6 +2853,9 @@
                                 <option :value="1000">1000 {{ t('logs.entries') }} （{{ t('config.default') }}）</option>
                                 <option :value="2000">2000 {{ t('logs.entries') }}</option>
                                 <option :value="5000">5000 {{ t('logs.entries') }}</option>
+                                <option :value="10000">10000 {{ t('logs.entries') }}</option>
+                                <option :value="20000">20000 {{ t('logs.entries') }}</option>
+                                <option :value="50000">50000 {{ t('logs.entries') }}</option>
                             </select>
                             <div class="form-text">{{ t('config.maxLogEntriesDesc') }}</div>
                         </div>
@@ -3682,16 +3691,21 @@ createApp({
                 const isDashboard = (currentTab.value === 'dashboard');
                 let lvl = (isDashboard && forceLevel) ? forceLevel : (logLvl.value || 'all');
                 let reqLevel = isDashboard ? 'error' : lvl;
-                let limit = 5000;  // 日志页面固定 5000
+                let limit = cfg.value.max_log_entries || 1000;  // 日志页面 取配置最大值
 
                 if (isDashboard) {
                     // 仪表盘只拉 error，使用 max_log_error
                     const limKey = 'max_log_error';
                     limit = cfg.value[limKey] || cfg.value.max_log_entries || 1000;
                 } else {
-                    // 日志页面：根据级别决定 limit
+                    // 日志页面：根据级别决定 limit（动态从配置读取）
                     if (reqLevel === 'all') {
-                        limit = 5000;   // 全部日志固定5000
+                        // 全部日志：取三个级别配置的最大值，确保能看到所有
+                        limit = Math.max(
+                            cfg.value.max_log_info || 1000,
+                            cfg.value.max_log_success || 1000,
+                            cfg.value.max_log_error || 1000
+                        );
                     } else if (reqLevel === 'info') {
                         limit = cfg.value.max_log_info || cfg.value.max_log_entries || 1000;
                     } else if (reqLevel === 'success') {
@@ -3703,15 +3717,19 @@ createApp({
                     }
                 }
 
+                // 可选：限制一个绝对上限，防止一次性加载几十万条导致浏览器卡死
+                const MAX_FETCH = 50000;
+                if (limit > MAX_FETCH) limit = MAX_FETCH;
                 // 强制构造带 limit 的 URL
                 const resp = await axios.get(`/api/logs?limit=${limit}&level=${reqLevel}`);
 
                 // 竞态防护：若此期间有更新的请求已发出，丢弃本次结果
                 if (reqId !== _logReqId) return;
-
+                // 如果是按级别加载，只替换对应级别的日志（all全替换）
                 if (reqLevel === 'all') {
                     logs.value = resp.data;
                 } else {
+                    // 替换内存中对应级别的条目，保留其他级别
                     const others = logs.value.filter(l => l.level !== reqLevel);
                     logs.value = [...others, ...resp.data].sort((a,b) => a.time < b.time ? -1 : 1);
                 }

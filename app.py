@@ -63,10 +63,10 @@ DEFAULT_CONFIG = {
     'dns_timeout': 0,                  # DNS 单次查询超时（秒）。0=与 timeout 相同；可设为 2~4 加快多 DNS 故障转移
     'dns_lb_enabled': True,            # DNS服务器负载均衡/权重排序开关（默认关闭）；关闭时始终按配置顺序顺序尝试
     'dns_refresh_interval': 120,       # DNS 刷新间隔（秒），默认 2 分钟
-    'max_log_entries': 1000,           # 日志最大条目数（兼容旧版，以下三项优先）
-    'max_log_info': 1000,              # Info 级日志最大条目数
-    'max_log_success': 1000,           # Success 级日志最大条目数
-    'max_log_error': 1000,             # Error 级日志最大条目数
+    'max_log_entries': 20000,          # 日志最大条目数（兼容旧版，以下三项优先）
+    'max_log_info': 2000,              # Info 级日志最大条目数
+    'max_log_success': 20000,          # Success 级日志最大条目数
+    'max_log_error': 5000,             # Error 级日志最大条目数
     'page_refresh_ms': 30000,          # 前端页面自动刷新间隔(ms)，0=禁用
     'cache_history': True,             # 是否缓存历史可用率到JSON（重启不丢失）
     'dashboard_stat_period': '24h',    # 仪表盘可用率统计周期：24h | 7d | 30d（排行TOP10+快速搜索）
@@ -114,7 +114,7 @@ DEFAULT_CONFIG = {
         {"username": "viewer",   "password": "d35ca5051b82ffc326a3b0b6574a9a3161dee16b9478a199ee39cd803ce5b799",  "role": "viewer"},
     ],
 }
-POLLING_SEQUENCE = [5, 10, 25, 55]
+POLLING_SEQUENCE = [5, 15, 30, 60]
 
 def load_config():
     cfg = dict(DEFAULT_CONFIG)
@@ -4649,9 +4649,30 @@ def api_query():
 # ── 日志 ──
 @app.route('/api/logs')
 def api_logs():
-    limit = min(request.args.get('limit', 300, type=int), 5000)
-    level = request.args.get('level', 'all').lower()  # all | info | success | error
-    if level not in ('all', 'info', 'success', 'error'): level = 'all'
+    req_limit = request.args.get('limit', 300, type=int)
+    level = request.args.get('level', 'all').lower()
+    if level not in ('all', 'info', 'success', 'error'):
+        level = 'all'
+
+    # 从 CONFIG 读取该级别的内存上限
+    if level == 'all':
+        max_limit = max(
+            CONFIG.get('max_log_info', 1000),
+            CONFIG.get('max_log_success', 1000),
+            CONFIG.get('max_log_error', 1000)
+        )
+    elif level == 'info':
+        max_limit = CONFIG.get('max_log_info', 1000)
+    elif level == 'success':
+        max_limit = CONFIG.get('max_log_success', 1000)
+    elif level == 'error':
+        max_limit = CONFIG.get('max_log_error', 1000)
+    else:
+        max_limit = 1000
+
+    # 最终 limit 不超过配置上限
+    limit = min(req_limit, max_limit)
+    # 返回数据
     return jsonify(db.get_logs(limit, level=level))
 
 @app.route('/api/logs/clear', methods=['POST'])
