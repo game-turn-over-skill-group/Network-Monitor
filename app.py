@@ -4670,9 +4670,8 @@ def api_logs():
     else:
         max_limit = 1000
 
-    # 最终 limit 不超过配置上限
-    limit = min(req_limit, max_limit)
-    # 返回数据
+    ABS_MAX = 100000  # 绝对上限，10万条日志
+    limit = min(req_limit, max_limit, ABS_MAX)    # 取最小值，最终 limit 不超过配置上限
     return jsonify(db.get_logs(limit, level=level))
 
 @app.route('/api/logs/clear', methods=['POST'])
