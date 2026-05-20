@@ -2975,7 +2975,17 @@ _probe_ok_v4 = True   # IPv4 探针状态
 _probe_ok_v6 = None   # IPv6 探针状态（None=未配置，True/False=有结果）
 _probe_lock  = threading.Lock()
 _net_bad     = False  # 网络故障标志，由 monitor_loop 每轮更新
+_net_bad_lock = threading.Lock()
 _probe_details = {}   # 每个探针IP的最后探测结果 {ip: {'ok': bool, 'latency': int_or_-1, 'version': 'ipv4'/'ipv6'}}
+
+# 实时健康缓存（每次探测前检查，TTL 秒内不重复扫描）
+_health_cache = {
+    'last_update': 0,
+    'net_bad': False,
+    'fail_rate': 0.0
+}
+_health_cache_lock = threading.Lock()
+HEALTH_CACHE_TTL = 1   # 缓存有效期 1 秒，可调
 
 # 连续失败计数：{(domain, ip): int}
 _consec_fail_count = {}
@@ -3138,6 +3148,70 @@ def _probe_loop():
 
         time.sleep(PROBE_INTERVAL)
 
+
+def _update_health_status():
+    """实时评估整体网络健康状态，更新 _net_bad 和缓存。每次探测前调用，开销极小（TTL 内直接返回）。"""
+    now = time.time()
+    with _health_cache_lock:
+        # 缓存未过期，直接返回缓存的故障状态
+        if now - _health_cache['last_update'] < HEALTH_CACHE_TTL:
+            return _health_cache['net_bad']
+
+        # 重新计算失败率
+        threshold = CONFIG.get('probe_fail_threshold', 30) / 100.0
+        timeout = CONFIG.get('timeout', 5)
+        window_sec = CONFIG.get('check_interval', 30)   # 统计最近一个检测周期内的数据
+
+        total = 0
+        fail = 0
+        with db.lock:
+            for domain, td in db.trackers.items():
+                if td.get('paused'):
+                    continue
+                for ip_obj in td.get('ips', []):
+                    if ip_obj.get('removed') or ip_obj.get('paused'):
+                        continue
+                    total += 1
+                    last_ts_str = ip_obj.get('last_check')
+                    if not last_ts_str:
+                        continue
+                    try:
+                        last_time = datetime.fromisoformat(last_ts_str).timestamp()
+                    except (ValueError, TypeError):
+                        continue
+                    # 只统计最近 window_sec 秒内有过探测的 IP
+                    if now - last_time > window_sec:
+                        continue
+                    if ip_obj.get('status') == 'offline':
+                        fail += 1
+
+        net_bad = False
+        if total >= 5:
+            fail_rate = fail / total
+            net_bad = (fail_rate >= threshold)
+            _health_cache['fail_rate'] = fail_rate
+            # 可选：打印状态变化（避免刷屏）
+            if net_bad != _health_cache.get('net_bad', False):
+                if net_bad:
+                    cprint(f"[实时健康] 网络故障触发：失败率 {fail_rate*100:.1f}% ≥ {threshold*100:.0f}%", 'error')
+                    db.add_log(f"[实时健康] 网络故障触发：失败率 {fail_rate*100:.1f}% ≥ {threshold*100:.0f}%", 'error')
+                else:
+                    cprint(f"[实时健康] 网络恢复：失败率降至 {fail_rate*100:.1f}% < {threshold*100:.0f}%", 'info')
+                    db.add_log(f"[实时健康] 网络恢复：失败率降至 {fail_rate*100:.1f}% < {threshold*100:.0f}%", 'info')
+        else:
+            # 样本不足时，保持之前的 net_bad 状态（不清除）
+            net_bad = _health_cache.get('net_bad', False)
+
+        _health_cache['net_bad'] = net_bad
+        _health_cache['last_update'] = now
+
+        # 同时更新全局 _net_bad（供其他地方使用）
+        with _net_bad_lock:
+            global _net_bad
+            _net_bad = net_bad
+
+        return net_bad
+
 # 立即检测触发器（兼容旧接口，独立线程模式下不再使用，保留以避免其他代码引用报错）
 _check_now = threading.Event()
 
@@ -3165,6 +3239,10 @@ def _ip_ver(ip_str: str) -> str:
 def _get_probe_net_status(ip_str: str):
     """返回 (skip: bool, reason: str)，True=应跳过本次探测（网络异常）"""
     ver = _ip_ver(ip_str)
+    # 1. 实时整体健康检查（基于失败率）
+    if _update_health_status():
+        return True, '全局网络故障（失败率超阈值）'
+    # 2. 原探针检查
     with _probe_lock:
         probe_v4_ok = _probe_ok_v4
         probe_v6_ok = _probe_ok_v6

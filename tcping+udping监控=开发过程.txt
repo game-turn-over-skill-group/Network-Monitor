@@ -15462,6 +15462,364 @@ python
         # ... 原有代码（包括暂停检查、DNS解析等） ...
         stop_event.wait(timeout=dns_interval)
 
+----------------
+Q：
+
+关于海外DNS TCP经常超时 我好像知道原因了 好像是TCP连接DNS 达到10秒对方就会主动断开
+如果刚刚好在这10秒内 比如最后1-2秒 请求 然后数据延迟反馈 刚刚好被断开连接 估计就返回超时了？
+是不是这个原因？
+然后是现在的代码 已经改过很多次了 修复了别的BUG 我发你最新的 你看看
+如果真得是这样 有没有办法 进一步优化和改造这个DNS请求的空间 让他不出现这个timed out？
+2026/5/21 02:29:49[DEBUG] [custom DNS] 2001:4860:4860::8844(TCP) 查询 A tracker.gmi.gd 失败: TimeoutError: timed out
+
+----------------
+A：
+
+你分析的方向很接近，但需要更精确地定位问题。
+你提到的“TCP 连接 10 秒后对方主动断开”现象确实存在：很多公共 DNS（如 Google 8.8.8.8、Cloudflare 1.1.1.1）对空闲的 TCP 连接会主动发送 FIN/RST，回收资源。
+但你的代码中，每次查询前都会执行 _check_alive() 探测连接存活：
+
+若连接已断开（select 可读且 recv 返回空），会立即重建连接，不会复用已死连接。
+
+即便如此，仍出现 TimeoutError: timed out，说明问题不在连接复用，而是 单次查询本身的网络延迟或丢包。
+
+为什么 TCP DNS 查询容易超时？
+TCP 三次握手 + 数据传输 + 四次挥手 比 UDP 多 2~3 个 RTT，在跨国/高延迟网络下更容易超时。
+
+中间防火墙/运营商可能限制或丢包，尤其是向海外 DNS 发起的 TCP 53 流量。
+
+你的 dns_timeout 默认等于探测超时（5 秒），而 _dns_query_timeout() 返回的是 max(0.5, timeout)，即 5 秒。
+5 秒内需要完成：TCP 握手（若重建）→ 发送请求 → 等待响应 → 接收数据。在跨国链路上经常不够。
+
+当前顺序故障转移机制（_resolve_custom 中逐个尝试 DNS 服务器），每个服务器耗时 5 秒，若 2~3 个都超时，总时间会很长，但每次超时仍返回 None 并继续尝试。
+
+如何优化以减少超时？
+
+方案一：缩短 DNS 超时并增加并发查询（推荐）
+将 dns_timeout 设为 2~3 秒，让单次失败更快，并启用多 DNS 并发查询（Racing），取最快结果。
+代码中已经实现了顺序故障转移，你可以改为并发查询：
+在 _resolve_custom 中，对每个记录类型（A/AAAA）同时向所有 DNS 服务器发送请求，取第一个成功的响应。
+这样即使某个服务器慢/超时，也不会阻塞整体。
+修改量较大，但效果最显著。
+
+方案二：切换到 UDP 模式（最快见效）
+将配置 dns_use_tcp 设为 false（你的默认值已经是 false，但可能你不小心改过？）。
+UDP DNS 查询无连接建立开销，单次往返时间短，且国内运营商对 UDP 53 限制比 TCP 宽松得多，超时概率大幅降低。
+这是当前你最应该尝试的。
+
+方案三：增加 DNS 服务器列表并启用负载均衡
+你已设置 dns_lb_enabled: True，且默认 DNS 列表包含 8.8.8.8, 8.8.4.4 等。可以再加入更多稳定且对 TCP 限制较宽的 DNS，例如：
+1.1.1.1 (Cloudflare)
+9.9.9.9 (Quad9)
+208.67.222.222 (OpenDNS)
+
+国内公共 DNS：114.114.114.114, 223.5.5.5（阿里），119.29.29.29（腾讯）
+这样当谷歌 DNS 限流或超时时，可以 fallback 到其他服务器。
+
+方案四：优化长连接的 keepalive 参数
+你已经在 _TcpDnsConn._make_sock 中设置了 TCP keepalive（Linux 下 10 秒空闲探测，5 秒间隔，3 次失败）。
+但 Windows 下仅用 SIO_KEEPALIVE_VALS 设置了 10 秒空闲和 5 秒间隔，对端（谷歌 DNS）可能忽略这些选项。
+可以尝试将空闲时间缩短到 5 秒，但效果有限，因为对端可能强行断开。
+
+方案五：在 _TcpDnsConn 中增加连接前快速健康检查
+当前 _check_alive 使用 select 检测可读/异常，但对端已经 FIN 的情况能正确处理，但对端已经 RST 的情况，某些系统上 select 可能不立即报告异常，导致后续 send 或 recv 时才会出错。
+可以改为发送一个轻量级的探测包（例如一个空的 DNS 查询），但这样会增加额外开销。
+
+针对你日志的具体分析
+[custom DNS] 2001:4860:4860::8844(TCP) 查询 A tracker.gmi.gd 失败: TimeoutError: timed out
+这个目标是 IPv6 DNS 服务器，你的网络可能 IPv6 不稳定，或该服务器响应慢。
+
+建议：优先使用 IPv4 DNS，或为 IPv6 设置更短超时。
+立即可操作的修改（不改动核心逻辑）
+在 Web 配置页面或 config.json 中，将 dns_timeout 改为 2（秒）。
+确认 dns_use_tcp 为 false（除非你明确需要 TCP）。
+
+将 dns_custom 设置为：
+"8.8.8.8, 1.1.1.1, 114.114.114.114, 223.5.5.5"
+这样可以快速 fallback。
+重启服务。
+
+如果需要更激进的改造（并发查询）
+我可以提供一个修改后的 _resolve_custom 函数，使用 concurrent.futures.ThreadPoolExecutor 并发查询所有 DNS 服务器，取最快结果。
+这样即使某个服务器超时，只要有一个返回，整体延迟就是最快那个的响应时间，大大降低超时概率。
+需要的话请告知，我会给出完整代码。
+
+总之，当前最有效的临时措施是关闭 TCP 并缩短超时。尝试后再观察日志，应该能显著减少
+
+----------------
+Q：
+
+C:\Users\Administrator\Desktop>nslookup t.overflow.biz 8.8.8.8
+服务器:  dns.google
+Address:  8.8.8.8
+
+DNS request timed out.
+    timeout was 2 seconds.
+非权威应答:
+名称:    trkr.duckdns.org
+Address:  189.18.162.12
+Aliases:  t.overflow.biz
+
+
+C:\Users\Administrator\Desktop>nslookup t.overflow.biz 8.8.4.4
+服务器:  dns.google
+Address:  8.8.4.4
+
+非权威应答:
+名称:    trkr.duckdns.org
+Address:  189.18.162.12
+Aliases:  t.overflow.biz
+
+我现在在配置中 设置了 等3秒超时了 是不是等的时间太短了。。？
+如果不改的话 默认是5秒来着。。这是使用UDP查询的结果 UDP老实说丢包更严重
+不然我也不会选择TCP了。。
+
+----------------
+A：
+
+你的 nslookup 测试揭示了一个关键问题：向 8.8.8.8 查询超时，而向 8.8.4.4 正常。
+这说明并不是你的网络普遍差，而是 8.8.8.8 这个特定服务器对你的 IP 或网络路径存在响应延迟或丢包。
+而 8.8.4.4 工作正常，因此合理设置超时（2~3 秒）是可行的，因为你总可以切换到能正常响应的服务器。
+
+为什么 UDP 丢包严重，TCP 也超时？
+UDP 丢包：国内运营商对跨境 UDP 53 经常限速或丢包，这是现实。
+
+TCP 超时：TCP 虽然抗丢包（重传），但 TCP 连接建立本身就需要 1.5 个 RTT，再加上请求/响应时间。
+如果 8.8.8.8 对你的网络路径延迟本身就高（例如 300ms），三次握手 + 请求 + 响应可能需要 1-2 秒。再加上丢包重传，3 秒内完不成就会超时。
+
+你设置的 3 秒超时，对于某些高延迟或丢包路径可能偏紧，但这是合理的，因为过长超时会导致整体探测周期拖慢。更关键的策略是 快速失败并切换 DNS 服务器。
+
+你的代码已经具备快速故障转移
+在 _resolve_custom 中，你逐个尝试 DNS 服务器，每个超时后立即换下一个。只要列表中有一个能正常响应，最终就能成功。
+你看到向 8.8.4.4 查询成功，说明故障转移机制有效。
+你可以通过配置调整 DNS 顺序，将 8.8.4.4 或 1.1.1.1 放在前面，以减少超时等待。
+
+针对你的情况，最佳实践建议
+不要完全放弃 UDP
+虽然 UDP 有丢包，但在某些网络上 UDP 仍然比 TCP 快（因为无连接）。
+建议保留 dns_use_tcp: false，但增加 DNS 服务器数量，包括响应快的国内公共 DNS（如 114.114.114.114）。国内 DNS 对 UDP 限制宽松，延迟低。
+
+调整超时时间到 3 秒
+你设置的 3 秒是合适的。如果担心 8.8.8.8 特别慢，可以将 dns_timeout 设为 3 秒，同时将 8.8.8.8 放在列表末尾，或者直接移除它。
+示例配置：
+json
+"dns_custom": "114.114.114.114, 223.5.5.5, 1.1.1.1, 8.8.4.4, 8.8.8.8"
+"dns_timeout": 3
+"dns_use_tcp": false
+启用 TCP 降级（可选）
+如果你想在某些域名解析时尝试 TCP，可以保留 dns_use_tcp: false，但在 _resolve_custom 中实现 UDP 失败后自动尝试 TCP 的 fallback（目前你的代码中没有，只有全局开关）。
+不过鉴于 UDP 已经严重丢包，你可以先试试把国内的 UDP DNS 放前面，看能否改善。
+
+关于 TCP 连接空闲断开的问题
+你之前提到的“10 秒后断开”是正常的，但不会导致超时，因为 _check_alive() 会检测到连接失效并重建。
+你看到的超时更多是网络层面（如丢包、对端无响应）造成的，而不是连接被断开。
+
+最终建议：切换到国内 DNS 为首选
+你的目标是解析 tracker 域名，这些域名很多在国内也有解析，国内 DNS（114、阿里、腾讯）不仅速度快，而且对 UDP 限制小。你可以把 dns_custom 改为：
+text
+114.114.114.114, 223.5.5.5, 119.29.29.29, 1.1.1.1, 8.8.4.4
+并保持 dns_use_tcp: false，超时 3 秒。这样大部分查询会在国内 DNS 快速完成，少数不存在的域名再 fallback 到国外 DNS。
+
+总结
+3 秒超时并不短，关键在于 DNS 服务器的选择和顺序。
+UDP 丢包虽然存在，但国内公共 DNS 的 UDP 服务质量远好于谷歌 DNS。
+TCP 并不比 UDP 更可靠，只是抗丢包，但高延迟下依然容易超时。
+你现有的代码没有问题，需要优化的是 DNS 服务器列表和顺序。
+如果想彻底避免超时，可以考虑在 _resolve_custom 中实现 并发查询（同时向所有 DNS 发请求，取最快返回），但修改较复杂，且可能增加临时端口压力。
+当前配置下，将快速 DNS 放在前面已经足够。
+建议你按上述调整 DNS 列表，观察日志中超时是否明显减少。
+
+----------------
+Q：
+
+关于你说的 方案4
+方案四：优化长连接的 keepalive 参数
+你已经在 _TcpDnsConn._make_sock 中设置了 TCP keepalive（Linux 下 10 秒空闲探测，5 秒间隔，3 次失败）。
+但 Windows 下仅用 SIO_KEEPALIVE_VALS 设置了 10 秒空闲和 5 秒间隔，对端（谷歌 DNS）可能忽略这些选项。
+可以尝试将空闲时间缩短到 5 秒，但效果有限，因为对端可能强行断开。
+我觉得 好像是 谷歌或者运营商限制 最早之前 好像TCP超时还不会这么厉害的。。
+国内的 倒是不怎么断开 不会10秒就断开 所以 windows的 keepalive保持 应该是有效的？
+只是国外对windows下的保持 不起作用？还是运营商那边 会主动断开我的DNS连接？
+我觉得 总有一边的问题 我更偏向 相信是运营商的行为。。或者BARS那边？
+还有 不止是IPV6 DNS这样 是所有的IPV4+IPV6的谷歌DNS都这样 TCP的
+对所有DNS并发查询 就别搞了 以前我弄过。。那样请求更厉害 怕被限制
+所以我现在采用的是 启用负载均衡+失败轮询
+我之前 怀疑的是那个DNS 权重 导致的，我让你给权重加开关 你把负载均衡也并入在内了
+就很尴尬 你知道吗。。权重是故障的会少请求 所以我怀疑是权重 导致的。。请求都集中到个别的去了
+现在的 负载均衡和权重 开关是一起的 实际上我需要默认启用负载均衡 权重需要开关。。
+我现在的运营商网络是电信的 虽然优化了CF 1.1.1.1的DNS的线路 可是问题是 谷歌才有 实时更新立即刷新。。CF DNS都没这个效率。。我要的是无缓存+立即+根据请求IP返回最近地区节点
+这些服务 恰好是谷歌DNS的优势。。CF和运营商DNS都没这个优势。。
+
+----------------
+A：
+
+你的分析非常精准，我完全理解你的困境：
+你需要谷歌 DNS 的 EDNS Client Subnet 和实时更新（国内 DNS 和 CF 都不具备）
+但电信到谷歌 DNS 的 TCP 53 频繁超时，而 UDP 虽然丢包但可能更快失败
+你怀疑是权重/负载均衡导致请求不均衡，并且希望将“健康度排序”与“轮询”分离
+下面我逐一回答你的问题，并给出可落地的修改方案。
+
+1. 为什么 keepalive 对谷歌 DNS 无效？
+你设置的 SIO_KEEPALIVE_VALS（空闲 10 秒，间隔 5 秒）只控制本机发送探测包的频率。
+谷歌 DNS 服务器完全可以忽略这些探测包，甚至主动发送 FIN/RST 来关闭长时间空闲的连接。
+你观察到 国内 DNS 不断开，是因为它们可能不对空闲 TCP 连接做强制回收。
+谷歌 DNS 为了资源回收，空闲 10 秒左右就会主动断开，这是服务端策略，与本机 keepalive 无关。
+
+所以无论你设置 5 秒还是 10 秒，都无法阻止对端主动断开。
+
+2. 运营商（电信）是否会主动干扰？
+有可能。电信对跨境 53 端口的 TCP 流量可能会进行 DPI 识别和限速，尤其是在高并发下。
+但你的 TimeoutError 更多是 网络丢包或对端无响应（如果是运营商 RST，你会收到 ConnectionResetError）。
+你可以用 tcping 或 telnet 8.8.8.8 53 持续测试，观察是超时还是拒绝。
+我倾向认为：谷歌 DNS 对 TCP 53 的并发连接数和空闲时间有严格限制，你的多线程并发 TCP 查询触发了限流，导致部分连接被静默丢弃（超时）。
+
+3. 负载均衡与权重分离（重要修正）
+你之前的代码中，dns_lb_enabled 同时控制了 健康度排序 和 RR 轮询。你希望的是：
+默认启用负载均衡（RR 轮询） 以分散请求
+健康度排序可单独开关（即根据失败次数调整优先级）
+
+当前逻辑回顾
+python
+def _dns_custom_try_order(servers):
+    if not CONFIG.get('dns_lb_enabled', False):
+        return list(range(count))        # 完全按配置顺序，无 RR，无健康度
+    # 下面走健康度排序 + RR
+你希望的行为：
+当 dns_lb_enabled=True：启用 RR 轮询，但健康度排序可选
+
+新增 dns_health_sort_enabled：决定是否按失败次数排序
+
+修改建议（最小改动）
+在 DEFAULT_CONFIG 中添加：
+python
+'dns_health_sort_enabled': True,   # 是否启用健康度排序（失败多的排后面）
+
+修改 _dns_custom_try_order：
+python
+def _dns_custom_try_order(servers):
+    count = len(servers)
+    if count <= 0:
+        return []
+    # 如果负载均衡关闭，完全顺序（无 RR，无健康度）
+    if not CONFIG.get('dns_lb_enabled', False):
+        return list(range(count))
+    
+    # 负载均衡开启：先决定顺序
+    if CONFIG.get('dns_health_sort_enabled', True):
+        # 健康度排序：失败冷却的排后面
+        now = time.time()
+        with _dns_srv_stats_lock:
+            indices = sorted(range(count), key=lambda i: (
+                1 if now < _dns_srv_stats.get((servers[i][0], servers[i][1]), {}).get('cool_until', 0) else 0,
+                _dns_srv_stats.get((servers[i][0], servers[i][1]), {}).get('fail_s', 0),
+                i
+            ))
+    else:
+        # 不健康度排序，仅按配置顺序（但后续会 RR 旋转）
+        indices = list(range(count))
+    # RR 旋转（无论是否排序都做）
+    start = _dns_rr_next(len(indices))
+    return [indices[(start + j) % len(indices)] for j in range(len(indices))]
+
+这样：
+dns_lb_enabled=False → 完全按配置顺序，无轮询，无健康度
+dns_lb_enabled=True, dns_health_sort_enabled=True → 健康度排序 + RR
+dns_lb_enabled=True, dns_health_sort_enabled=False → 仅 RR（顺序不变但轮询）
+
+4. 针对谷歌 DNS 超时的终极优化（不改并发查询）
+既然你需要谷歌的 ECS 能力，又不能放弃 TCP，可以尝试以下组合拳：
+
+(1) 为谷歌 DNS 单独延长超时
+在 _query_single_server 中，对谷歌 DNS（IP 以 8.8 或 2001:4860 开头）动态增加超时时间，例如：
+python
+timeout = _dns_query_timeout()
+if srv_ip.startswith('8.8') or srv_ip.startswith('2001:4860'):
+    timeout = max(timeout, 5.0)   # 给谷歌 DNS 至少 5 秒
+(2) 限制 TCP DNS 的总并发数
+在 _resolve_custom 外层加一个全局 Semaphore，限制同时进行的 TCP 查询数量（例如 5 个），避免瞬间大量连接触发限流。
+这一步改动稍大，但可以有效减少超时。
+(3) 对谷歌 DNS 强制使用 UDP 并重试
+在 _query_single_server 中，针对谷歌 DNS 的 UDP 路径增加一次重试（如果超时或丢包，立刻重发一次），因为 UDP 超时后重试成功率较高。
+
+5. 总结建议
+策略	可行性	效果	工作量
+拆分为两个开关（健康度排序单独控制）	高	解决你的负载均衡疑虑	小（修改 _dns_custom_try_order）
+为谷歌 DNS 单独延长超时	高	减少超时误判	极小
+限制 TCP DNS 并发数	中	降低限流概率	中
+对谷歌 DNS 使用 UDP + 重试	高	可能解决超时根本问题	小（修改 _query_single_server）
+我强烈建议你先尝试方案 1（拆分开关）+ 方案 4（UDP + 重试），因为：
+
+UDP 对谷歌 DNS 通常限流更宽松，且无连接建立延迟。
+加上一次重试后，丢包时能迅速恢复。
+保留 TCP 作为 fallback（例如 UDP 连续失败 2 次后再切 TCP）。
+如果你愿意，我可以为你写出 针对谷歌 DNS 自动降级为 UDP 并重试 的完整代码片段，这样你既能享受 ECS 的益处，又能减少超时。
+请告诉我是否需要我提供上述修改的具体代码（包括拆分开关、UDP 重试等）。
+
+----------------
+Q：
+
+我们现在的APP代码 对DNS都做了负载均衡 错开请求了 而且连接实现了公用复用同一个TCP连接
+在这样多种优化的前提下 还有你说的 多线程查询 触发限流的可能吗？
+我记得代码是有优化 请求频率和间隔的呀？都2分钟一次 缓慢的负载均衡请求啦。。
+GitHub上 就没有国内使用谷歌 不丢包的例子吗？HTTPS的443端口 基本不用试了 运营商阻断了 tcping都不通。。
+
+----------------
+A：
+
+关于电信连接谷歌 DNS（8.8.8.8/8.8.4.4）的 TCP 53 端口频繁出现连接超时，你的分析基本准确。
+这的确不是单纯的性能问题，而是 运营商（电信）的阻断与谷歌的限流策略共同作用下的综合困境。
+
+🚧 1. 运营商阻断与限流：根本症结所在
+运营商对 DNS 的“习惯性”管控
+正如你所体会到的，国内运营商对 DNS 实施高层策略管控并非个例。这是一种常规的网络安全防御手段。
+因此，你听到的“某某运营商在某某地区对海外 DNS 的 53 端口做手脚”，以及看到的一些 TCP RST 报文，并非空穴来风。
+
+谷歌的 TCP 53 限流机制
+即使运营商未做阻断，谷歌为了保障服务稳定性，也对其公共 DNS 设置了严格的速率限制：
+限制指标：系统会监控每个源IP地址的 QPS (每秒查询数)。
+默认阈值：限制阈值为 1500 QPS。
+QPS 计算规则：这一指标是基于 1-2 秒内的平均查询量 计算的，这意味着瞬间的高并发请求依然可能触发限流。
+
+📊 2. 已做优化，为何超时依然频发？
+你的理解是，既然连接已复用（类似于长连接），且频率已降至每2分钟一次，就不应触发限流。逻辑上没错，但实际情况更为复杂：
+
+微观突发流量：即使宏观上 2 分钟才启动一轮请求，但在同一轮请求中，所有域名仍是“同时”发起 DNS 查询的。
+这些请求在同一秒内涌向对端，就会在微观层面形成流量尖刺。
+以你的 77 个域名为例，50 QPS 的瞬间并发（77个域名 * 平均2个IP/域名 ≈ 150个请求）远低于 1500 QPS，理论上是安全的。
+但若所有请求集中在极短时间内（如毫秒级）撞向单个 TCP 连接，其统计波动可能触发谷歌基于“短时平均”的防御机制，从而导致部分请求被丢弃，表现为超时。
+
+运营商干扰：前面提到的运营商 DPI 系统也会介入。
+当它识别到单个 TCP 连接上出现“短时高并发”的 DNS 流量（特别是对海外 IP 的 DNS 查询），可能会被判定为异常行为而主动干预。
+它干预的最狠一招，就是直接向你的服务器发送 TCP RESET (RST) 数据包来强行切断连接。
+因此，所谓的“连接复用”与“低频率”，在特定的网络审查策略和谷歌的微观限流机制面前，只能缓解问题，却难以根除。
+
+📡 3. 关于 DNS over HTTPS (DoH) 443 端口
+你猜的没错，443 端口这条路也已基本被阻断：
+域名方式阻断：目前国内已大面积屏蔽以域名形式访问的海外 DoH 服务。
+IP 方式风险：虽然部分服务通过直接使用 IP 地址可能尚可访问，但这并非长久之计，随时可能被切断。
+
+🌏 4. 国内使用谷歌 DNS 的真实体验与替代方案
+你的情况并非个例，电信用户使用谷歌 DNS 时出现丢包、高延迟是普遍现象。
+高丢包率：根据实测，在部分地区，谷歌 DNS 的丢包率甚至可高达 15%。
+延迟显著：平均延迟通常超过 50ms。
+
+如何在保留谷歌 DNS 优势的同时降级超时风险？
+你选用谷歌 DNS，看重的是它的 EDNS Client Subnet (ECS) 功能，即能根据用户真实 IP 返回最近的 CDN 节点，避免 CDN 重定向。
+为了降级超时风险，同时保留这一优势，你可以采取以下策略：
+
+目标	推荐做法	理由
+防御运营商RST	在代码中加强异常处理，当检测到 ConnectionResetError 时，立即切换 DNS 服务器并重试。	主动规避因运营商发送 RST 报文导致的连接失效。
+优化查询流程	* 将 “健康度排序”（权重）与“轮询”（负载均衡）进行解耦。	这样既可优先使用响应迅速的 DNS，又能避免长期冷落备用 DNS，保持其连接活跃，并分散请求压力。
+* 为谷歌 DNS 单独设置一个略长的超时时间（如 5-7 秒）。	在部分请求跨境时，给予链路充分的时间，避免因跨境延迟而超时。
+规避运营商TCP干扰	针对谷歌 DNS 的特定 IP，强制使用 UDP 协议进行查询。	UDP 查询的开销更小，且由于历史原因，运营商对 UDP 53 端口的干扰程度通常低于 TCP。这是现阶段最有效的规避手段之一。
+配置冗余（高可靠）	添加一个性能稳定的国内公共 DNS（如 114.114.114.114）作为备用。	114DNS 等国内服务在国内有节点优化，延迟极低（约20-30ms），可作为最后的保底策略。
+终极降级方案（高可用）	如果经过以上优化，超时问题依然无法解决，可考虑部署 dnsproxy 等工具，通过代理完成海外 DNS 查询。	此方案可彻底绕过运营商的本地限制，但需要额外的服务器资源，适合对 DNS 解析稳定性要求极高的场景。
+
+💎 总结
+针对你当前的困境，最务实的短期策略是：针对 8.8.8.8 强制使用 UDP 查询，并配置一个国内 DNS 作为可靠的备用方案。
+此操作能最大化保留谷歌 DNS 的优势，同时有效规避运营商的 TCP 干扰。
+长远来看，在代码层面解耦并优化负载均衡逻辑，将是从根本上提升系统健壮性的最佳选择。
+
 
 --------------------------------------
 
@@ -17305,9 +17663,450 @@ text
 --------------------------------------
 
 
+//修复新增tracker监控列表默认排序失效问题
+
+我找到BUG了 原因是新添加的tracker不会按照 默认可用率排序 而是按照 名称排序……修复一下这个问题
+我提供的这2张截图 已经能说明一切了 看看问题出在哪？
+
+----------------
+[Claude]
+
+看截图，问题很明显了：
+
+截图1：anime-tracker.aruku.kro.kr（91.3%）排在 archive.torrentonline.cc（93.9%）和 admin.52ywp.com（98.3%）之间——91% 夹在 94% 和 98% 中间，完全乱序
+截图2：tracker.aruku.ovh（55%）排在 tracker1.itzmx.com（100%）之后——55% 紧跟 100% 后面，没有按可用率降序
+
+这是按字母顺序的结果：anime- 在 archive- 前面，admin 在 archive 和 anime 之间，tracker.aruku 在 tracker1 后面（因为 . < 1 in ASCII）。
+根本原因就是前端 filteredTrackers 先按字母维持 API 顺序，sortedTrackers 里排序用了 Object.entries(base) 但 base 本身是个对象——等等，让我直接看代码：Viewed 2 files, ran a commandViewed 2 files, ran a command找到了！ 排序逻辑本身没问题，但看第 3619 行：
+jsif (!k || dir === 0) return 0;
+当 dir === 0 时，所有比较都返回 0，保持原始顺序（即 API 返回的字母序）。而 cycleSort 里 uptime 的循环是 [1,2,3,4,0]，当用户点了几次后 dir 变成 0，就等于"不排序"了——但问题不在这里。
+让我看 cycleSort 和初始化：View cycleSort and sortKey/sortDir initializationView cycleSort and sortKey/sortDir initialization找到根本原因了！
+jsconst sortKey = ref('uptime');
+const sortDir = ref(1);
+初始值设置了，然后看排序函数里：
+jsconst utimeDiff = dir === 1 ? ub - ua : ua - ub;
+dir=1 → ub - ua（这里 a 是第一个参数，b 是第二个）。
+sort(compareFn(a,b)) 返回正数 → b 排在 a 前面，返回负数 → a 排在 b 前面。
+当 ua=91.3（anime-tracker），ub=93.9（archive）：ub - ua = 2.6 > 0 → b(archive) 排在 a(anime-tracker) 前面 ✓
+但截图1里 anime-tracker(91.3%) 排在 archive(93.9%) 前面，说明比较结果是相反的——dir 实际上不是 1！
+cycleSort 里 uptime 的序列是 [1, 2, 3, 4, 0]。排序函数只处理了 dir===1（降序）和其他情况（升序），但 dir=2,3,4 时全走 ua - ub（升序）！
+所以当 dir=2 时：ua - ub = 91.3 - 93.9 = -2.6 < 0 → a(anime-tracker) 排在 b(archive) 前面 → 低可用率在前，看起来就像"按字母顺序"（因为低可用率的 tracker 恰好字母排前面）。
+但等等，默认 dir=1，为什么会变成 2 或别的值？
+看升降序按钮：
+js@click="sortDir = sortDir===1 ? -1 : sortDir===-1 ? 0 : 1"
+这个按钮在 sortDir=1 时会设为 -1，不会设成 2。
+那 dir 是怎么变成 2/3/4 的？必须是用户点了"可用率"列头按钮（触发 cycleSort）。
+但这是首次打开页面的默认状态——除非有 localStorage 或 URL 参数保存了之前的排序状态！
+让我查：Ran 3 commands, viewed 2 filesRan 3 commands, viewed 2 files初始化和数据加载都看起来正常。让我看看用于触发 uptime 排序的按钮/列头点击是否有问题，以及 API 数据加载后是否有地方重置了 sortDir：Ran 2 commandsRan 2 commands找到了！ 第 2046 行：
+html<select v-model="sortKey" ...>
+sortKey 被绑定到一个 <select> 下拉菜单！ 当用户在下拉里选择 "可用率"（uptime），Vue 会通过 v-model 直接设置 sortKey.value = 'uptime'——但不会重置 sortDir！
+所以如果用户之前操作过（比如点了几次"可用率"按钮让 sortDir 变成了 2），再通过下拉重选"可用率"，sortDir 还是 2（升序），不会重置回 1（降序）。
+但更关键的问题是：cycleSort 函数里 dir=2,3,4 时，排序函数走的是 ua - ub（升序），这根本不是"在线优先"或"离线优先"，而是普通升序——低可用率在前！
+现在看截图1，anime-tracker(91.3%) 排在 archive(93.9%) 和 admin(98.3%) 中间，这正好是升序（低→高）顺序……
+但截图2，tracker.aruku.ovh(55%) 排在 tracker1.itzmx.com(100%) 后面。这不是升序也不是降序……
+等等！截图2里列头显示的是 [7D]（7天维度），而截图1是默认维度。让我仔细看截图2：tracker1.itzmx.com(100%, 10/10 IP)，tracker.aruku.ovh(55%, 1/1 IP)，tr.nyacat.pw(100%, 4/4 IP)。
+如果按降序（100→55→100），55% 怎么会夹在两个 100% 中间？这跟上一批截图一样的问题。
+这不是升序/降序逻辑的问题，而是 IP 数量次排序的问题！
+当 tracker1(100%, 10IP) vs tr.nyacat.pw(100%, 4IP)：uptime 相同，次排序 ipCntB - ipCntA = 4 - 10 = -6 < 0，tracker1 排前 ✓
+当 tracker.aruku.ovh(55%) vs tracker1(100%)：uptime 差 45%，理应 tracker1 排前。但截图显示 aruku 在 tracker1 后面……
+这说明 tracker.aruku.ovh 的 uptime_24h 在前端计算出来不是 55%，而可能是比 tracker1(100%) 还大的值？
+不可能。55% < 100%。
+等等！截图2里是按 7D 期间的可用率排序吗？还是 24H？ 列头显示 [7D]，所以 cfg.tracker_stat_period = '7d'，uptimeFn 里用的是 uptime_7d 字段。如果 tracker.aruku.ovh 的 uptime_7d 是 null（刚加入不久，7天数据不足），uv(null) = -1，就会排到末尾。但它显示 55%……
+55% 是 ip_uptime 字段（当前配置周期的 IP 级显示），而 uptime_7d 可能是 null！
+让我验证这个核心假设：Ran a command, viewed a fileRan a command, viewed a file后端对每个 tracker 都会计算 uptime_24h、uptime_7d、uptime_30d 三个字段，所以 API 应该都有值（如果有历史数据）。
+但 tracker.aruku.ovh 的添加时间是 2026/05/18 23:00:41（截图2），非常新，只有约 16 分钟的历史数据。uptime_7d 会算 7天内的数据，只有 16 分钟的数据，可能只有很少的检测点（几个）。
+后端：uptime_val = round(s['ok'] / s['total'] * 100, 1) if s['total'] > 0 else None
+如果 tracker.aruku.ovh 在 7 天内有数据（哪怕只有几条），就会计算出一个值。55% 就是这个值。
+那排序怎么会让它排到 tracker1(100%) 后面？
+让我再仔细看截图2：tracker1.itzmx.com 后面是 tracker.aruku.ovh，再后面是 tr.nyacat.pw。
+如果按降序（100%, 55%, 100%），这明显不对。但我们用 Node.js 验证过排序是正确的……
+唯一的解释：前端数据里 tracker.aruku.ovh 的 uptime_7d 实际是 null，但 ip_uptime 字段（用于显示的 55%）是有值的。
+前端显示用 uptime(tr) 函数，它用 uptime_7d（当 cfg.period='7d' 时）。如果 uptime_7d = null，fallback 到 IP 级 ip['uptime_7d']。ip['uptime_7d'] 不等于 ip['ip_uptime']！
+ip_uptime 是后端按当前配置周期赋值的：ip_copy['ip_uptime'] = ip_copy.get(f'uptime_{period}')。当 period='7d' 时，ip_uptime = uptime_7d。所以应该是同一个值。
+那我再检查一下前端显示函数用的是哪个字段：Viewed 2 files, ran a commandViewed 2 files, ran a command两个函数（显示和排序）逻辑完全一致，都用 uptime_7d，且都有 fallback。
+
+我现在必须换一个完全不同的角度看。 让我直接用截图2的实际场景跑模拟：Ran 2 commandsRan 2 commands破案了！
+截图2的显示顺序（tracker1 → aruku(55%) → nyacat）就是原始插入顺序，说明 sort 比较函数全部返回了 0！
+这只有一种情况：!k || dir === 0——即 sortKey=null 或 sortDir=0。
+cycleSort 的 uptime 序列是 [1,2,3,4,0]，点第 5 次时 sortDir=0，然后 sortKey=null。之后数据刷新，sortedTrackers 重新计算，但 sortKey=null，所有比较返回 0，保持 API 的字母序！
+现在再验证截图1（anime-tracker 91.3% 夹在 93.9% 和 98.3% 中间）：这也是按插入顺序（字母序），因为后端 data.json 就是按字母序保存的。
+根本 bug 就在这里：sortDir 和 sortKey 是全局状态，cycleSort 的五态循环会让 sortDir=0 进而 sortKey=null，之后任何数据刷新都不会重置它们回默认的 uptime 降序。用户以为一直在"可用率"排序，实际已经变成了无排序（字母序）。
+而且截图显示用户根本没有点过排序按钮（右上角"可用率"按钮圈出表示这是默认状态），说明页面初始化后 sortDir 就不是 1——或者有其他地方把它改成了非 1 的值。
+让我检查是否有地方在 trackers 数据加载后改变了 sortDir：
+
+----------------
+Q：
+
+然后上面是我找Claude 让他修复 他还在思考 还没分析完 token就不够了 给你做参考分析
+
+----------------
+A：[deepseek]（改了半天=无效）
+
+好的，我明白问题所在了。根据你的截图和Claude的分析，根本原因是：
+排序状态 sortKey 和 sortDir 在某些操作下（比如点击列头多次）会进入 sortKey = null 或 sortDir = 0 的状态，此时排序函数直接返回 0（保持原始顺序）。
+原始顺序是 API 返回的 按域名 key 字母序（因为后端 data.json 的对象 key 默认是插入顺序，但实际 HTTP 传输时按对象属性遍历顺序，
+在新版 Python 中会按插入顺序，但新添加的域名会排在末尾，从而表现出“按名称排序”的假象）。
+新添加的 tracker 在 trackers 对象中属于新 key，当排序无效时，它就被放在最后（或插入顺序中），看起来像按字母序排在中间（比如 anime-tracker 在 archive 前面是因为字母序）。
+解决方案：在数据加载后强制恢复默认排序（可用率降序），同时在 sortedTrackers 中增加后备排序逻辑。
+
+修改 index.html（两个地方）
+修改点 1：在 loadTrackers 函数末尾强制恢复默认排序
+找到 const loadTrackers = async () => { ... } 函数，在 trackers.value = ... 之后添加代码：
+
+修改前：
+javascript
+const loadTrackers = async () => {
+    try {
+        trackers.value = (await axios.get('/api/datas')).data;
+    } catch(e){}
+};
+修改后：
+javascript
+const loadTrackers = async () => {
+    try {
+        trackers.value = (await axios.get('/api/datas')).data;
+        // 修复：如果当前没有有效排序（无字段或方向为0），恢复默认排序（可用率降序）
+        if (!sortKey.value || sortDir.value === 0) {
+            sortKey.value = 'uptime';
+            sortDir.value = 1;
+        }
+    } catch(e){}
+};
+
+修改点 2：简化 cycleSort 中对 uptime 的循环（可选，但推荐）
+找到 cycleSort 函数，将其中的 uptime 分支改为三态（降序、升序、无排序），避免出现无意义的 2,3,4 状态。
+原代码：
+javascript
+if (key === 'uptime') {
+    // 1(▲高→低)→2(▼低→高)→3(●绿:在线优先)→4(●红:离线优先)→0(还原)
+    const seq = [1,2,3,4,0]; const i = seq.indexOf(sortDir.value);
+    sortDir.value = seq[(i+1) % seq.length];
+}
+修改为：
+javascript
+if (key === 'uptime') {
+    // 三态循环：1(降序) → -1(升序) → 0(取消排序) → 1
+    if (sortDir.value === 1) sortDir.value = -1;
+    else if (sortDir.value === -1) sortDir.value = 0;
+    else sortDir.value = 1;
+}
+
+同时，在 sortedTrackers 的比较函数中，对于 uptime 分支，目前只处理了 dir === 1 和 else（升序），现在 dir 可能为 -1，需要统一处理。
+不过你的代码中 dir 是从 sortDir.value 直接取的，而 sortDir 的值现在是 1, -1, 0，所以需要修改比较逻辑中的 dir 使用方式。
+建议一并修改：在 sortedTrackers 的 uptime 分支中，将原来的：
+javascript
+const utimeDiff = dir === 1 ? ub - ua : ua - ub;
+改为：
+javascript
+const utimeDiff = dir === 1 ? ub - ua : (dir === -1 ? ua - ub : 0);
+if (utimeDiff !== 0) return utimeDiff;
+这样当 dir = -1 时升序，dir = 0 时保持原顺序（但 dir = 0 的情况已被 loadTrackers 中的恢复逻辑覆盖，可省略）。
+
+总结：
+核心修复：每次刷新数据后，如果排序状态无效，则恢复为“可用率降序”。
+辅助优化：简化排序方向循环，避免无效状态。
+请按照上述方法修改你的 index.html 文件，然后重启后端（无需重启，只是前端文件更新），强制刷新浏览器（Ctrl+F5）测试。新添加的 tracker 应该会正确出现在可用率降序的位置。
 
 
+--------------------------------------
 
+
+//修复网络故障全局检测
+
+看看网络故障检测 是不是坏了？我的DNS查询都提示10051套字节失败了 所有tcping也提示超时了
+但是就是没有收到 探针的网络异常提示。。因为现在的网络探针是固定连接发包了 难道和这个有关？
+还是说 现在的网络故障检测 不记录日志和暂停 已经失效了？看看代码是为什么？已经发生不止一次了
+特别是IPV6网络故障 它检测不出来 也不会暂停 每次坏了我都要修复不准的超时数据库 改半天。。
+（app - 204）是旧版本的代码 你看看和改成独立线程探测 有关系吗？旧版本是周期性探测
+当时故障的时候 我登录web查看 只有1个谷歌的IPV6 DNS探针提示超时 别的还都正常 这就离谱。。
+而且 我现在的配置设置是 本轮故障总失败概 达到30%就触发网络故障+网络探针超时是3秒 为什么2个检测都没生效？
+
+下面是故障的时候部分web错误日志：
+2026/5/21 02:40:54[ERROR] ✗ HTTPS://tracker.nekomi.cn:443 (2606:4700:3037::6815:155a) 离线 | 网络错误: [WinError 10051] 向一个无法连接的网络尝试了一个套接字操作。
+2026/5/21 02:40:54[ERROR] ✗ HTTPS://tr.nyacat.pw:443 (2606:4700:3037::6815:29bc) 离线 | 网络错误: [WinError 10051] 向一个无法连接的网络尝试了一个套接字操作。
+2026/5/21 02:29:49[DEBUG] [custom DNS] 2001:4860:4860::8888(TCP) 查询 A tracker.gmi.gd 失败: OSError: [WinError 10051] 向一个无法连接的网络尝试了一个套接字操作。
+2026/5/21 02:29:49[DEBUG] [custom DNS] 2001:4860:4860::8844(TCP) 查询 A tracker.gmi.gd 失败: TimeoutError: timed out
+2026/5/21 02:29:48[DEBUG] [custom DNS] 2001:4860:4860::8888(TCP) 查询 A tracker.nekomi.cn 失败: OSError: [WinError 10051] 向一个无法连接的网络尝试了一个套接字操作。
+2026/5/21 02:29:45[DEBUG] [custom DNS] 2001:4860:4860::8888(TCP) 查询 A tracker.breizh.pm 失败: OSError: [WinError 10051] 向一个无法连接的网络尝试了一个套接字操作。
+
+----------------
+
+问题分析：网络故障检测失效
+根据您提供的代码和故障现象（WinError 10051，所有 IPv6 tracker 超时，但探针面板显示 IPv6 正常，且没有触发网络异常告警），问题出在 新版独立线程监控架构移除了全局失败率检测，且探针判断逻辑过于乐观。
+
+1. 新版监控架构（app.py）vs 旧版（app - 204）
+特性	旧版（周期轮询）	新版（独立线程）
+每轮探测结果聚合	✅ monitor_loop 收集本轮所有结果，计算失败率，超过阈值则丢弃本轮历史并告警	❌ 每个 IP 独立探测，不聚合，失败率阈值形同虚设
+网络故障判断	探针状态 + 失败率双重保障	仅依赖探针状态（_probe_ok_v4 / _probe_ok_v6）
+自动暂停机制	✅ 有（auto_pause_enabled + 连续失败计数）	✅ 保留了 IP 级连续失败计数，但前提是探针必须判定网络可达
+日志记录	网络故障恢复/恶化时有明确日志	仅在探针状态变化时打日志
+2. 为什么故障时探针仍显示 IPv6 正常？
+您配置的 IPv6 探针列表：
+python
+'probe_ipv6_targets': [
+    '2001:4860:4860::8888',   # Google DNS
+    '2606:4700:4700::1111',   # Cloudflare DNS
+    '2400:3200:baba::1',      # 阿里 DNS
+]
+故障发生时：
+访问海外 IPv6（Google/Cloudflare）出现 WinError 10051 → 套接字操作无法连接到网络，说明 海外 IPv6 路由中断。
+但阿里 DNS 2400:3200:baba::1 是国内节点，可能仍可达。
+_probe_loop 中只要 任一 探针成功，就判定 IPv6 正常（v6_reachable = True）。
+因此探针给出“IPv6 正常”的假象，而您所有 tracker 的 IPv6 地址大部分位于海外，全部超时。
+
+3. 为什么您设置的 30% 失败率阈值没有生效？
+新版 app.py 中根本没有实现失败率聚合。检查 monitor_loop 函数（约第 1800 行附近）：
+python
+def monitor_loop():
+    """监控管理线程：定期检查死线程并重启，启动所有独立监控线程，不再做轮询探测。"""
+    db.add_log("监控服务启动（独立线程模式）", 'info')
+    cprint("监控服务启动（独立线程模式）", 'info')
+    _start_all_tracker_threads()
+    _check_now.set()
+    while True:
+        try:
+            time.sleep(60)
+            _restart_dead_threads()
+        except Exception as e:
+            ...
+完全没有失败率计算。配置项 probe_fail_threshold 仅在旧版中被读取，新版中 _check_one_and_record 函数也不存在。您的 app.py 中甚至没有 _check_one_and_record 这个函数——因为独立线程探测是通过 _ip_monitor_thread 直接调用 check_ip 并更新数据库的，没有汇总步骤。
+
+4. 为什么旧版 app - 204 的检测有效，新版却失效？
+旧版使用 周期性轮询（monitor_loop 每 check_interval 秒收集所有 IP 探测结果，计算本轮失败率，若超过阈值则跳过历史写入）。您之前反馈“网络故障检测正常”时，应该是基于旧版或早期版本。
+
+新版改为独立线程后：
+每个 IP 独立按自己的节奏探测（错峰），没有全局轮次，自然无法计算“本轮失败率”。
+网络故障判断完全甩给探针（_probe_ok_v4 / _probe_ok_v6），探针一叶障目。
+
+5. 代码证据摘录
+新版探针判定逻辑（_probe_loop）：
+python
+v6_reachable = False
+for host, port, ver in IPV6_TARGETS:
+    ok, lat = _probe_one(host, port, PROBE_TIMEOUT)
+    if ok:
+        v6_reachable = True
+        break
+# 只要有一个成功，v6_reachable = True
+IP 线程中的网络状态检查（_ip_monitor_thread）：
+python
+skip_net, net_reason = _get_probe_net_status(ip)
+if skip_net:
+    # 跳过本次探测，不写历史
+    ...
+而 _get_probe_net_status 仅检查 _probe_ok_v4 / _probe_ok_v6，不检查任何失败率。
+
+解决方案：
+您需要恢复 全局失败率检测，使其与独立线程模式共存。建议做以下修改：
+
+方案一：增加一个独立线程定期评估整体健康度（推荐）
+在 app.py 中添加一个新线程 _health_monitor_loop，每隔 check_interval 秒扫描所有活跃 IP 的 最近一次探测结果（通过 db.trackers 中的 last_check 和 status），计算失败率。
+若失败率高于阈值（例如 50%）且持续时间超过 2 轮，则设置全局标志 _net_bad = True，并在 _get_probe_net_status 中将其纳入判断。
+
+具体步骤：
+添加全局标志 _net_bad（已有，但未被 _get_probe_net_status 使用）和 _net_bad_lock。
+修改 _get_probe_net_status，增加对 _net_bad 的检查：
+python
+def _get_probe_net_status(ip_str: str):
+    ver = _ip_ver(ip_str)
+    with _probe_lock:
+        probe_v4_ok = _probe_ok_v4
+        probe_v6_ok = _probe_ok_v6
+    with _net_bad_lock:
+        net_bad = _net_bad
+    if net_bad:
+        return True, '全局失败率过高'
+    if ver == 'ipv4' and not probe_v4_ok:
+        return True, 'IPv4探针不可达'
+    if ver == 'ipv6' and probe_v6_ok is False:
+        return True, 'IPv6探针不可达'
+    return False, ''
+实现 _health_monitor_loop：
+每 check_interval 秒执行一次。
+统计所有 非暂停 IP 中，status == 'offline' 且 last_check 在最近 timeout 秒内的数量，除以总活跃 IP 数，得到失败率。
+如果失败率 > probe_fail_threshold（例如 30%），且 连续两轮 都超阈值，则设置 _net_bad = True 并记录日志；如果连续两轮恢复正常，则清除 _net_bad。
+为避免频繁误报，可设置 _net_bad_confirm_count 计数器。
+启动该线程：在 if __name__ == '__main__' 中加入 threading.Thread(target=_health_monitor_loop, daemon=True).start()。
+
+方案二（临时）：改进探针列表，要求所有 IPv6 探针都失败才判定不可达
+修改 _probe_loop 中的 IPv6 判定逻辑，改为 所有指定探针均失败 时才认为 IPv6 不可达。但这样可能导致假阴性（国内正常但海外故障时不触发），不如方案一全面。
+
+方案三：回退到旧版轮询模式（不推荐）
+将 app.py 替换为 app - 204，但旧版轮询在高并发下可能有性能问题，且您之前改到独立线程就是为了解决线程堆积问题。因此方案一更优。
+
+立即修复建议
+我可以为您生成修改后的 app.py 补丁，实现方案一。是否需要我直接提供完整的 _health_monitor_loop 代码和集成方式？这样您只需替换/增加相关函数，无需重构整个监控架构。
+
+----------------
+Q：
+
+我现在app中 保存tracker数据 我记得保存周期是60秒啊？
+所有tracker探测后会立即写入history.json吗？应该不会吧……？
+直接在保存history.json的这个60秒的周期里面加检测 不就完事了？
+还有要让我的config.json配置生效下面这些 
+  "probe_fail_threshold": 30,
+  "probe_ipv6_targets": [
+    "2001:4860:4860::8888",
+    "2606:4700:4700::1111",
+    "2400:3200:baba::1"
+  ],
+  "probe_timeout": 3,
+  "probe_ipv4_targets": [
+    "8.8.4.4",
+    "1.1.1.1",
+    "114.114.114.114"
+  ],
+  "auto_pause_enabled": true,
+  "auto_pause_threshold": 30
+你看看 现在是不是我说的这样？大体上是按照方案1来改造
+
+----------------
+A：
+
+确认您的问题与现状
+1. 保存周期确实是 60 秒
+在 app.py 中，_periodic_save_loop() 线程每 60 秒调用一次 db._save_async()，该函数会将内存中的 db.trackers 和 hdb 数据写入 data.json 和 history.json。
+但是，每次探测的结果（db.update_status → _push_history → hdb.push_ip）会 立即写入内存中的 hdb._data，所以历史统计（可用率）是实时计算的，只是磁盘文件每 60 秒更新一次。
+
+这并不会影响您提出的“在保存周期里加检测”——因为统计所需的数据（各 IP 的最近状态）始终在内存中，随时可以访问。
+
+2. 您的配置参数全部生效
+probe_fail_threshold、probe_ipv6_targets、probe_timeout、probe_ipv4_targets、auto_pause_enabled、auto_pause_threshold 在 CONFIG 中都有加载和默认值，并且在 _probe_loop 和 _ip_monitor_thread 中被正确使用。
+但是，probe_fail_threshold 目前 没有被用于任何失败率聚合，因为独立线程架构移除了全局轮次。
+
+3. 网络故障检测失效的根本原因
+仅依赖探针：_get_probe_net_status() 只检查 _probe_ok_v4 和 _probe_ok_v6，完全忽略全局失败率。
+
+探针判定过于宽松：只要任一 IPv6 探针成功（比如国内的阿里 DNS 2400:3200:baba::1 可达），就认为 IPv6 网络正常，即使所有海外 IPv6 tracker 都因路由中断而超时。
+
+没有全局失败率聚合：配置项 probe_fail_threshold 形同虚设，新版代码中没有计算失败率的逻辑。
+
+您的方案：在 60 秒保存周期里加检测 — 完全可行且更简洁
+您提议在 _periodic_save_loop 中每 60 秒计算一次全局失败率，并据此设置网络故障标志 _net_bad。
+这个方案比单独开一个 _health_monitor_loop 更轻量，因为保存线程本来就要周期运行，不会增加额外线程开销。
+……
+
+----------------
+Q：
+
+那不行 网络故障了 还保存到内存中 难怪 那样60秒一次缓存到硬盘 肯定都是错误数据了
+还是按照你之前说的 方案1 来改吧。。
+恢复 全局失败率检测，使其与独立线程模式共存。
+方案1：
+在 app.py 中添加一个新线程 _health_monitor_loop，每隔 check_interval 秒扫描所有活跃 IP 的 最近一次探测结果（通过 db.trackers 中的 last_check 和 status），计算失败率。
+若失败率高于阈值（例如 50%）且持续时间超过 2 轮，则设置全局标志 _net_bad = True，并在 _get_probe_net_status 中将其纳入判断。
+……
+你把完整的改造方案 给我。。精细具体到要改哪里 修改前和修改后的代码
+以前我是通过web修改配置 然后config.json中的配置会生效 比如那个 总体故障率和探针超时时间那些 也是要config.json配置存在就优先 其次才是app.py的默认配置
+
+----------------
+A：
+
+完整改造方案：恢复全局失败率检测（方案1）
+目标：在独立线程监控架构上，增加一个独立健康监测线程 _health_monitor_loop，定期（check_interval 秒）扫描所有活跃 IP 的最近探测状态，计算失败率。
+若失败率连续两轮超过 probe_fail_threshold（如 30%），则设置全局标志 _net_bad = True；
+连续两轮恢复正常则清除 _net_bad。然后在 _get_probe_net_status 中纳入该标志，使异常期间的探测被跳过，不写历史、不累加失败计数。
+……
+
+二、配置生效说明
+您 config.json 中的以下配置会被正确读取（load_config 已做）：
+probe_fail_threshold (默认 30)
+probe_timeout (默认 5)
+probe_ipv4_targets
+probe_ipv6_targets
+auto_pause_enabled
+auto_pause_threshold
+在 _health_monitor_loop 中，CONFIG.get('probe_fail_threshold', 30) 会优先读取您保存的值。
+_probe_loop 中也会使用 CONFIG.get('probe_timeout', 5) 和 CONFIG.get('probe_ipv6_targets', [])。
+所以您通过 Web 修改后保存，重启线程会立即生效（健康监测线程每次循环都重新从 CONFIG 读取阈值和间隔）。
+
+三、工作流程说明
+独立线程监控：每个 IP 按自己的节奏探测，状态实时写入内存 db.trackers（last_check、status）。
+健康监测线程：每 check_interval 秒（如 30 秒）扫描所有 非暂停 IP 的最近 last_check（在 timeout*2 秒内），计算失败率。
+
+触发规则：
+连续两轮失败率 ≥ probe_fail_threshold → _net_bad = True，记录错误日志，后续探测被跳过。
+连续两轮失败率 < 阈值 → _net_bad = False，记录恢复日志，探测恢复。
+探测跳过：_ip_monitor_thread 中调用 _get_probe_net_status，若返回 True，则不执行实际网络探测、不更新状态、不写历史、不累加失败计数（避免自动暂停误触发）。
+内存与磁盘：探测结果正常时立即写入内存，60 秒保存线程仍会持久化到 data.json 和 history.json。但网络故障期间跳过写入，因此内存和磁盘都不会被污染。
+
+四、注意事项
+样本数阈值：代码中要求 total >= 5 才评估，避免启动初期误报。
+连续轮次：连续两轮触发才改变状态，防止短暂抖动。
+锁安全：_net_bad_lock 保护读写 _net_bad，db.lock 保护遍历 tracker 数据。
+陈旧数据过滤：只统计最近 timeout*2 秒内有更新的 IP，避免因部分 IP 长期未检测而拉低失败率。
+与自动暂停的关系：自动暂停逻辑在探测被跳过时不会执行，符合预期（网络故障时不暂停单个 IP）。
+
+五、完整补丁文件
+由于代码量较大，建议您按照上述“修改前/修改后”逐一编辑。如果您需要完整替换后的 app.py 文件，请告知，我可以根据您提供的原始 app.py（您代码中的第一个 app.py 是完整版，第二个 app - 204 是旧版）生成最终版本。但根据平台限制，我无法直接上传文件，只能给出代码片段。
+
+建议操作步骤：
+备份当前 app.py。
+按照上述四步修改。
+重启服务。
+测试：故意断开 IPv6 路由，观察日志是否出现 [健康监测] 网络故障触发，以及后续探测是否被跳过。
+
+如有任何疑问或需要进一步调整参数（如连续轮次改为 3 轮、样本数阈值调整），请随时提出。
+
+----------------
+Q：
+
+现在这样改 如果网络故障了 是不是立马生效 就不记录到内存和硬盘？
+还是说 非要失败一次？是想立即就生效 网络故障的时候 一次失败都不想要 现在的这个改法 能实现这个效果吗？
+
+----------------
+A：
+
+您说得对，目前的周期性健康监测线程（每 check_interval 秒运行一次）无法做到立即生效。在两次检查的间隔中，
+如果网络发生故障，IP 线程仍会继续探测并记录至少一次失败（直至下一轮检查设置 _net_bad = True）。
+
+要实现“网络故障发生时，一次失败都不记录”，需要在每次探测之前实时评估整体网络状态，而不是依赖周期标志。
+
+改进方案：实时评估失败率（准实时，<1秒延迟）
+将健康检测逻辑直接嵌入 _get_probe_net_status 中，每次调用时动态计算最近一段时间内的整体失败率。
+这样只要失败率连续超阈值，后续探测立即被跳过，不会产生任何一次失败的入库。
+
+核心思路：
+使用滑动时间窗口（例如最近 check_interval 秒），统计窗口内所有活跃 IP 的失败比例。
+由于每次探测前都要计算，需要高效（不能遍历全部 trackers）。可以通过维护全局的失败率缓存，定期更新（例如每 5 秒更新一次），而非每次探测都全量扫描。
+为了满足“立即生效”，将缓存更新时间间隔设为 1~2 秒，这样网络故障后最多延迟 1~2 秒即可拦截后续探测。
+
+具体实现（修改 app.py）
+……
+
+最终效果：
+每次探测前都会调用 _update_health_status()，该函数最多每 2 秒 扫描一次数据库（TTL 内直接返回缓存结果，开销极小）。
+一旦计算出的实时失败率 ≥ probe_fail_threshold，_net_bad 立即被设为 True，后续所有探测都会被 _get_probe_net_status 拦截。
+网络故障期间，不会再有任何失败记录写入内存和硬盘（因为 _ip_monitor_thread 中判断 skip_net 后会直接跳过 db.update_status 和 hdb.push_ip）。
+当失败率回落到阈值以下，_net_bad 自动清除，探测恢复。
+这样就实现了您要求的“网络故障时立即生效，一次失败都不记录”。
+
+注意事项：
+TTL 设置：HEALTH_CACHE_TTL = 2 意味着网络故障后最多延迟 2 秒触发拦截。您可以根据需要调整为 1 或 3 秒。
+样本数阈值：代码中要求 total >= 5 才做判断，避免启动初期误判。
+与探针的协作：实时健康检测和探针检测是 OR 关系，任一条件满足就跳过探测。
+配置生效：probe_fail_threshold、check_interval、timeout 等配置每次计算时从 CONFIG 动态读取，修改后实时生效。
+您只需按照上述 4 步修改 app.py，重启服务即可。如果遇到任何问题，欢迎继续反馈。
+
+----------------
+Q：
+
+total >= 5 这个是什么意思？
+
+----------------
+A：
+
+total >= 5 是在健康监测函数 _update_health_status() 中的一个判断条件。它表示：只有当统计到的“活跃 IP 数量”达到或超过 5 个时，才根据当前的失败率来决定是否触发网络故障。
+
+具体作用是：
+如果当前只有不到 5 个 IP 在活跃监测（例如系统刚启动、只添加了少量 tracker、或者大部分 IP 都被暂停了），
+那么即使这些 IP 全部离线，也不会立即判定为“网络故障”，避免因为样本太小而产生误报。
+一旦活跃 IP 数量达到 5 个或更多，才会根据失败率是否超过阈值（例如 30%）来设置 _net_bad 标志。
+在活跃 IP 不足 5 个的情况下，_net_bad 会维持之前的状态（如果已经是故障状态则保持，如果是正常状态也不乱触发），不会因为样本太少而错误地清除真实的故障标志。
+这个阈值（5）是一个经验值，您可以根据自己的需求调整（比如改成 3 或 10）。它的核心目的就是防止在监控初期或 tracker 数量很少时因偶然因素误判网络故障。
+
+
+--------------------------------------
 
 
 
