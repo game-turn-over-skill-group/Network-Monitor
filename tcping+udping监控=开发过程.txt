@@ -18109,8 +18109,30 @@ total >= 5 是在健康监测函数 _update_health_status() 中的一个判断�
 --------------------------------------
 
 
+//定时保存硬盘时间改为2分钟
+
+现在定时保存到硬盘的时间是多久 我想要改成2分钟 改哪里？
+
+----------------
+
+当前定时保存到硬盘的间隔是 60 秒（1 分钟），位于 app.py 中的 _periodic_save_loop 函数。
+要改为 2 分钟，请修改该函数内的 time.sleep(60) 为 time.sleep(120)。
+具体修改位置：
+def _periodic_save_loop():
+    while True:
+        time.sleep(60)          # ← 改成 time.sleep(120)
+        try:
+            if CONFIG.get('cache_history', True):
+                db._save_async()
+        except Exception as e:
+            cprint(f"[定时保存] 异常: {e}", 'error')
+说明：
+该线程与监控主循环独立，每 60 秒唤醒一次，将内存中的数据（data.json 和 history.json）异步写入磁盘。
+除了定时保存，添加/删除/暂停等操作也会触发异步保存（db._save_async()），但定时保存作为兜底策略，确保即使没有操作变更，数据也会定期落盘。
+修改后重启服务即可生效。
 
 
+--------------------------------------
 
 
 

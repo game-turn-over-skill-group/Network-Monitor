@@ -2288,7 +2288,7 @@ _dns_noresult_lock = threading.Lock()
 # 进入 CD 后缓存 _DNS_NEG_TTL 秒，期间跳过查询；重启后计数和缓存均清空。
 # 超时（None）不计入无结果次数——网络抖动不等于记录不存在。
 _DNS_NEG_TTL       = 24 * 3600   # CD 时长：24 小时
-_DNS_NEG_THRESHOLD = 3           # 连续全部无结果多少次才进 CD
+_DNS_NEG_THRESHOLD = 5           # 连续全部无结果多少次才进 CD
 _dns_neg_cache: dict = {}        # {(domain, rtype): expire_timestamp}  —— CD 中的条目
 _dns_neg_miss:  dict = {}        # {(domain, rtype): consecutive_count} —— 连续全无结果计数
 _dns_neg_lock   = threading.Lock()
@@ -3606,13 +3606,13 @@ def _start_all_tracker_threads():
 # 旧的 monitor_loop 保留为存根（启动脚本引用），实际功能已迁移到独立线程
 # 这里只做线程清理/健康检查（死线程重启）
 def _periodic_save_loop():
-    """定时保存线程：每60秒将数据持久化到磁盘。
+    """定时保存线程：每120秒将数据持久化到磁盘。
     替代之前每次探测完都调 _save_async() 的高频保存方式，
     彻底消除因频繁持 db.lock 写磁盘导致 API 响应阻塞的问题。
     彻底消除因频繁写 history.json 导致磁盘 I/O 过高的问题。
     """
     while True:
-        time.sleep(60)
+        time.sleep(120)          # 保存到硬盘的间隔 120s = 2分钟
         try:
             if CONFIG.get('cache_history', True):
                 db._save_async()
