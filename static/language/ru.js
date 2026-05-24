@@ -163,6 +163,8 @@ window.__i18n_ru = {
     autoRefreshDesc: 'Интервал обновления страницы',
     monitorWorkers: 'Параллельные рабочие процессы',
     monitorWorkersDesc: 'Максимальное количество параллельных потоков проверки (увеличить для длинных списков IP)',
+    currentlyUsing: 'Используется',
+    almostFull: 'Близко к ёмкости',
     exportSuffix: 'Суффикс экспорта',
     exportSuffixDesc: 'Путь, добавляемый к каждой URL трекера при экспорте',
     tabSwitchRefresh: 'Обновить при переключении вкладки',

@@ -163,6 +163,8 @@ window.__i18n_en = {
     autoRefreshDesc: 'Page refresh interval',
     monitorWorkers: 'Concurrent Workers',
     monitorWorkersDesc: 'Max parallel check threads (increase for large IP lists)',
+    currentlyUsing: 'In Use',
+    almostFull: 'Near Capacity',
     exportSuffix: 'Export Suffix',
     exportSuffixDesc: 'Path appended to each tracker URL on export',
     tabSwitchRefresh: 'Refresh on Tab Switch',

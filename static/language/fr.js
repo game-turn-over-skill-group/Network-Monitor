@@ -163,6 +163,8 @@ window.__i18n_fr = {
     autoRefreshDesc: 'Intervalle d\'actualisation de la page',
     monitorWorkers: 'Workers simultanés',
     monitorWorkersDesc: 'Nombre maximal de threads de vérification parallèles (augmenter pour de longues listes IP)',
+    currentlyUsing: 'En cours',
+    almostFull: 'Près de la capacité',
     exportSuffix: 'Suffixe d\'exportation',
     exportSuffixDesc: 'Chemin ajouté à chaque URL de tracker lors de l\'exportation',
     tabSwitchRefresh: 'Actualiser au changement d\'onglet',

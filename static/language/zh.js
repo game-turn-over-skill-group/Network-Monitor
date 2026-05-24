@@ -163,6 +163,8 @@ window.__i18n_zh = {
     autoRefreshDesc: '自动刷新间隔',
     monitorWorkers: '并发检测数',
     monitorWorkersDesc: '同时检测的最大线程数，IP数量多时可适当调高',
+    currentlyUsing: '当前使用',
+    almostFull: '即将满载',
     exportSuffix: '导出后缀',
     exportSuffixDesc: '导出 Tracker 列表时追加的路径，如 /announce',
     tabSwitchRefresh: '切换时刷新',

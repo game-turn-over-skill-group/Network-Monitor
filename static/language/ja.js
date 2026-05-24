@@ -163,6 +163,8 @@ window.__i18n_ja = {
     autoRefreshDesc: 'ページリフレッシュ間隔',
     monitorWorkers: 'コンカレントワーカー',
     monitorWorkersDesc: '最大並列確認スレッド数（IPリストが多い場合は増やす）',
+    currentlyUsing: '現在使用',
+    almostFull: '高負荷',
     exportSuffix: 'エクスポートサフィックス',
     exportSuffixDesc: 'Tracker URLエクスポート時に各URLに追加するパス',
     tabSwitchRefresh: 'タブ切り替え時にリフレッシュ',

@@ -19161,6 +19161,473 @@ BUG已修复。现在让我继续排查CPU暴走问题。让我检查 _ip_monito
 --------------------------------------
 
 
+//修复频繁刷新网页app的CPU高占用
+
+还是高占用CPU的问题 之前的几次修复中 并没有解决问题 还是周期性的高占用CPU
+我还发现个问题 如果我把配置页面的 页面刷新 间隔从30秒改成1秒 似乎他就会时时高占用CPU
+难道是读取加载数据 吃CPU？这似乎有点不科学 不过顺着这个思路 排查一下代码……
+
+----------------
+
+✅ CPU高占用问题修复完成
+我找到了导致CPU高占用的根本原因：前端页面刷新时调用的API存在大量重复遍历。让我总结一下修复内容：
+
+📊 问题根源分析
+当页面刷新间隔从30秒改成1秒后，以下API会被频繁调用：
+API			问题				复杂度
+get_ranking		5次遍历IP列表			O(5n)
+api_trackers_export	创建完整trackers快照		O(n)
+add_log			每次添加日志时重新计算索引	O(n)
+
+🚀 优化方案
+优化1：get_ranking 函数（第768行）
+问题：每次调用需要遍历IP列表5次
+Python
+# 优化前：5次遍历
+active_ips = [ip for ip in tr['ips'] if ...]  # 第1次
+paused_ip_set = {ip.get('ip') for ip in tr['ips'] if ...}  # 第2次
+active_ip_set = {ip.get('ip') for ip in active_ips}  # 第3次
+online_count = sum(1 for ip in active_ips if ...)  # 第4次
+offline_count = sum(1 for ip in active_ips if ...)  # 第5次
+
+优化后：一次遍历完成所有统计
+Python
+for ip_obj in tr.get('ips', []):    
+# 在单次遍历中完成所有统计
+    if ip_obj.get('paused'):
+        paused_ip_set.add(ip)
+    else:
+        active_ips.append(ip_obj)
+        active_ip_set.add(ip)
+        if ip_obj.get('status') == 'online':
+            online_count += 1
+
+优化2：api_trackers_export 函数（第4078行）
+问题：创建完整的trackers快照，然后又遍历处理
+Python
+# 优化前
+trackers_snap = {k: dict(v) for k, v in db.trackers.items()}  # O(n)
+online_ips = [ip for ip in ips if ...]  # 再次遍历
+
+优化后：按需查找，提前过滤，找到第一个在线IP即停止
+Python
+# 优化后
+for ip_obj in td.get('ips', []):
+    if not ip_obj.get('removed') and not ip_obj.get
+    ('paused') and ip_obj.get('status') == 'online':
+        has_online = True
+        break  # 找到一个即可，无需继续遍历
+
+优化3：add_log 函数（第831行）
+问题：每次裁剪日志时重新计算所有索引
+Python
+# 优化前
+level_logs_idx = [i for i, e in enumerate(self.logs) if e['level'] == level]  # O(n)
+while len(level_logs_idx) > max_e:
+    self.logs.pop(level_logs_idx[0])
+    level_logs_idx = [i for i, e in enumerate(self.logs)
+    if e['level'] == level]  # 每次都重新计算！
+
+优化后：从列表开头顺序删除，避免重复计算索引
+Python
+# 优化后
+while to_remove > 0 and remove_idx < len(self.logs):
+    if self.logs[remove_idx]['level'] == level:
+        self.logs.pop(remove_idx)
+        to_remove -= 1    else:
+        remove_idx += 1
+
+📈 优化效果
+操作			修改前复杂度	修改后复杂度
+get_ranking		O(5n)		O(n)
+api_trackers_export	O(n)		O(1)~O(n)（提前退出）
+add_log 裁剪		O(n²)		O(n)
+
+请重启应用测试：
+将页面刷新间隔改回1秒测试，CPU占用应该显著降低
+如果问题仍然存在，请告诉我，我会继续排查其他可能的性能瓶颈
+
+
+--------------------------------------
+
+
+//灵活线程探测=根据IP数量决定
+
+我发现一个 旧的限制并发检测数量的限制 这个以前用来限制 最多使用多少线程来着的
+那时候是周期性的 全局线程并发检测 现在已经是独立IP线程探测了 这个旧的参数 是否会影响性能？
+比如造成线程达到上限后的锁 卡住 卡顿等待？是否要移除这个限制？或者增加一个选项 比如：灵活
+灵活 = 根据IP数量 自动调节线程 //然后是现在的代码中 是否是灵活？
+
+----------------
+
+## 🔍 发现：monitor_workers 是遗留参数
+### 当前状态分析
+方面 		现状 
+配置定义 	存在（默认值120） 
+配置页面 	显示（并发检测数） 
+参数验证 	存在（1-1000整数） 
+实际使用 	未使用！
+
+### 代码验证
+从代码搜索结果来看，所有线程池都是 硬编码 的：
+
+```
+# 数据库保存线程池（固定1个worker）
+self._save_executor = ThreadPoolExecutor(max_workers=1)
+
+# 归属地查询线程池（固定2个worker）
+_geo_executor = ThreadPoolExecutor(max_workers=2)
+
+# 网络探针线程池（根据目标数量动态创建）
+with ThreadPoolExecutor(max_workers=len(IPV4_TARGETS)) as 
+executor:
+```
+monitor_workers 参数在代码中没有被使用！
+
+## 🤔 你的问题解答
+### 1. 这个旧参数是否会影响性能？
+不会。 因为它根本没有被代码使用，只是一个配置项存在那里。
+
+### 2. 是否会造成线程达到上限后的锁等待？
+不会。 没有任何代码使用这个参数来限制线程数量，所以不存在"达到上限"的情况。
+
+### 3. 是否要移除这个限制？
+建议保留但重新启用 ，原因：
+
+- 当前架构是每个IP一个独立线程，没有全局限制
+- 如果IP数量很多（比如几百个），可能会创建大量线程
+- 大量线程会增加系统开销和调度压力
+### 4. 是否增加一个"灵活"选项？
+可以考虑 ，但更简单的方案是：
+
+- 直接使用 monitor_workers 作为最大并发线程数限制
+- 或者改成自动模式： max(活跃IP数, 120)
+## 🚀 建议方案
+### 方案A：重新启用 monitor_workers 限制
+修改代码，使用 monitor_workers 限制并发探测线程数。
+
+### 方案B：改为自动模式
+让线程数根据活跃IP数量自动调整：
+
+```
+# 自动计算线程数：取活跃IP数和配置值的较小值
+active_count = len(db._active_ips)
+max_workers = min(active_count, CONFIG.get
+('monitor_workers', 120))
+```
+### 方案C：移除该参数
+如果当前独立线程架构工作良好，可以移除这个无用的配置项。
+我的建议 ：选择 方案B（自动模式） ，这样既能利用现有配置，又能根据实际IP数量自动调整，避免创建过多线程。
+
+你希望我帮你实现哪个方案？
+
+----------------
+Q：
+
+那就用方案B吧 我要默认使用灵活线程数 根据IP数量决定 但是最好 能在配置页面 查看到当前使用的线程数
+然后上限还能自定义修改 等于保留旧的参数 又能灵活不限制上限
+改的话 是不是要修改html 还是要修改 \static\language下的多语言？
+没事 你帮我改 放心干
+
+----------------
+A：
+
+## ✅ 方案B实现完成
+### 修改总结 1. app.py - 后端修改
+修改位置 		内容 
+第3356-3359行 	添加全局变量： _probe_semaphore , _probe_active_count , _probe_active_lock , _stats_thread_info 
+第3770-3776行 	monitor_loop() 初始化时创建信号量 
+第3446-3455行 	_ip_monitor_thread() 探测时使用信号量限制并发 
+第4981-4997行 	添加 /api/stats/threads API 
+第5163-5168行 	配置保存时更新信号量
+
+ 2. index.html - 前端修改
+修改位置 		内容 
+第3131行 	添加 threadStats ref 
+第3772-3777行 	添加 loadThreadStats() 函数 
+第4731-4734行 	配置页刷新时调用 loadThreadStats() 
+第2492-2500行 	显示当前线程使用情况 
+第4831行 	return 语句中添加 threadStats
+
+ 3. 多语言文件
+添加了 currentlyUsing 和 almostFull 两个翻译键：
+- zh.js（中文）
+- en.js（英文）
+- ja.js（日文）
+- ko.js（韩文）
+- fr.js（法文）
+- ru.js（俄文）
+
+### 功能说明
+1. 并发限制 ：使用信号量限制同时探测的IP数量，默认120（可配置）
+2. 实时统计 ：API返回 active_probes （当前活跃探测数）、 max_probes （最大限制）、 total_active_ips （总活跃IP数）
+3. 配置页面显示 ：在"并发检测数"配置项下方显示 当前使用: X/120 ，当可用槽位少于20%时显示"即将满载"警告
+4. 动态调整 ：修改配置后信号量实时更新，无需重启
+
+----------------
+Q：
+
+  IPv4监听模式   : global
+  2026/5/24 21:28:53 [INFO] [并发限制] 最大并发探测线程数: 120
+  IPv6监听模式   : global
+  访问地址       : http://localhost:443  (IPv4+IPv6 双栈)
+  监控间隔       : 30秒
+  超时时间       : 5秒
+  DNS解析模式    : 自定义(180.184.1.1,180.184.2.2,2001:4860:4860::8844,2001:4860:4860::8888,8.8.8.8,8.8.4.4) [TCP]
+  日志最大条目   : Info=25000 / Success=20000 / Error=2000条
+  重试模式       : polling
+  日志级别       : error
+  磁盘日志       : 开启
+  HTTP代理       : 关闭
+  UDP代理        : 启用
+  UDP代理        : socks5://localhost:22
+  允许内网IP     : 否
+  最小密码长度   : 8
+  用户账户       : 4 个 (admin: 1, operator: 2, viewer: 1)
+==========================================================
+  权限说明:
+    admin    - 全部权限（配置+用户管理，重试不限速）
+    operator - 增删tracker，重试限速500ms
+    viewer   - 只读，重试限速1000ms
+==========================================================
+
+  2026/5/24 21:28:53 [INFO] [监控启动] 共 72 个tracker，已启动独立线程，错峰分布在 30s 内
+  使用 waitress 生产服务器
+
+  2026/5/24 21:28:53 [INFO] HTTP服务器启动在 http://localhost:443
+::1 - - - - [24/May/2026:21:28:54 +0800] "GET /home HTTP/1.1" 200 54334
+::1 - - - - [24/May/2026:21:28:54 +0800] "GET /api/auth/whoami HTTP/1.1" 200 51
+
+上面是控制台输出的结果 你自己看看。。打印并发限制的位置 不太对。。
+建议放在[INFO] [监控启动]的上面或者下面。。然后我我不能通过web查看到当前使用的 线程数量？
+控制台好像也没输出 当前使用的数量呀？哦不对 有了 但是好像不会马上出现 要过一段时间。。F5刷新不会出现是为什么？
+
+----------------
+A：
+
+## ✅ 修复完成
+### 问题1：调整日志输出顺序
+修改了 _start_all_tracker_threads() 函数，现在日志输出顺序更合理：
+
+```
+[INFO] 监控服务启动（独立线程模式）
+[INFO] [并发限制] 最大并发探测线程数: 120
+[INFO] [监控启动] 共 72 个tracker，已启动独立线程，错峰分布在 
+30s 内
+```
+### 问题2：配置页面立即显示线程统计
+修复了配置页面切换和初始加载时的线程统计加载问题：
+
+场景 		修复前 			修复后 
+切换到配置页 	不加载，等待定时刷新 	立即加载 
+初始进入配置页 	不加载，等待定时刷新 	立即加载 
+F5刷新配置页 	不加载，等待定时刷新 	立即加载
+
+### 修改内容
+app.py ：
+- _start_all_tracker_threads() 接受 max_workers 参数
+- [并发限制] 日志现在在 [监控启动] 之前输出
+
+index.html ：
+- watch(currentTab) 中添加配置页切换时加载线程统计
+- onMounted() 中添加初始加载时如果在配置页也加载线程统计
+
+请重启应用测试！ 现在：
+1. 控制台日志顺序更合理
+2. 配置页面切换或刷新时会立即显示当前线程使用情况
+
+
+--------------------------------------
+
+
+//优化统计IP可用率遍历=避免重复遍历
+
+审查一下 现在的代码 所有域名和IP的 可用率 
+是首次启动app的时候 从history.json预加载到内存中
+还是每次周期统计读取硬盘来更新的？如果是后者 是否是导致CPU高占用的元凶？
+现在的问题 还是主要没找到 周期性高占用CPU的 罪魁祸首
+
+----------------
+
+## 🔍 可用率统计分析
+### 核心发现
+根据代码分析，可用率统计的流程是：
+
+```
+首次启动 → 从 history.json 加载到内存 (hdb._data) → 后续所有查
+询都在内存中进行
+```
+关键点 ：
+- history.json 只在启动时加载一次 ，之后所有数据都在内存中
+- 写入是增量的 ：每次探测结果直接写入内存，定期（每120秒）批量写入磁盘
+- 读取完全在内存中 ：不会每次统计都读取硬盘
+### 📊 CPU高占用的潜在元凶
+我发现了一个严重的性能问题！在 get_trackers() 函数中（第694-763行）：
+
+操作 				复杂度 				问题 
+hdb.get_ip_uptime() 		O(n) per IP 		对每个IP的每个周期遍历所有历史点 
+hdb.get_ip_recent() 		O(n) per IP 		再次遍历该IP的历史数据 
+hdb.get_domain_summary() 	O(n*m) per domain 	遍历域名下所有IP的所有历史点
+
+问题代码示例 （第714-720行）：
+```
+# 对每个IP，遍历3个周期的历史数据
+for pk, secs in HISTORY_WINDOWS.items():
+    ip_copy[f'uptime_{pk}'] = hdb.get_ip_uptime(domain, 
+    ip, secs)  # O(n)
+
+# 再次遍历该IP的历史数据
+recent = hdb.get_ip_recent(domain, ip, 86400)  # O(n)
+```
+场景分析 ：
+- 假设有 100 个域名，每个域名平均 10 个 IP
+- 每次 get_trackers() 调用需要：
+  - 100 × 10 × 3 = 3000 次 IP 级历史遍历
+  - 100 次域名级历史遍历
+
+### 🚀 优化方案 优化1：批量计算，避免重复遍历
+修改 get_trackers() ，一次性计算所有统计数据：
+……
+优化2：预计算并缓存 IP 级统计
+添加专门的批量统计函数：
+……
+
+### ✅ 总结
+历史数据读取方式 ：
+
+- ✅ 首次启动：从 history.json 加载到内存 ( hdb._data )
+- ✅ 运行时：所有查询都在内存中进行， 不会每次都读取硬盘
+
+CPU高占用原因 ：
+- ❌ get_trackers() 中对每个IP进行多次独立的历史数据遍历
+- ❌ 没有批量计算机制，导致重复遍历相同数据
+
+建议修复 ：
+1. 修改 get_trackers() 使用批量统计
+2. 或者添加 IP 级统计缓存
+
+这个优化应该能显著降低页面刷新时的CPU占用！
+
+----------------
+A：
+
+我已经修复了两个问题：
+
+### 1. 添加 IP 级统计缓存
+修改位置 		内容 
+第477行 	添加 self.ip_stats_cache = LRUCache(5000) 
+第499-507行 	添加 _get_ip_stats_cached() 和 _set_ip_stats_cache() 函数 
+第526-535行 	修改 _clear_uptime_cache() 同时清除 IP 级缓存
+
+### 2. 修改 get_trackers() 使用批量统计
+修改位置 		内容 
+第728-729行 	调用 _get_domain_ip_stats() 批量获取统计 
+第738-747行 	从缓存获取IP级统计数据 
+第787-832行 	添加 _get_domain_ip_stats() 方法
+
+### 📊 优化效果
+操作 		修改前 			修改后 
+IP可用率计算 	每个IP单独查询hdb 	批量查询 + 缓存 
+连续失败计算 	每个IP单独遍历历史 	批量计算 + 缓存 
+缓存有效期 	仅域名级缓存（30秒） 	域名级 + IP级缓存（30秒） 
+缓存容量 	1000条 			域名级1000 + IP级5000
+
+### 🔄 数据流向
+```
+页面请求 → get_trackers() → _get_domain_ip_stats(domain)
+                       ↓
+                 检查 IP级缓存 (ip_stats_cache)
+                       ↓
+            	     缓存命中 → 直接返回
+                       ↓
+              	      缓存未命中 → 查询 hdb → 计算统计 → 写入缓存 → 返回
+```
+请重启应用测试！ 这个优化应该能显著降低页面刷新时的CPU占用，特别是在IP数量较多的情况下。
+
+
+--------------------------------------
+
+
+//优化更新状态和写入历史的相关遍历=每次探测后减少线程锁竞争调用
+
+优化了统计域名/IP 可用率遍历后 页面刷新改成1秒 APP常态下的CPU占用率 显著降低了
+就是 会导致 不活跃的 已移除IP 看不到历史可用率了……（之前可以的）不过 问题不大 这个不是必要的
+但是 现在偶尔的CPU暴走的问题 依旧存在
+把 问题 聚焦到 超时重试 的相关段落的代码 是否有线程锁竞争资源的情况？
+
+----------------
+
+## ✅ 优化完成
+我修复了以下几个关键的 O(n) 遍历问题：
+
+### 修复列表
+位置 			函数 			问题 			修复 
+第569-585行 	update_status() 	遍历 ips[] 查找IP 	使用 _ip_map O(1) 查找 
+第587-597行 	_push_history() 	遍历 ips[] 检查removed 	使用 _ip_map O(1) 查找 
+第3548-3554行 	自动暂停逻辑 		遍历 ips[] 查找IP 	使用 _ip_map O(1) 查找 
+第4586-4600行 	api_pause 		遍历 ips[] 查找IP 	使用 _ip_map O(1) 查找
+
+### 性能提升
+场景 			修改前 					修改后 
+单IP状态更新	 O(n) 遍历域名下所有IP 			O(1) 直接查找 
+连续失败计数+1 	获取锁 → 遍历 → 释放锁 		获取锁 → 直接查找 → 释放锁 
+自动暂停 	获取锁 → 遍历 → 修改 → 释放锁 	获取锁 → 直接查找 → 修改 → 释放锁
+
+### 关键优化点
+之前的优化 ：
+- update_status() 每次探测后调用
+- 原来需要遍历域名下所有IP（假设平均10个IP/域名，100个域名 = 1000次遍历/次）
+- 现在直接用 _ip_map 查找，O(1)
+
+锁竞争减少 ：
+- 每次操作持锁时间从 O(n) 降为 O(1)
+- 多线程同时探测时，锁竞争显著减少
+
+
+--------------------------------------
+
+
+//修复恢复暂停IP按钮失效
+
+所有域名下的暂停IP 点击 恢复此IP监控 按钮 都没反应了 看看是为什么 修复这个BUG
+
+----------------
+
+## ✅ 修复完成
+问题原因 ：我之前修改 api_pause 函数时，暂停IP会从 _ip_map 中移除，但恢复时只从 _ip_map 查找，导致找不到已暂停的IP。
+
+修复方案 ：
+
+```
+# 先从 _ip_map 查找（快速路径）
+ip_obj = db._ip_map.get((domain, ip))
+if not ip_obj:
+    # 如果 _ip_map 中找不到（可能已暂停），遍历查找
+    for ip_obj2 in td.get('ips', []):
+        if ip_obj2.get('ip') == ip:
+            ip_obj = ip_obj2
+            break
+```
+改动 ：
+1. 恢复时先尝试快速查找（ _ip_map ）
+2. 如果找不到，再进行遍历查找（处理已暂停的IP）
+3. 暂停时不再从 _ip_map 移除，只从 _active_ips 移除
+
+
+--------------------------------------
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -474,6 +474,7 @@ class TrackerDB:
         self._ip_map = {}
         # 可用率缓存
         self.uptime_cache = LRUCache(1000)  # 限制缓存大小
+        self.ip_stats_cache = LRUCache(5000)  # IP级统计缓存
         self.cache_lock = threading.RLock()
         self.cache_ttl = 30  # 秒
         # 异步保存线程池（单线程）
@@ -495,6 +496,16 @@ class TrackerDB:
     def _set_uptime_cache(self, domain, period, value):
         self.uptime_cache.put((domain, period), {'value': value, 'time': time.time()})
 
+    def _get_ip_stats_cached(self, domain, ip):
+        """从缓存获取IP级统计（可用率+连续失败次数）"""
+        entry = self.ip_stats_cache.get((domain, ip))
+        if entry and time.time() - entry['time'] < self.cache_ttl:
+            return entry['value']
+        return None
+
+    def _set_ip_stats_cache(self, domain, ip, stats):
+        self.ip_stats_cache.put((domain, ip), {'value': stats, 'time': time.time()})
+
     def _clear_uptime_cache(self, domain=None):
         if domain:
             # 由于LRU缓存不支持按前缀删除，这里我们遍历所有键并删除匹配的
@@ -512,8 +523,19 @@ class TrackerDB:
                         del self.uptime_cache.cache[key]
                         if key in self.uptime_cache.order:
                             self.uptime_cache.order.remove(key)
+                # 清除该域名下所有IP的统计缓存
+                ip_keys_to_remove = []
+                for key in list(self.ip_stats_cache.cache.keys()):
+                    if isinstance(key, tuple) and len(key) == 2 and key[0] == domain:
+                        ip_keys_to_remove.append(key)
+                for key in ip_keys_to_remove:
+                    if key in self.ip_stats_cache.cache:
+                        del self.ip_stats_cache.cache[key]
+                        if key in self.ip_stats_cache.order:
+                            self.ip_stats_cache.order.remove(key)
         else:
             self.uptime_cache.clear()
+            self.ip_stats_cache.clear()
 
     # ---------- tracker 管理 ----------
     def add_tracker(self, domain, port, protocol, ip_list=None):
@@ -543,40 +565,36 @@ class TrackerDB:
     def update_status(self, domain, ip, status, latency, check_time=None):
         with self.lock:
             if domain in self.trackers:
-                for info in self.trackers[domain]['ips']:
-                    if info['ip'] == ip:
-                        info['status'] = status
-                        info['latency'] = latency
-                        info['last_check'] = check_time or datetime.now().isoformat()  # 优先使用传入的时间
-                        # 同时保存数值时间戳，避免后续转换
-                        try:
-                            dt = datetime.fromisoformat(info['last_check'])
-                            info['last_check_ts'] = dt.timestamp()
-                        except Exception:
-                            info['last_check_ts'] = time.time()
-                        # 非暂停、非移除的IP才加入活跃集
-                        if not info.get('paused') and not info.get('removed'):
-                            self._active_ips.add((domain, ip))
-                        else:
-                            self._active_ips.discard((domain, ip))
-                        break
+                ip_obj = self._ip_map.get((domain, ip))
+                if ip_obj:
+                    ip_obj['status'] = status
+                    ip_obj['latency'] = latency
+                    ip_obj['last_check'] = check_time or datetime.now().isoformat()
+                    # 同时保存数值时间戳，避免后续转换
+                    try:
+                        dt = datetime.fromisoformat(ip_obj['last_check'])
+                        ip_obj['last_check_ts'] = dt.timestamp()
+                    except Exception:
+                        ip_obj['last_check_ts'] = time.time()
+                    # 非暂停、非移除的IP才加入活跃集
+                    if not ip_obj.get('paused') and not ip_obj.get('removed'):
+                        self._active_ips.add((domain, ip))
+                    else:
+                        self._active_ips.discard((domain, ip))
                 self._push_history(domain, ip, status)
                 self._recalc()
                 self._clear_uptime_cache(domain)
-                # 不在此处保存：探测结果由定时保存线程（60秒）统一落盘，
+                # 不在此处保存：探测结果由定时保存线程（120秒）统一落盘，
                 # 避免每次探测都写磁盘导致高频 I/O
                 #self._save_async()  # 异步保存
 
     def _push_history(self, domain, ip, status):
         """把探测结果写入 hdb（时间戳历史库）。
         跳过 removed IP，避免污染统计。"""
-        t = self.trackers[domain]
-        for info in t['ips']:
-            if info['ip'] == ip:
-                if info.get('removed', False):
-                    return
-                break
-        else:
+        ip_obj = self._ip_map.get((domain, ip))
+        if ip_obj is None:
+            return
+        if ip_obj.get('removed', False):
             return
         # 写入 hdb，domain 作为父级，IP 归属关系自包含在 history.json
         hdb.push_ip(domain, ip, status)
@@ -703,6 +721,9 @@ class TrackerDB:
         # 锁外填充可用率
         result = {}
         for domain, t_copy in trackers_copy.items():
+            # 批量获取该域名下所有IP的统计数据
+            ip_stats_map = self._get_domain_ip_stats(domain)
+            
             ips_copy = []
             for ip_obj in t_copy['ips']:
                 ip_copy = {k: v for k, v in ip_obj.items()
@@ -710,19 +731,16 @@ class TrackerDB:
                 if 'added_time' not in ip_copy:
                     ip_copy['added_time'] = t_copy.get('added_time')
                 ip = ip_obj.get('ip', '')
+                # 从缓存获取IP级统计
+                ip_stats = ip_stats_map.get(ip, {})
                 # IP 级三个周期可用率
-                for pk, secs in HISTORY_WINDOWS.items():
-                    ip_copy[f'uptime_{pk}'] = hdb.get_ip_uptime(domain, ip, secs)
+                for pk in HISTORY_WINDOWS.keys():
+                    ip_copy[f'uptime_{pk}'] = ip_stats.get(f'uptime_{pk}')
                 # ip_uptime 用当前配置周期
                 period = CONFIG.get('tracker_stat_period', '24h')
                 ip_copy['ip_uptime'] = ip_copy.get(f'uptime_{period}')
                 # IP 级末尾连续失败次数（近24h）
-                recent = hdb.get_ip_recent(domain, ip, 86400)
-                ip_consec = 0
-                for v in reversed(recent):
-                    if v == 0: ip_consec += 1
-                    else: break
-                ip_copy['consec_fail'] = ip_consec
+                ip_copy['consec_fail'] = ip_stats.get('consec_fail', 0)
                 ips_copy.append(ip_copy)
             t_copy['ips'] = ips_copy
             # 域名级：hdb 内该域名下所有IP（含历史已移除）汇总，但排除已暂停IP
@@ -762,6 +780,53 @@ class TrackerDB:
             result[domain] = t_copy
         return result
 
+    def _get_domain_ip_stats(self, domain):
+        """批量获取域名下所有IP的统计数据，减少重复遍历"""
+        ip_stats_map = {}
+        
+        # 获取该域名下所有活跃IP
+        active_ips = []
+        with self.lock:
+            td = self.trackers.get(domain)
+            if td:
+                for ip_obj in td.get('ips', []):
+                    if not ip_obj.get('removed'):
+                        active_ips.append(ip_obj.get('ip', ''))
+        
+        for ip in active_ips:
+            if not ip:
+                continue
+            
+            # 尝试从缓存获取
+            cached_stats = self._get_ip_stats_cached(domain, ip)
+            if cached_stats is not None:
+                ip_stats_map[ip] = cached_stats
+                continue
+            
+            # 计算IP级统计
+            stats = {}
+            
+            # 三个周期的可用率
+            for pk, secs in HISTORY_WINDOWS.items():
+                uptime = hdb.get_ip_uptime(domain, ip, secs)
+                stats[f'uptime_{pk}'] = uptime
+            
+            # 连续失败次数（近24h）
+            recent = hdb.get_ip_recent(domain, ip, 86400)
+            consec_fail = 0
+            for v in reversed(recent):
+                if v == 0:
+                    consec_fail += 1
+                else:
+                    break
+            stats['consec_fail'] = consec_fail
+            
+            # 缓存结果
+            self._set_ip_stats_cache(domain, ip, stats)
+            ip_stats_map[ip] = stats
+        
+        return ip_stats_map
+
     def get_stats(self):
         with self.lock: return dict(self.stats)
 
@@ -770,34 +835,50 @@ class TrackerDB:
         out = []
         with self.lock:
             for name, tr in self.trackers.items():
-                # name  = 外层key（备注），也是 history.json 的索引
-                # tr['domain'] = 实际连接地址（可以是IP或域名）
                 if tr.get('paused'):
                     continue
-                active_ips = [ip for ip in tr['ips'] if not ip.get('removed') and not ip.get('paused')]
-                if not active_ips: continue
-                paused_ip_set = {ip.get('ip','') for ip in tr['ips']
-                                 if ip.get('paused') and not ip.get('removed')}
-                active_ip_set = {ip.get('ip','') for ip in active_ips}
-                s      = hdb.get_domain_summary(name, secs, 
-                                               excluded_ips=paused_ip_set if paused_ip_set else None,
-                                               included_ips=active_ip_set if active_ip_set else None)
+                # 一次遍历完成所有统计，避免多次遍历
+                active_ips = []
+                active_ip_set = set()
+                paused_ip_set = set()
+                online_count = 0
+                offline_count = 0
+                versions = set()
+                for ip_obj in tr.get('ips', []):
+                    ip = ip_obj.get('ip', '')
+                    if ip_obj.get('removed'):
+                        continue
+                    if ip_obj.get('paused'):
+                        paused_ip_set.add(ip)
+                    else:
+                        active_ips.append(ip_obj)
+                        active_ip_set.add(ip)
+                        status = ip_obj.get('status')
+                        if status == 'online':
+                            online_count += 1
+                        elif status == 'offline':
+                            offline_count += 1
+                        versions.add(ip_obj.get('version', 'ipv4'))
+                if not active_ips:
+                    continue
+                s = hdb.get_domain_summary(name, secs,
+                                           excluded_ips=paused_ip_set if paused_ip_set else None,
+                                           included_ips=active_ip_set if active_ip_set else None)
                 uptime = round(s['ok'] / s['total'] * 100, 2) if s['total'] > 0 else None
-                if uptime is None and min_uptime > 0: continue
-                if uptime is not None and uptime < min_uptime: continue
-                online_count  = sum(1 for ip in active_ips if ip.get('status') == 'online')
-                offline_count = sum(1 for ip in active_ips if ip.get('status') == 'offline')
-                versions = list({ip.get('version','ipv4') for ip in active_ips})
-                domain = tr.get('domain', name)  # 实际连接地址（可以是IP）
-                out.append({'name': name, 'domain': domain, 'port': tr.get('port',80),
-                            'protocol': tr.get('protocol','tcp'),
+                if uptime is None and min_uptime > 0:
+                    continue
+                if uptime is not None and uptime < min_uptime:
+                    continue
+                domain = tr.get('domain', name)
+                out.append({'name': name, 'domain': domain, 'port': tr.get('port', 80),
+                            'protocol': tr.get('protocol', 'tcp'),
                             'uptime': uptime,
                             'ip_count': len(active_ips),
                             'online_count': online_count,
                             'offline_count': offline_count,
                             'has_v4': 'ipv4' in versions,
                             'has_v6': 'ipv6' in versions,
-                            'all_paused': all(ip.get('paused') for ip in active_ips) if active_ips else False})
+                            'all_paused': False})
         out.sort(key=lambda x: (-(x['uptime'] if x['uptime'] is not None else -1), -x['online_count'], x['domain']))
         return out[:limit]
 
@@ -812,10 +893,20 @@ class TrackerDB:
             # 全局总条目裁剪（保持向后兼容：按各级别独立上限裁剪）
             max_e = CONFIG.get(max_key, CONFIG.get('max_log_entries', 1000))
             # 只裁剪同级别的日志，其他级别不受影响
-            level_logs_idx = [i for i, e in enumerate(self.logs) if e['level'] == level]
-            while len(level_logs_idx) > max_e:
-                self.logs.pop(level_logs_idx[0])
-                level_logs_idx = [i for i, e in enumerate(self.logs) if e['level'] == level]
+            # 优化：从列表开头查找并删除，避免每次重新计算索引
+            if len(self.logs) > max_e:
+                # 统计当前级别日志数量
+                level_count = sum(1 for e in self.logs if e['level'] == level)
+                if level_count > max_e:
+                    # 需要删除的数量
+                    to_remove = level_count - max_e
+                    remove_idx = 0
+                    while to_remove > 0 and remove_idx < len(self.logs):
+                        if self.logs[remove_idx]['level'] == level:
+                            self.logs.pop(remove_idx)
+                            to_remove -= 1
+                        else:
+                            remove_idx += 1
             # 磁盘日志只写 error 级别，避免成功结果和轮检摘要塞满日志文件
             if CONFIG.get('log_to_disk') and level == 'error':
                 try:
@@ -3326,6 +3417,11 @@ _tracker_threads: Dict[tuple, threading.Thread] = {}
 _tracker_threads_lock = threading.Lock()
 # 停止信号：每个线程的停止事件
 _tracker_stop_events: Dict[tuple, threading.Event] = {}
+# 并发探测限制（信号量 + 计数器）
+_probe_semaphore: threading.Semaphore = None
+_probe_active_count: int = 0
+_probe_active_lock: threading.Lock = threading.Lock()
+_stats_thread_info: dict = {'active_probes': 0, 'max_probes': 120}
 
 def _ip_ver(ip_str: str) -> str:
     """返回 IP 地址族字符串：'ipv6' 或 'ipv4'。解析失败默认视为 ipv4。"""
@@ -3411,7 +3507,16 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
 
             # ── 实际探测（不再做立即重试）────────────────────────
             fn = udp_ping if protocol == 'udp' else tcp_ping
-            ok, lat, err = fn(ip, port)
+            # 使用信号量限制并发探测数
+            with _probe_semaphore:
+                # 更新活跃探测计数
+                with _probe_active_lock:
+                    _stats_thread_info['active_probes'] += 1
+                try:
+                    ok, lat, err = fn(ip, port)
+                finally:
+                    with _probe_active_lock:
+                        _stats_thread_info['active_probes'] -= 1
 
             # 代理不可用 → 跳过，保留上次状态，不计入失败计数
             if not ok and _is_proxy_unavail(err):
@@ -3448,12 +3553,11 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                 # 自动暂停检查（仅在未跳过网络探针时）
                 if auto_pause_enabled and cur >= auto_pause_threshold and not skip_net2:
                     with db.lock:
-                        for ip_obj2 in db.trackers.get(domain, {}).get('ips', []):
-                            if ip_obj2.get('ip') == ip:
-                                ip_obj2['paused'] = True
-                                db._active_ips.discard((domain, ip))
-                                db._ip_map.pop((domain, ip), None)
-                                break
+                        ip_obj2 = db._ip_map.get((domain, ip))
+                        if ip_obj2:
+                            ip_obj2['paused'] = True
+                            db._active_ips.discard((domain, ip))
+                            db._ip_map.pop((domain, ip), None)
                     pause_msg = (f"[自动暂停] {protocol.upper()}://{domain}:{port} ({ip}) "
                                  f"累计失败 {cur} 次，已自动暂停监控")
                     db.add_log(pause_msg, 'info')
@@ -3625,7 +3729,7 @@ def _stop_tracker_threads(name: str, ip: str = None):
             cprint(f"[线程停止] {key}", 'debug')
 
 
-def _start_all_tracker_threads():
+def _start_all_tracker_threads(max_workers: int = 120):
     """启动时为所有已加载的 tracker 创建线程，带随机错峰延迟。
     目标：把 N 个 tracker 的首次探测和DNS查询均匀分散到 check_interval 秒内，
     避免启动时一次性大量并发。
@@ -3636,6 +3740,7 @@ def _start_all_tracker_threads():
 
     domain_count = len(all_trackers)
     if domain_count == 0:
+        cprint(f"[并发限制] 最大并发探测线程数: {max_workers}", 'info')
         return
 
     # 为每个域名分配一个固定偏移槽，错峰启动
@@ -3704,6 +3809,7 @@ def _start_all_tracker_threads():
                 _tracker_threads[key] = t
                 t.start()
 
+    cprint(f"[并发限制] 最大并发探测线程数: {max_workers}", 'info')
     cprint(f"[监控启动] 共 {domain_count} 个tracker，已启动独立线程，"
            f"错峰分布在 {check_interval}s 内", 'info')
 
@@ -3727,9 +3833,15 @@ def _periodic_save_loop():
 
 def monitor_loop():
     """监控管理线程：定期检查死线程并重启，启动所有独立监控线程，不再做轮询探测。"""
+    global _probe_semaphore
     db.add_log("监控服务启动（独立线程模式）", 'info')
     cprint("监控服务启动（独立线程模式）", 'info')
-    _start_all_tracker_threads()
+    # 初始化并发探测信号量
+    max_workers = CONFIG.get('monitor_workers', 120)
+    _probe_semaphore = threading.Semaphore(max_workers)
+    _stats_thread_info['max_probes'] = max_workers
+    # 传递给启动函数，让日志输出顺序更合理
+    _start_all_tracker_threads(max_workers)
     _check_now.set()
 
     # 启动定时保存线程（60秒一次，替代每次探测后立即保存）
@@ -4060,32 +4172,42 @@ def api_trackers_export():
         # 允许传 "announce" 自动补斜杠，或传 "" 表示无后缀
         suffix = ('/' + suffix_raw.lstrip('/')) if suffix_raw else ''
     ranking = db.get_ranking(period, 9999, min_uptime)
-    with db.lock:
-        trackers_snap = {k: dict(v) for k, v in db.trackers.items()}
     lines = []
-    for item in ranking:
-        name     = item['name']    # 外层key(备注)，用于查 trackers
-        domain   = item['domain']  # 实际连接地址，用于拼 URL
-        td       = trackers_snap.get(name, {})
-        protocol = td.get('protocol', 'tcp')
-        port     = td.get('port', 80)
-        ips      = td.get('ips', [])
-        if proto != 'all':
-            is_udp   = (protocol == 'udp')
-            is_https = (protocol == 'https')
-            is_http  = not is_udp and not is_https
-            if proto == 'udp'   and not is_udp:            continue
-            if proto == 'tcp'   and is_udp:                continue  # TCP含HTTP+HTTPS
-            if proto == 'https' and not is_https:          continue
-            if proto == 'http'  and (is_udp or is_https):  continue
-        online_ips = [ip for ip in ips if not ip.get('removed') and not ip.get('paused') and ip.get('status') == 'online']
-        if ip_ver != 'all':
-            online_ips = [ip for ip in online_ips if ip.get('version','ipv4') == ip_ver]
-        if not online_ips: continue
-        scheme = 'udp' if protocol == 'udp' else ('https' if protocol == 'https' else 'http')
-        url = f"{scheme}://{domain}:{port}{suffix}"
-        lines.append(url)
-        lines.append('')  # 每个域名后空一行
+    with db.lock:
+        for item in ranking:
+            name     = item['name']    # 外层key(备注)，用于查 trackers
+            domain   = item['domain']  # 实际连接地址，用于拼 URL
+            td       = db.trackers.get(name, {})
+            protocol = td.get('protocol', 'tcp')
+            port     = td.get('port', 80)
+            # 直接过滤在线IP，避免创建完整列表
+            has_online = False
+            if ip_ver == 'all':
+                # 不需要版本过滤时，只要有一个在线IP即可
+                for ip_obj in td.get('ips', []):
+                    if not ip_obj.get('removed') and not ip_obj.get('paused') and ip_obj.get('status') == 'online':
+                        has_online = True
+                        break
+            else:
+                # 需要版本过滤
+                for ip_obj in td.get('ips', []):
+                    if not ip_obj.get('removed') and not ip_obj.get('paused') and ip_obj.get('status') == 'online' and ip_obj.get('version', 'ipv4') == ip_ver:
+                        has_online = True
+                        break
+            if not has_online:
+                continue
+            if proto != 'all':
+                is_udp   = (protocol == 'udp')
+                is_https = (protocol == 'https')
+                is_http  = not is_udp and not is_https
+                if proto == 'udp'   and not is_udp:            continue
+                if proto == 'tcp'   and is_udp:                continue  # TCP含HTTP+HTTPS
+                if proto == 'https' and not is_https:          continue
+                if proto == 'http'  and (is_udp or is_https):  continue
+            scheme = 'udp' if protocol == 'udp' else ('https' if protocol == 'https' else 'http')
+            url = f"{scheme}://{domain}:{port}{suffix}"
+            lines.append(url)
+            lines.append('')  # 每个域名后空一行
     while lines and lines[-1] == '':
         lines.pop()
     text = '\n'.join(lines)
@@ -4469,19 +4591,24 @@ def api_pause():
             td = db.trackers.get(domain)
             if not td:
                 return jsonify({'error': '域名不存在'}), 404
-            for ip_obj in td.get('ips', []):
-                if ip_obj['ip'] == ip:
-                    ip_obj['paused'] = paused
-                    key = (domain, ip)
-                    if paused:
-                        db._active_ips.discard(key)
-                        db._ip_map.pop(key, None)
-                    else:
-                        if not ip_obj.get('removed'):
-                            db._active_ips.add(key)
-                            db._ip_map[key] = ip_obj
-                    changed.append(f"{domain}/{ip}")
-                    break
+            # 先从 _ip_map 查找（快速路径）
+            ip_obj = db._ip_map.get((domain, ip))
+            if not ip_obj:
+                # 如果 _ip_map 中找不到（可能已暂停），遍历查找
+                for ip_obj2 in td.get('ips', []):
+                    if ip_obj2.get('ip') == ip:
+                        ip_obj = ip_obj2
+                        break
+            if ip_obj:
+                ip_obj['paused'] = paused
+                key = (domain, ip)
+                if paused:
+                    db._active_ips.discard(key)
+                else:
+                    if not ip_obj.get('removed'):
+                        db._active_ips.add(key)
+                        db._ip_map[key] = ip_obj
+                changed.append(f"{domain}/{ip}")
         elif domain:
             # 整个域名
             td = db.trackers.get(domain)
@@ -4919,6 +5046,26 @@ def api_export_logs():
         'Content-Length':      str(len(body)),
     })
 
+@app.route('/api/stats/threads', methods=['GET'])
+@_require_role('admin', 'operator', 'viewer')
+def api_stats_threads():
+    """返回当前探测线程统计信息"""
+    try:
+        with _probe_active_lock:
+            active = _stats_thread_info['active_probes']
+        max_probes = _stats_thread_info['max_probes']
+        with db.lock:
+            total_active_ips = len(db._active_ips)
+        return jsonify({
+            'active_probes': active,
+            'max_probes': max_probes,
+            'total_active_ips': total_active_ips,
+            'available_slots': max(0, max_probes - active)
+        })
+    except Exception as e:
+        app.logger.error('[stats/threads] 查询失败: %s', e, exc_info=True)
+        return jsonify({'error': '查询失败'}), 500
+
 # ── 历史管理 ──
 @app.route('/api/history/clear', methods=['POST'])
 @_require_role('admin')
@@ -5082,6 +5229,13 @@ def api_config():
         if any(k in data for k in proxy_changed_keys):
             _socks5_pool.invalidate()
             cprint('[SOCKS5Pool] 代理配置变更，连接池已重置', 'debug')
+        # 如果并发检测数变化，更新信号量
+        if 'monitor_workers' in data:
+            global _probe_semaphore
+            max_workers = data['monitor_workers']
+            _probe_semaphore = threading.Semaphore(max_workers)
+            _stats_thread_info['max_probes'] = max_workers
+            cprint(f'[并发限制] 最大并发探测线程数更新为: {max_workers}', 'info')
         if changes:
             msg = f"配置已更新: {' | '.join(changes)}"
             g.access_note = msg

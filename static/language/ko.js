@@ -163,6 +163,8 @@ window.__i18n_ko = {
     autoRefreshDesc: '페이지 새로 고침 간격',
     monitorWorkers: '동시 작업자 수',
     monitorWorkersDesc: '최대 병렬 확인 스레드 수 (IP 목록이 많으면 늘리세요)',
+    currentlyUsing: '현재 사용',
+    almostFull: '용량 초과 임박',
     exportSuffix: '내보내기 접미사',
     exportSuffixDesc: 'Tracker URL 내보낼 때 각 URL에 추가되는 경로',
     tabSwitchRefresh: '탭 전환 시 새로 고침',

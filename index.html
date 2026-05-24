@@ -2488,7 +2488,13 @@
                                 <option :value="160">160</option>
                                 <option :value="200">200</option>
                             </select>
-                            <div class="form-text">{{ t('config.monitorWorkersDesc') }}</div>
+                            <div class="form-text">
+                                <span>{{ t('config.monitorWorkersDesc') }}</span>
+                                <span v-if="threadStats" class="ms-2">
+                                    <span class="badge bg-info">{{ t('config.currentlyUsing') }}: {{ threadStats.active_probes }}/{{ threadStats.max_probes }}</span>
+                                    <span v-if="threadStats.available_slots < threadStats.max_probes * 0.2" class="badge bg-warning ms-1">{{ t('config.almostFull') }}</span>
+                                </span>
+                            </div>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">{{ t('config.retryMode') }}</label>
@@ -3121,6 +3127,7 @@ createApp({
             avg_latency:-1, avg_latency_v4:-1, avg_latency_v6:-1,
             avg_latency_tcp:-1, avg_latency_udp:-1,
             probe_details:{}});
+        const threadStats = ref(null);
         const expanded  = ref([]);   // 手动展开的域名（≥5 IP）
         const collapsed = ref([]);   // 手动折叠的域名（< 5 IP 默认展开，加入此集合后收起）
         const searchQ = ref('');
@@ -3758,7 +3765,13 @@ createApp({
                     }
                 }
                 // resetRefresh 由 onMounted 统一调用，避免产生双重 timer
-            } catch(e){} 
+            } catch(e){}
+        };
+
+        const loadThreadStats = async () => {
+            try {
+                threadStats.value = (await axios.get('/api/stats/threads')).data;
+            } catch(e) {}
         };
 
         const toggleExpand = (d) => {
@@ -4714,6 +4727,10 @@ createApp({
                 if (tab === 'logs') {
                     await loadLogs();
                 }
+                // 配置页加载线程统计
+                if (tab === 'config') {
+                    await loadThreadStats();
+                }
             }, refreshMs.value);
         };
 
@@ -4784,6 +4801,8 @@ createApp({
             if (tab === 'ranking') loads.push(loadRanking());
             // logs：仪表盘和日志页需要
             if (tab === 'dashboard' || tab === 'logs') loads.push(loadLogs());
+            // threadStats：配置页需要
+            if (tab === 'config' && isAdmin) loads.push(loadThreadStats());
             await Promise.all(loads);
             loading.value = false;
             resetRefresh();
@@ -4806,11 +4825,14 @@ createApp({
             }
             if (tab === 'ranking') await loadRanking();
             if (tab === 'logs') await loadLogs(); // 确保使用当前选择的级别加载，且不再额外请求 error
-            if (tab === 'config' && authUser.value.role === 'admin') loadUsers();
+            if (tab === 'config' && authUser.value.role === 'admin') {
+                loadUsers();
+                await loadThreadStats();
+            }
         });
 
         return {
-            currentTab, locale, currentTheme, themeNames, setTheme, layoutWidth, applyLayout, loading, trackers, stats, expanded, collapsed, expandMode, searchQ, logSearch, TAB_PATH,
+            currentTab, locale, currentTheme, themeNames, setTheme, layoutWidth, applyLayout, loading, trackers, stats, threadStats, expanded, collapsed, expandMode, searchQ, logSearch, TAB_PATH,
             sortKey, sortDir, cycleSort, sortedTrackers,
             showAdd, showProbeTooltip, probeTooltipX, probeTooltipY, addUrl, adding, addMsg, ranking, filteredRanking, rankPeriod, showApiPanel, showQueryApiPanel, apiBase, apiExamples, queryApiExamples, apiCopiedIdx, copyApiText, filterEnabled, filterThreshold,
             exportRanking, exportProto, exportIpVer,
