@@ -468,6 +468,8 @@ class TrackerDB:
         self.trackers = {}
         self.logs  = []
         self.stats = {'total': 0, 'alive': 0, 'ipv4': 0, 'ipv6': 0}
+        # 活跃IP集合：存储 (domain, ip) 元组，仅包含非暂停、非移除的IP
+        self._active_ips = set()
         # 可用率缓存
         self.uptime_cache = LRUCache(1000)  # 限制缓存大小
         self.cache_lock = threading.RLock()
@@ -532,6 +534,7 @@ class TrackerDB:
                         info.update({'status': 'unknown', 'latency': -1, 'last_check': None,
                                      'added_time': datetime.now().isoformat()})
                         self.trackers[domain]['ips'].append(info)
+                        self._active_ips.add((domain, info['ip']))
             self._save_async()  # 改为异步保存
 
     def update_status(self, domain, ip, status, latency, check_time=None):
@@ -539,9 +542,20 @@ class TrackerDB:
             if domain in self.trackers:
                 for info in self.trackers[domain]['ips']:
                     if info['ip'] == ip:
-                        info['status']     = status
-                        info['latency']    = latency
+                        info['status'] = status
+                        info['latency'] = latency
                         info['last_check'] = check_time or datetime.now().isoformat()  # 优先使用传入的时间
+                        # 同时保存数值时间戳，避免后续转换
+                        try:
+                            dt = datetime.fromisoformat(info['last_check'])
+                            info['last_check_ts'] = dt.timestamp()
+                        except Exception:
+                            info['last_check_ts'] = time.time()
+                        # 非暂停、非移除的IP才加入活跃集
+                        if not info.get('paused') and not info.get('removed'):
+                            self._active_ips.add((domain, ip))
+                        else:
+                            self._active_ips.discard((domain, ip))
                         break
                 self._push_history(domain, ip, status)
                 self._recalc()
@@ -820,9 +834,13 @@ class TrackerDB:
                 if ip in new_ips:
                     # IP 仍然存在：若有 removed 标记则清除
                     if ip_obj.pop('removed', None) is not None:
+                        self._active_ips.add((domain, ip))
                         changed = True
                 else:
                     # IP 消失
+                    key = (domain, ip)
+                    if key in self._active_ips:
+                        self._active_ips.discard(key)
                     if show_removed:
                         if not ip_obj.get('removed'):
                             ip_obj['removed'] = True
@@ -840,6 +858,7 @@ class TrackerDB:
                         'added_time': datetime.now().isoformat()
                     })
                     td['ips'].append(ip_info)
+                    self._active_ips.add((domain, ip_info['ip']))
                     changed = True
             if changed:
                 self._recalc()
@@ -940,8 +959,16 @@ class TrackerDB:
                     if removed_cnt:
                         cprint(f"[load] {d}: 跳过探测 {removed_cnt} 个已移除IP（历史数据保留在 history.json）", 'debug')
                     for ip_obj in clean_ips:
+                        # 清理历史摘要字段
                         for k in ('history_24h','history_7d','history_30d'):
                             ip_obj.pop(k, None)
+                        # ===== 新增：为旧数据补充 last_check_ts =====
+                        if 'last_check' in ip_obj and 'last_check_ts' not in ip_obj:
+                            try:
+                                dt = datetime.fromisoformat(ip_obj['last_check'])
+                                ip_obj['last_check_ts'] = dt.timestamp()
+                            except Exception:
+                                ip_obj['last_check_ts'] = 0
                     self.trackers[d] = {
                         'domain':t.get('domain',d),'port':t.get('port',80),
                         'protocol':t.get('protocol','tcp'),'ips':clean_ips,
@@ -950,7 +977,7 @@ class TrackerDB:
                         'paused': t.get('paused', False)
                     }
                 self._recalc()
-            # 预热 geo 缓存
+            # 预热 geo 缓存（保持不变）
             warmed = 0
             for td in self.trackers.values():
                 for ip_obj in td.get('ips', []):
@@ -3159,31 +3186,44 @@ def _update_health_status():
 
         # 重新计算失败率
         threshold = CONFIG.get('probe_fail_threshold', 30) / 100.0
-        timeout = CONFIG.get('timeout', 5)
-        window_sec = CONFIG.get('check_interval', 30)   # 统计最近一个检测周期内的数据
+        window_sec = CONFIG.get('check_interval', 30)
 
         total = 0
         fail = 0
         with db.lock:
-            for domain, td in db.trackers.items():
-                if td.get('paused'):
+            # 只遍历活跃IP集合，规模与活跃IP数量一致
+            for domain, ip in db._active_ips:
+                td = db.trackers.get(domain)
+                if not td:
                     continue
-                for ip_obj in td.get('ips', []):
-                    if ip_obj.get('removed') or ip_obj.get('paused'):
+                # 找到对应的 IP 对象
+                ip_obj = None
+                for obj in td.get('ips', []):
+                    if obj.get('ip') == ip:
+                        ip_obj = obj
+                        break
+                if not ip_obj:
+                    continue
+                # 二次确认：如果 IP 被暂停或移除（理论上不应出现在活跃集中），跳过
+                if ip_obj.get('removed') or ip_obj.get('paused'):
+                    continue
+                total += 1
+                # 优先使用数值时间戳 last_check_ts，避免重复转换
+                last_ts = ip_obj.get('last_check_ts')
+                if last_ts is None:
+                    last_str = ip_obj.get('last_check')
+                    if last_str:
+                        try:
+                            last_ts = datetime.fromisoformat(last_str).timestamp()
+                            ip_obj['last_check_ts'] = last_ts
+                        except (ValueError, TypeError):
+                            continue
+                    else:
                         continue
-                    total += 1
-                    last_ts_str = ip_obj.get('last_check')
-                    if not last_ts_str:
-                        continue
-                    try:
-                        last_time = datetime.fromisoformat(last_ts_str).timestamp()
-                    except (ValueError, TypeError):
-                        continue
-                    # 只统计最近 window_sec 秒内有过探测的 IP
-                    if now - last_time > window_sec:
-                        continue
-                    if ip_obj.get('status') == 'offline':
-                        fail += 1
+                if now - last_ts > window_sec:
+                    continue
+                if ip_obj.get('status') == 'offline':
+                    fail += 1
 
         net_bad = False
         if total >= 5:
