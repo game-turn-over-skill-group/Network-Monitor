@@ -545,7 +545,8 @@ class TrackerDB:
                     'domain': domain, 'port': port, 'protocol': protocol,
                     'ips': [],
                     'added_time': datetime.now().isoformat(),
-                    'dns_error': False
+                    'dns_error': False,
+                    'paused': False  # 确保新添加的 tracker 有 paused 字段
                 }
             else:
                 # 已有条目：只更新 port/protocol，不覆盖 domain 字段（用户可能手动改成IP）
@@ -784,16 +785,15 @@ class TrackerDB:
         """批量获取域名下所有IP的统计数据，减少重复遍历"""
         ip_stats_map = {}
         
-        # 获取该域名下所有活跃IP
-        active_ips = []
+        # 获取该域名下所有IP（包括已移除的）
+        all_ips = []
         with self.lock:
             td = self.trackers.get(domain)
             if td:
                 for ip_obj in td.get('ips', []):
-                    if not ip_obj.get('removed'):
-                        active_ips.append(ip_obj.get('ip', ''))
+                    all_ips.append(ip_obj.get('ip', ''))
         
-        for ip in active_ips:
+        for ip in all_ips:
             if not ip:
                 continue
             
