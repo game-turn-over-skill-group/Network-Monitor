@@ -63,21 +63,21 @@ DEFAULT_CONFIG = {
     'dns_timeout': 0,                  # DNS 单次查询超时（秒）。0=与 timeout 相同；可设为 2~4 加快多 DNS 故障转移
     'dns_lb_enabled': True,            # DNS服务器负载均衡/权重排序开关（默认关闭）；关闭时始终按配置顺序顺序尝试
     'dns_refresh_interval': 120,       # DNS 刷新间隔（秒），默认 2 分钟
-    'max_log_entries': 20000,          # 日志最大条目数（兼容旧版，以下三项优先）
-    'max_log_info': 2000,              # Info 级日志最大条目数
+    'max_log_entries': 50000,          # 日志最大条目数（兼容旧版，以下三项优先）
+    'max_log_info': 25000,             # Info 级日志最大条目数
     'max_log_success': 20000,          # Success 级日志最大条目数
-    'max_log_error': 5000,             # Error 级日志最大条目数
+    'max_log_error': 2000,             # Error 级日志最大条目数
     'page_refresh_ms': 30000,          # 前端页面自动刷新间隔(ms)，0=禁用
     'cache_history': True,             # 是否缓存历史可用率到JSON（重启不丢失）
     'dashboard_stat_period': '24h',    # 仪表盘可用率统计周期：24h | 7d | 30d（排行TOP10+快速搜索）
-    'tracker_stat_period': '24h',      # 监控列表可用率统计周期：24h | 7d | 30d
+    'tracker_stat_period': '7d',       # 监控列表可用率统计周期：24h | 7d | 30d
     'tab_switch_refresh': True,        # 切换仪表盘/监控列表时是否刷新数据
     'export_suffix': '/announce',      # 导出 tracker 列表时追加的路径后缀
     'show_removed_ips': True,          # 是否显示已移除的历史IP（前端控制）
     'default_layout_width': '1700',    # 默认页面视野宽度（px字符串，对应50%~100%）
     'allow_private_ips': False,        # 是否允许添加内网IP，默认禁止（SSRF防护）
     # ── 网络探针与故障检测 ──
-    'probe_fail_threshold': 50,        # 本轮失败率达到多少%触发网络异常（默认50%，原90%太高）
+    'probe_fail_threshold': 30,        # 本轮失败率达到多少%触发网络异常（默认30%）
     'probe_timeout': 5,                # 探针单次 TCP 连接超时（秒），默认5s（原硬编码3s）
     'probe_ipv4_targets': [            # IPv4 探针目标列表（任一可达即认为 IPv4 正常）
         '8.8.8.8',                     # Google Public DNS
@@ -482,6 +482,8 @@ class TrackerDB:
         self._save_pending = False
         self._save_requested = False
         self._save_state_lock = threading.RLock()
+        self._dirty_trackers = set()  # 标记需要保存的tracker域名
+        self._last_save_time = 0  # 上次保存时间（用于节流）
 
     def _save_trace_enabled(self):
         return CONFIG.get('debug_save_trace', False) and CONFIG.get('log_level') == 'debug'
@@ -561,7 +563,9 @@ class TrackerDB:
                         self.trackers[domain]['ips'].append(info)
                         self._active_ips.add((domain, info['ip']))
                         self._ip_map[(domain, info['ip'])] = info
-            self._save_async()  # 改为异步保存
+            # 标记该tracker有变化
+            self._dirty_trackers.add(domain)
+            # 延迟保存，不立即调用 _save_async()，由定时保存统一处理
 
     def update_status(self, domain, ip, status, latency, check_time=None):
         with self.lock:
@@ -585,7 +589,8 @@ class TrackerDB:
                 self._push_history(domain, ip, status)
                 self._recalc()
                 self._clear_uptime_cache(domain)
-                # 不在此处保存：探测结果由定时保存线程（120秒）统一落盘，
+                # 探测结果不标记tracker脏，只写入history
+                # data.json只在配置变化时保存（添加/删除/暂停/恢复）
                 # 避免每次探测都写磁盘导致高频 I/O
                 #self._save_async()  # 异步保存
 
@@ -987,11 +992,22 @@ class TrackerDB:
             if changed:
                 self._recalc()
                 self._clear_uptime_cache(domain)
+                # 标记该tracker有配置变化（DNS更新导致IP变化）
+                self._dirty_trackers.add(domain)
                 self._save_async()
 
     # 异步保存：将保存任务提交到线程池
     def _save_async(self):
+        """异步保存（线程安全，合并高频请求，带节流）"""
         with self._save_state_lock:
+            # 节流：两次保存之间至少间隔1秒，避免高频写入
+            now = time.time()
+            if now - self._last_save_time < 1.0:
+                # 如果已有任务在执行，标记需要再保存一次
+                if self._save_pending:
+                    self._save_requested = True
+                return
+            
             if self._save_pending:
                 # 已有保存任务在执行/排队：只标记“还需要再保存一次”
                 # 避免高频更新时丢失最后一次落盘请求。
@@ -1001,6 +1017,7 @@ class TrackerDB:
                 return
             self._save_pending = True
             self._save_requested = False
+            self._last_save_time = now  # 记录保存开始时间
             if self._save_trace_enabled():
                 cprint("[save] queue=idle pending=1 requested=0 -> submit worker", 'debug')
         def _save_worker():
@@ -1026,25 +1043,66 @@ class TrackerDB:
         self._save_executor.submit(_save_worker)
 
     def _save(self):
+        """保存 data.json（tracker配置）"""
         try:
-            # ── 第一步：持锁期间只做纯内存拷贝（微秒级），不阻塞 API ────────
             with self.lock:
-                snapshot = []
-                for d, t in self.trackers.items():
-                    ips_snap = []
-                    for ip_obj in t['ips']:
-                        ip_entry = {k: v for k, v in ip_obj.items()
-                                    if k not in ('history_24h','history_7d','history_30d')}
-                        ips_snap.append(ip_entry)
-                    paused_set = ({ip_obj.get('ip','') for ip_obj in t['ips']
-                                   if ip_obj.get('paused') and not ip_obj.get('removed')}
-                                  if not t.get('paused') else set())
-                    snapshot.append((d, t.get('domain', d), t.get('port', 80),
-                                     t.get('protocol', 'tcp'), t['added_time'],
-                                     t.get('paused', False), ips_snap, paused_set))
+                # 如果没有配置变化，直接跳过
+                if len(self._dirty_trackers) == 0:
+                    return
+                
+                # ── 第一步：持锁期间只做纯内存拷贝（微秒级），不阻塞 API ────────
+                # 判断是否需要增量保存
+                total_trackers = len(self.trackers)
+                dirty_count = len(self._dirty_trackers)
+                
+                if dirty_count > 0 and dirty_count < total_trackers * 0.5:
+                    # 增量保存：只处理变化的tracker
+                    snapshot = []
+                    for d in self._dirty_trackers:
+                        if d in self.trackers:
+                            t = self.trackers[d]
+                            ips_snap = []
+                            for ip_obj in t['ips']:
+                                ip_entry = {k: v for k, v in ip_obj.items()
+                                            if k not in ('history_24h','history_7d','history_30d')}
+                                ips_snap.append(ip_entry)
+                            paused_set = ({ip_obj.get('ip','') for ip_obj in t['ips']
+                                           if ip_obj.get('paused') and not ip_obj.get('removed')}
+                                          if not t.get('paused') else set())
+                            snapshot.append((d, t.get('domain', d), t.get('port', 80),
+                                             t.get('protocol', 'tcp'), t['added_time'],
+                                             t.get('paused', False), ips_snap, paused_set))
+                    
+                    # 读取现有文件内容
+                    if os.path.exists(CONFIG['data_file']):
+                        with open(CONFIG['data_file'], 'r', encoding='utf-8') as f:
+                            try:
+                                data = json.load(f)
+                            except:
+                                data = {}
+                    else:
+                        data = {}
+                else:
+                    # 全量保存
+                    snapshot = []
+                    for d, t in self.trackers.items():
+                        ips_snap = []
+                        for ip_obj in t['ips']:
+                            ip_entry = {k: v for k, v in ip_obj.items()
+                                        if k not in ('history_24h','history_7d','history_30d')}
+                            ips_snap.append(ip_entry)
+                        paused_set = ({ip_obj.get('ip','') for ip_obj in t['ips']
+                                       if ip_obj.get('paused') and not ip_obj.get('removed')}
+                                      if not t.get('paused') else set())
+                        snapshot.append((d, t.get('domain', d), t.get('port', 80),
+                                         t.get('protocol', 'tcp'), t['added_time'],
+                                         t.get('paused', False), ips_snap, paused_set))
+                    data = {}
+                
+                # 清空脏标记
+                self._dirty_trackers.clear()
 
             # ── 第二步：锁外做慢操作（读 hdb 历史、写文件），不阻塞任何 API ─
-            data = {}
             do_history = CONFIG.get('cache_history', True)
             for d, domain, port, protocol, added_time, paused, ips_snap, paused_set in snapshot:
                 ips_to_save = []
@@ -1070,8 +1128,10 @@ class TrackerDB:
 
             with open(CONFIG['data_file'], 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            if do_history:
-                hdb.save()
+            # hdb.save() 只由定时保存线程处理，不在此处调用
+            # 避免每次配置变化都触发历史数据保存
+            #if do_history:
+            #    hdb.save()
         except Exception as e:
             cprint(f"保存 data.json 失败: {e}", 'error')
 
@@ -1083,12 +1143,15 @@ class TrackerDB:
             with self.lock:
                 self._active_ips.clear()
                 self._ip_map.clear()
+                total_removed = 0
                 for d, t in data.items():
                     all_ips    = t.get('ips', [])
-                    clean_ips  = [ip for ip in all_ips if not ip.get('removed', False)]
+                    # 启动时删除 removed: true 的IP，减少文件大小
+                    clean_ips   = [ip for ip in all_ips if not ip.get('removed', False)]
                     removed_cnt = len(all_ips) - len(clean_ips)
                     if removed_cnt:
-                        cprint(f"[load] {d}: 跳过探测 {removed_cnt} 个已移除IP（历史数据保留在 history.json）", 'debug')
+                        total_removed += removed_cnt
+                        cprint(f"[load] {d}: 清理 {removed_cnt} 个已移除IP", 'debug')
                     for ip_obj in clean_ips:
                         # 清理历史摘要字段
                         for k in ('history_24h','history_7d','history_30d'):
@@ -1100,6 +1163,7 @@ class TrackerDB:
                                 ip_obj['last_check_ts'] = dt.timestamp()
                             except Exception:
                                 ip_obj['last_check_ts'] = 0
+                    # 只保留非removed的IP
                     self.trackers[d] = {
                         'domain':t.get('domain',d),'port':t.get('port',80),
                         'protocol':t.get('protocol','tcp'),'ips':clean_ips,
@@ -1107,7 +1171,7 @@ class TrackerDB:
                         'dns_error': t.get('dns_error', False),
                         'paused': t.get('paused', False)
                     }
-                    # 初始化活跃IP集合和IP快速查找表
+                    # 初始化活跃IP集合和IP快速查找表（只添加非paused的IP）
                     domain_paused = t.get('paused', False)
                     for ip_obj in clean_ips:
                         ip = ip_obj.get('ip')
@@ -1126,6 +1190,12 @@ class TrackerDB:
                         warmed += 1
             if warmed:
                 cprint(f"[geo] 预热归属地缓存 {warmed} 条", 'info')
+            # 如果清理了 removed IP，保存更新后的 data.json
+            if total_removed > 0:
+                cprint(f"[load] 共清理 {total_removed} 个已移除IP，保存 data.json", 'info')
+                self._save_async()
+            # 标记数据已同步，避免启动时全量保存
+            self._dirty_trackers.clear()
             return True
         except Exception as e:
             cprint(f"加载 data.json 失败: {e}", 'error')
@@ -1161,19 +1231,26 @@ HISTORY_WINDOWS = {
 
 class HistoryDB:
     def __init__(self):
-        self.lock     = threading.RLock()
-        self._data    = {}
-        self._last_gc = 0
+        self.lock         = threading.RLock()
+        self._data        = {}
+        self._last_gc     = 0
+        self._dirty_domains = set()  # 标记需要保存的域名
+        self._save_timer   = None    # 延迟保存定时器
+        self._pending_records = []   # 待写入的探测记录缓存
+        self._last_flush   = 0       # 上次刷新时间
 
     def _key_ip(self, ip): return f'ip:{ip}'
 
     def push_ip(self, domain, ip, result):
-        """写入一条探测结果到对应域名下的IP key"""
+        """写入一条探测结果到对应域名下的IP key（先缓存，批量写入）"""
         v   = 1 if result in (True, 'online') else 0
         now = int(time.time())
         with self.lock:
             dom = self._data.setdefault(domain, {})
             dom.setdefault(self._key_ip(ip), []).append([now, v])
+            self._dirty_domains.add(domain)  # 标记该域名有变化
+            # 缓存待写入的记录（仅追加模式）
+            self._pending_records.append((domain, self._key_ip(ip), now, v))
         if now - self._last_gc > 3600:
             self._gc()
 
@@ -1223,6 +1300,7 @@ class HistoryDB:
         """手动删除域名时调用，清除该域名所有历史数据"""
         with self.lock:
             self._data.pop(domain, None)
+            self._dirty_domains.add(domain)  # 标记需要保存
 
     def _gc(self):
         """清理30天外的数据"""
@@ -1247,20 +1325,62 @@ class HistoryDB:
         ip = ip_str.lower().strip()
         return ip in HistoryDB._INVALID_IPS
 
-    def save(self):
-        """持久化到 history.json（原子写入：先写临时文件再替换，防止写入中断导致数据损坏）"""
-        tmp_file = HISTORY_FILE + '.tmp'
+    def save(self, force_full=False):
+        """运行时：只追加到 .append 文件，不做定时合并（合并在启动时进行）"""
         try:
             with self.lock:
-                data_copy = {
-                    domain: {ik: list(pts) for ik, pts in ip_map.items()}
-                    for domain, ip_map in self._data.items()
-                }
-            # 第一步：写入临时文件（即使此时崩溃，原文件也不受影响）
+                if not self._pending_records:
+                    return
+                
+                # 批量写入追加文件（只追加，不合并）
+                with open(HISTORY_FILE + '.append', 'a', encoding='utf-8') as f:
+                    for domain, ik, ts, v in self._pending_records:
+                        record = json.dumps({
+                            'd': domain,
+                            'i': ik,
+                            't': ts,
+                            'v': v
+                        }, separators=(',', ':'))
+                        f.write(record + '\n')
+                    f.flush()
+                    os.fsync(f.fileno())
+                
+                self._pending_records = []
+                self._dirty_domains.clear()
+                
+        except Exception as e:
+            cprint(f"[HistoryDB] 保存失败: {e}", 'error')
+
+    def _merge_append_file(self):
+        """合并追加文件到主 history.json（定期执行，减少文件碎片）"""
+        append_file = HISTORY_FILE + '.append'
+        if not os.path.exists(append_file):
+            return
+        
+        try:
+            # 读取追加文件的所有记录
+            with open(append_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                        domain = rec.get('d')
+                        ik = rec.get('i')
+                        ts = rec.get('t')
+                        v = rec.get('v')
+                        if domain and ik:
+                            dom = self._data.setdefault(domain, {})
+                            dom.setdefault(ik, []).append([ts, v])
+                    except:
+                        continue
+            
+            # 全量写入主文件
+            tmp_file = HISTORY_FILE + '.tmp'
             with open(tmp_file, 'w', encoding='utf-8') as f:
-                # 每个IP条目单独一行，便于手动编辑和区分
                 f.write('{\n')
-                domains = list(data_copy.items())
+                domains = list(self._data.items())
                 for d_idx, (domain, ip_map) in enumerate(domains):
                     f.write(f'  {json.dumps(domain, ensure_ascii=False)}: {{\n')
                     ip_items = list(ip_map.items())
@@ -1271,53 +1391,130 @@ class HistoryDB:
                     domain_comma = ',' if d_idx < len(domains) - 1 else ''
                     f.write(f'  }}{domain_comma}\n')
                 f.write('}\n')
-                # 确保内容已刷入磁盘，降低进程异常退出导致的落盘缺失概率
                 f.flush()
                 os.fsync(f.fileno())
-            # 第二步：原子替换（os.replace 在同一文件系统下是原子操作）
             os.replace(tmp_file, HISTORY_FILE)
+            
+            # 删除追加文件
+            os.remove(append_file)
+            cprint(f"[HistoryDB] 合并完成，已清理追加文件", 'info')
         except Exception as e:
-            cprint(f"[HistoryDB] 保存失败: {e}", 'error')
-            # 清理可能残留的临时文件
-            try:
-                if os.path.exists(tmp_file):
-                    os.remove(tmp_file)
-            except Exception:
-                pass
+            cprint(f"[HistoryDB] 合并失败: {e}", 'error')
 
     def load(self):
-        """从 history.json 恢复，GC过期数据，自动过滤无效IP（如[::]、127.0.0.1）"""
+        """启动时：先合并追加文件到主文件（去重），再加载到内存"""
         try:
-            if not os.path.exists(HISTORY_FILE):
-                return
-            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-                raw = json.load(f)
             cutoff = int(time.time()) - 30 * 86400
+            
+            # 1. 先处理追加文件（如果存在）
+            append_file = HISTORY_FILE + '.append'
+            if os.path.exists(append_file):
+                # 读取追加文件
+                append_records = []
+                with open(append_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                rec = json.loads(line)
+                                if rec.get('d') and rec.get('i') and rec.get('t') >= cutoff:
+                                    append_records.append(rec)
+                            except Exception as e:
+                                cprint(f"[HistoryDB] 解析追加文件记录失败: {e}", 'error')
+                                continue
+                
+                # 如果有需要合并的记录
+                if append_records:
+                    try:
+                        # 读取主文件（如果存在）
+                        main_data = {}
+                        if os.path.exists(HISTORY_FILE):
+                            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+                                main_data = json.load(f)
+                        
+                        # 合并去重（检查每个记录是否已存在）
+                        merged_count = 0
+                        duplicate_count = 0
+                        for rec in append_records:
+                            domain = rec['d']
+                            ik = rec['i']
+                            ts = rec['t']
+                            v = rec['v']
+                            
+                            # 检查是否已存在相同时间戳的记录（去重）
+                            exists = False
+                            if domain in main_data and isinstance(main_data[domain], dict):
+                                if ik in main_data[domain] and isinstance(main_data[domain][ik], list):
+                                    for existing_ts, existing_v in main_data[domain][ik]:
+                                        if existing_ts == ts:
+                                            exists = True
+                                            duplicate_count += 1
+                                            break
+                            
+                            if not exists:
+                                main_data.setdefault(domain, {}).setdefault(ik, []).append([ts, v])
+                                merged_count += 1
+                        
+                        # 写入主文件（原子操作）
+                        tmp_file = HISTORY_FILE + '.tmp'
+                        with open(tmp_file, 'w', encoding='utf-8') as f:
+                            f.write('{\n')
+                            domains = list(main_data.items())
+                            for d_idx, (domain, ip_map) in enumerate(domains):
+                                f.write(f'  {json.dumps(domain, ensure_ascii=False)}: {{\n')
+                                ip_items = list(ip_map.items())
+                                for i_idx, (ik, pts) in enumerate(ip_items):
+                                    pts_str = json.dumps(pts, separators=(',', ':'))
+                                    comma = ',' if i_idx < len(ip_items) - 1 else ''
+                                    f.write(f'    {json.dumps(ik)}: {pts_str}{comma}\n')
+                                domain_comma = ',' if d_idx < len(domains) - 1 else ''
+                                f.write(f'  }}{domain_comma}\n')
+                            f.write('}\n')
+                            f.flush()
+                            os.fsync(f.fileno())
+                        os.replace(tmp_file, HISTORY_FILE)
+                        
+                        cprint(f"[HistoryDB] 启动时合并完成: 新增 {merged_count} 条, 跳过重复 {duplicate_count} 条", 'info')
+                        
+                        # 只有合并成功才删除追加文件
+                        os.remove(append_file)
+                        cprint(f"[HistoryDB] 已清理追加文件", 'info')
+                    
+                    except Exception as e:
+                        # 合并失败，保留追加文件，下次启动继续合并
+                        cprint(f"[HistoryDB] 启动时合并失败: {e}", 'error')
+                        cprint(f"[HistoryDB] 追加文件已保留，将在下次启动时重新尝试合并", 'warning')
+            
+            # 2. 加载主文件到内存
             loaded_domains = loaded_ips = skipped_ips = 0
-            with self.lock:
-                for domain, ip_map in raw.items():
-                    if not isinstance(ip_map, dict):
-                        continue  # 跳过旧格式残留（扁平key格式）
-                    cleaned_map = {}
-                    for ik, pts in ip_map.items():
-                        if not isinstance(pts, list):
+            if os.path.exists(HISTORY_FILE):
+                with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+                    raw = json.load(f)
+                with self.lock:
+                    for domain, ip_map in raw.items():
+                        if not isinstance(ip_map, dict):
                             continue
-                        # 自动过滤CF安全DNS解析出的无效IP（[::]、127.0.0.1等）
-                        raw_ip = ik[3:] if ik.startswith('ip:') else ik
-                        if self._is_invalid_ip(raw_ip):
-                            cprint(f"[HistoryDB] 跳过无效IP: {ik} (域名: {domain})", 'debug')
-                            skipped_ips += 1
-                            continue
-                        cleaned = [[int(ts), int(v)] for ts, v in pts if ts >= cutoff]
-                        if cleaned:
-                            cleaned_map[ik] = cleaned
-                            loaded_ips += 1
-                    if cleaned_map:
-                        self._data[domain] = cleaned_map
-                        loaded_domains += 1
+                        cleaned_map = {}
+                        for ik, pts in ip_map.items():
+                            if not isinstance(pts, list):
+                                continue
+                            raw_ip = ik[3:] if ik.startswith('ip:') else ik
+                            if self._is_invalid_ip(raw_ip):
+                                skipped_ips += 1
+                                continue
+                            cleaned = [[int(ts), int(v)] for ts, v in pts if ts >= cutoff]
+                            if cleaned:
+                                cleaned_map[ik] = cleaned
+                                loaded_ips += 1
+                        if cleaned_map:
+                            self._data[domain] = cleaned_map
+                            loaded_domains += 1
+            
             if skipped_ips:
                 cprint(f"[HistoryDB] 已自动过滤 {skipped_ips} 个无效IP记录（[::]、127.0.0.1等）", 'info')
             cprint(f"[HistoryDB] 加载完成：{loaded_domains} 个域名，{loaded_ips} 个IP key", 'info')
+            self._dirty_domains.clear()
+            
         except Exception as e:
             cprint(f"[HistoryDB] 加载失败: {e}", 'error')
 
@@ -3564,7 +3761,7 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                     cprint(pause_msg, 'info')
                     with _consec_fail_lock:
                         _consec_fail_count[key] = 0
-                    db._save_async()
+                    # 自动暂停不立即保存，由定时保存统一处理
                     next_wait = CONFIG.get('check_interval', 30)
                 else:
                     # 根据连续失败次数计算轮询等待时间（循环使用 5/15/30/60）
@@ -3818,15 +4015,19 @@ def _start_all_tracker_threads(max_workers: int = 120):
 # 这里只做线程清理/健康检查（死线程重启）
 def _periodic_save_loop():
     """定时保存线程：每120秒将数据持久化到磁盘。
-    替代之前每次探测完都调 _save_async() 的高频保存方式，
-    彻底消除因频繁持 db.lock 写磁盘导致 API 响应阻塞的问题。
-    彻底消除因频繁写 history.json 导致磁盘 I/O 过高的问题。
+    - history.json.append: 只追加探测历史（不合并，合并在启动时进行）
+    - data.json: 只在配置变化时保存（添加/删除/暂停/恢复）
+    彻底消除因频繁写磁盘导致的高 I/O 问题。
     """
     while True:
-        time.sleep(120)          # 保存到硬盘的间隔 120s = 2分钟
+        time.sleep(120)          # 保存到硬盘的间隔
         try:
             if CONFIG.get('cache_history', True):
-                db._save_async()
+                # 只追加到 .append 文件（合并在启动时进行）
+                hdb.save()
+                # 如果有配置变化，保存 data.json
+                if len(db._dirty_trackers) > 0:
+                    db._save_async()
         except Exception as e:
             cprint(f"[定时保存] 异常: {e}", 'error')
 
