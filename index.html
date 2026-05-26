@@ -2142,7 +2142,7 @@
                                 <!-- 左：展开图标 + 备注(域名key) + 实际domain小字 -->
                                 <div class="tl-domain-left">
                                     <span class="tl-expand-icon">
-                                        <i class="bi" :class="(tr.paused ? expanded.includes(domain) : (tr.ips.filter(i=>!i.removed).length < 10 ? !collapsed.includes(domain) : expanded.includes(domain))) ? 'bi-chevron-down' : 'bi-chevron-right'"></i>
+                                        <i class="bi" :class="(tr.paused ? expanded.includes(domain) : (tr.ips.length < 10 ? !collapsed.includes(domain) : expanded.includes(domain))) ? 'bi-chevron-down' : 'bi-chevron-right'"></i>
                                     </span>
                                     <span class="tl-domain-name" :title="domain">{{ domain }}</span>
                                     <span class="port-tag ms-1">:{{ tr.port }}</span>
@@ -2187,7 +2187,7 @@
                             </div>
 
                             <!-- IP 行：<10个默认展开（除非手动折叠），≥10个需手动展开 -->
-                            <template v-if="tr.paused ? expanded.includes(domain) : (tr.ips.filter(i=>!i.removed).length < 10 ? !collapsed.includes(domain) : expanded.includes(domain))">
+                            <template v-if="tr.paused ? expanded.includes(domain) : (tr.ips.length < 10 ? !collapsed.includes(domain) : expanded.includes(domain))">
                                 <div v-for="ip in tr.ips.filter(i => (cfg.show_removed_ips ? true : !i.removed) && (ipVerFilter==='all' || i.version===ipVerFilter))"
                                      :key="ip.ip"
                                      class="tl-ip-row"
@@ -2499,6 +2499,7 @@
                         <div class="col-md-4">
                             <label class="form-label">{{ t('config.retryMode') }}</label>
                             <select class="form-select" v-model="cfg.retry_mode" @change="saveCfg">
+                                <option value="disabled">✕ {{ t('config.retryDisabled') }}</option>
                                 <option value="polling">⟳ {{ t('config.retryPolling') }}</option>
                                 <option :value="5">5 {{ t('config.seconds') }}</option>
                                 <option :value="15">15 {{ t('config.seconds') }}</option>
@@ -2506,7 +2507,10 @@
                                 <option :value="60">1 {{ t('config.minute') }}</option>
                             </select>
                             <div class="form-text">
-                                <span v-if="cfg.retry_mode==='polling'">
+                                <span v-if="cfg.retry_mode==='disabled'">
+                                    {{ t('config.retryDisabledDesc') }}
+                                </span>
+                                <span v-else-if="cfg.retry_mode==='polling'">
                                     {{ t('config.retryModeDesc') }}
                                     <span class="polling-badge">5s → 15s → 30s → 60s → 5s...</span>
                                 </span>
@@ -2782,7 +2786,13 @@
                             </div>
                             <div class="form-text">{{ t('config.logToDiskDesc') }}</div>
                         </div>
-                        <div class="col-md-4"></div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ t('config.saveInterval') }}</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" class="form-control" v-model.number="cfg.save_interval" @change="saveCfg" min="10" max="3600" step="10">
+                                <span class="input-group-text">{{ t('config.seconds') }}</span>
+                            </div>
+                        </div>
                         <!-- 缓存统计可用率开关（第二位） -->
                         <div class="col-md-8">
                             <div class="form-check form-switch">
@@ -2942,10 +2952,17 @@
                             </div>
                             <div class="form-text">{{ t('config.autoPauseThreshDesc') }}</div>
                         </div>
-                        <div class="col-md-4 d-flex align-items-end">
-                            <div class="form-text" style="font-size:.72rem;color:#64748b;padding-bottom:2px;">
-                                <i class="bi bi-info-circle me-1"></i>{{ t('config.autoPauseHint') }}
+                        <!-- 重启保持自动暂停 -->
+                        <div class="col-md-4" :style="cfg.auto_pause_enabled ? '' : 'opacity:.4;pointer-events:none;'">
+                            <label class="form-label"><i class="bi bi-reboot me-1"></i>{{ t('config.autoPausePersistLabel') }}</label>
+                            <div class="form-check form-switch mt-1">
+                                <input class="form-check-input" type="checkbox" v-model="cfg.auto_pause_persist"
+                                       @change="saveCfg" :disabled="!cfg.auto_pause_enabled" id="autoPausePersistSwitch">
+                                <label class="form-check-label" for="autoPausePersistSwitch" style="cursor:pointer;">
+                                    {{ cfg.auto_pause_persist ? t('config.enabled') : t('config.disabled') }}
+                                </label>
                             </div>
+                            <div class="form-text">{{ t('config.autoPausePersistDesc') }}</div>
                         </div>
                     </div>
                 </div>
@@ -3235,6 +3252,7 @@ createApp({
         const logSearch = ref('');        
         const cfg = ref({
             log_to_disk: false,
+            save_interval: 120,
             check_interval: 30,
             timeout: 5,
             retry_mode: 'polling',
@@ -3276,7 +3294,8 @@ createApp({
             probe_ipv4_targets: ['8.8.8.8', '1.1.1.1', '114.114.114.114'],
             probe_ipv6_targets: ['2001:4860:4860::8888', '2606:4700:4700::1111', '2400:3200:baba::1'],
             auto_pause_enabled: true,
-            auto_pause_threshold: 30
+            auto_pause_threshold: 30,
+            auto_pause_persist: false
         });
         // 仪表盘 rank 切换 / 快速搜索
         const dashRankMode = ref('worst'); // 'worst' | 'best'
@@ -3683,11 +3702,16 @@ createApp({
             return list;
         });
 
+        let _trackersLoading = false;
         const loadTrackers = async () => {
+            if (_trackersLoading) return;
+            _trackersLoading = true;
             try {
                 trackers.value = (await axios.get('/api/datas')).data;
                 // 默认不展开任何域名，由用户点击 IP列 表头控制
-            } catch(e){}
+            } catch(e){} finally {
+                _trackersLoading = false;
+            }
         };
         const loadStats = async () => { try { stats.value = (await axios.get('/api/count')).data; } catch(e){} };
         const loadRanking = async () => { try { const min = filterEnabled.value ? filterThreshold.value : 0; ranking.value = (await axios.get(`/api/ranking/${rankPeriod.value}?min_uptime=${min}`)).data.ranking; } catch(e){} };
@@ -3777,12 +3801,12 @@ createApp({
         const toggleExpand = (d) => {
             const tr = filteredTrackers.value[d] || Object.values(trackers.value).find((_,k)=>k===d) || trackers.value[d];
             if (!tr) return;
-            const activeLen = (tr.ips||[]).filter(i=>!i.removed).length;
+            const totalLen = (tr.ips||[]).length;  // 改为使用所有 IP 数量，与显示逻辑一致
             if (tr.paused) {
                 // 暂停域名：操作 expanded 数组
                 const i = expanded.value.indexOf(d);
                 i > -1 ? expanded.value.splice(i, 1) : expanded.value.push(d);
-            } else if (activeLen < 10) {
+            } else if (totalLen < 10) {
                 // 小于10个IP：默认展开，点击切换折叠状态
                 const ci = collapsed.value.indexOf(d);
                 ci > -1 ? collapsed.value.splice(ci, 1) : collapsed.value.push(d);
@@ -3926,6 +3950,7 @@ createApp({
             try {
                 const res = await axios.post('/api/config',{
                     log_to_disk:cfg.value.log_to_disk,
+                    save_interval:cfg.value.save_interval,
                     check_interval:cfg.value.check_interval,
                     timeout:cfg.value.timeout,
                     retry_mode: cfg.value.retry_mode,
@@ -3965,6 +3990,7 @@ createApp({
                     probe_ipv6_targets: cfg.value.probe_ipv6_targets || [],
                     auto_pause_enabled: cfg.value.auto_pause_enabled !== false,
                     auto_pause_threshold: cfg.value.auto_pause_threshold || 30,
+                    auto_pause_persist: cfg.value.auto_pause_persist || false,
                 });
                 if (res.data?.success) showToast(_t('config.savedOk'), 'ok', 2000);
                 // 检测端口或监听地址是否改变

@@ -148,6 +148,8 @@ window.__i18n_en = {
     retryPolling: 'Polling',
     retryInterval: 'Fixed Interval',
     retryIntervalDesc: 'Fixed seconds retry (replaces polling)',
+    retryDisabled: 'Disabled',
+    retryDisabledDesc: 'Retry disabled, use default check interval after failure',
     consoleLog: 'Log Level',
     consoleLogDesc: 'Verbosity of console and disk log output',
     consoleNone: 'None - no output',
@@ -177,6 +179,7 @@ window.__i18n_en = {
     defaultLayoutWidthDesc: 'Default page width for new users; existing cookie takes priority',
     logToDisk: 'Log to Disk',
     logToDiskDesc: 'Persist logs after restart',
+    saveInterval: 'Save Interval',
     enable: 'Enable',
     httpProxy: 'HTTP Proxy',
     httpProxyPlaceholder: 'http://127.0.0.1:7890 or socks5://127.0.0.1:1080',
@@ -322,6 +325,8 @@ window.__i18n_en = {
     autoPauseThreshLabel:  'Consecutive Failures Before Pause',
     autoPauseThreshDesc:   'How many consecutive failures trigger auto-pause (default 30). An INFO log is written to console and Web logs',
     autoPauseHint:         'Auto-paused IPs can be resumed manually in the monitor list. The failure counter resets on resume',
+    autoPausePersistLabel: 'Persist Auto-Pause on Restart',
+    autoPausePersistDesc:  'When enabled, auto-paused IPs remain paused after restart; when disabled, they resume monitoring (recommended: disabled)',
     probeIPv6NotConfigured:'IPv6 probe not configured',
   });
 })();

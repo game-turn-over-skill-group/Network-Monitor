@@ -68,6 +68,7 @@ DEFAULT_CONFIG = {
     'max_log_success': 20000,          # Success 级日志最大条目数
     'max_log_error': 2000,             # Error 级日志最大条目数
     'page_refresh_ms': 30000,          # 前端页面自动刷新间隔(ms)，0=禁用
+    'save_interval': 120,              # 日志存盘 (history.json.append) 定时保存间隔（秒），默认120秒
     'cache_history': True,             # 是否缓存历史可用率到JSON（重启不丢失）
     'dashboard_stat_period': '24h',    # 仪表盘可用率统计周期：24h | 7d | 30d（排行TOP10+快速搜索）
     'tracker_stat_period': '7d',       # 监控列表可用率统计周期：24h | 7d | 30d
@@ -92,6 +93,7 @@ DEFAULT_CONFIG = {
     # ── 连续失败自动暂停 ──
     'auto_pause_enabled': True,        # 是否开启连续失败自动暂停
     'auto_pause_threshold': 30,        # 连续失败多少次后自动暂停该IP
+    'auto_pause_persist': False,       # 是否在重启后保持自动暂停状态（默认关闭，避免误暂停后无人处理）
     'min_password_length': 8,          # 用户修改密码最小长度
     'refresh_geo_on_restart': True,    # 重启时自动更新 IP 归属地
     # ── 安全/限流内存清理 ──
@@ -124,7 +126,7 @@ def load_config():
                 saved = json.load(f)
             for k in ['check_interval','timeout','retry_mode','retry_interval',
                       'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
-                      'log_to_disk','log_level','console_log_level','debug_save_trace',
+                      'log_to_disk','log_level','log_level','save_interval','console_log_level','debug_save_trace',
                       'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                       'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                       'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
@@ -133,7 +135,7 @@ def load_config():
                       'cleanup_interval','trust_cf_ip',
                       'probe_fail_threshold','probe_ipv6_targets',
                       'probe_timeout','probe_ipv4_targets',
-                      'auto_pause_enabled','auto_pause_threshold']:
+                      'auto_pause_enabled','auto_pause_threshold','auto_pause_persist']:
                 if k in saved:
                     cfg[k] = saved[k]
             # 向后兼容：旧配置文件用 rank_stat_period，迁移到 dashboard_stat_period
@@ -150,7 +152,7 @@ def persist_config(cfg):
     try:
         savable = {k: cfg[k] for k in ['check_interval','timeout','retry_mode','retry_interval',
                                         'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
-                                        'log_to_disk','log_level','debug_save_trace',
+                                        'log_to_disk','log_level','save_interval','debug_save_trace',
                                         'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                                         'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                                         'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
@@ -160,7 +162,7 @@ def persist_config(cfg):
                                         'cleanup_interval','trust_cf_ip',
                                         'probe_fail_threshold','probe_ipv6_targets',
                                         'probe_timeout','probe_ipv4_targets',
-                                        'auto_pause_enabled','auto_pause_threshold']
+                                        'auto_pause_enabled','auto_pause_threshold','auto_pause_persist']
                    if k in cfg}
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(savable, f, indent=2, ensure_ascii=False)
@@ -1146,8 +1148,8 @@ class TrackerDB:
                 total_removed = 0
                 for d, t in data.items():
                     all_ips    = t.get('ips', [])
-                    # 启动时删除 removed: true 的IP，减少文件大小
-                    clean_ips   = [ip for ip in all_ips if not ip.get('removed', False)]
+                    # 启动时删除 removed: true 的IP（但保留用户手动暂停的IP，自动暂停的IP仍会被删除）
+                    clean_ips   = [ip for ip in all_ips if not ip.get('removed', False) or ip.get('paused_by_user', False)]
                     removed_cnt = len(all_ips) - len(clean_ips)
                     if removed_cnt:
                         total_removed += removed_cnt
@@ -3275,7 +3277,10 @@ def next_retry_wait(domain: str) -> int:
     return wait
 
 def get_retry_wait(domain: str) -> int:
-    if CONFIG.get('retry_mode') == 'polling':
+    retry_mode = CONFIG.get('retry_mode')
+    if retry_mode == 'disabled':
+        raise ValueError('Retry is disabled')
+    if retry_mode == 'polling':
         return next_retry_wait(domain)
     return int(CONFIG.get('retry_interval', 5))
 
@@ -3298,13 +3303,17 @@ def check_ip(domain, ip_info, retry=True, update_db=True):
     if not ok and _is_proxy_unavail(err):
         return 'skipped', lat, err
     if not ok and retry:
-        wait = get_retry_wait(domain)
-        cprint(f"首次失败 {domain}:{port} ({ip}) 等待{wait}s重试 | {err}", 'debug')
-        time.sleep(wait)
-        ok, lat, err = fn(ip, port)
-        # 重试后再次判断
-        if not ok and _is_proxy_unavail(err):
-            return 'skipped', lat, err
+        try:
+            wait = get_retry_wait(domain)
+            cprint(f"首次失败 {domain}:{port} ({ip}) 等待{wait}s重试 | {err}", 'debug')
+            time.sleep(wait)
+            ok, lat, err = fn(ip, port)
+            # 重试后再次判断
+            if not ok and _is_proxy_unavail(err):
+                return 'skipped', lat, err
+        except ValueError:
+            # 重试已禁用，直接返回失败状态
+            pass
     status = 'online' if ok else 'offline'
     if update_db:
         db.update_status(domain, ip, status, lat)
@@ -3749,24 +3758,40 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
 
                 # 自动暂停检查（仅在未跳过网络探针时）
                 if auto_pause_enabled and cur >= auto_pause_threshold and not skip_net2:
+                    auto_pause_persist = CONFIG.get('auto_pause_persist', False)
                     with db.lock:
                         ip_obj2 = db._ip_map.get((domain, ip))
                         if ip_obj2:
                             ip_obj2['paused'] = True
                             db._active_ips.discard((domain, ip))
                             db._ip_map.pop((domain, ip), None)
+                            # 只有当 auto_pause_persist 开启时才保存暂停状态到磁盘
+                            if auto_pause_persist:
+                                db._dirty_trackers.add(domain)  # 标记需要保存
                     pause_msg = (f"[自动暂停] {protocol.upper()}://{domain}:{port} ({ip}) "
-                                 f"累计失败 {cur} 次，已自动暂停监控")
+                                 f"累计失败 {cur} 次，已自动暂停监控"
+                                 f"{'（重启后保持暂停）' if auto_pause_persist else '（重启后恢复）'}")
                     db.add_log(pause_msg, 'info')
                     cprint(pause_msg, 'info')
                     with _consec_fail_lock:
                         _consec_fail_count[key] = 0
-                    # 自动暂停不立即保存，由定时保存统一处理
+                    # 如果配置了持久化，立即保存
+                    if auto_pause_persist:
+                        db._save_async()
                     next_wait = CONFIG.get('check_interval', 30)
                 else:
-                    # 根据连续失败次数计算轮询等待时间（循环使用 5/15/30/60）
-                    idx = (cur - 1) % len(POLLING_SEQUENCE)
-                    next_wait = POLLING_SEQUENCE[idx]
+                    # 根据重试模式计算下次等待时间
+                    retry_mode = CONFIG.get('retry_mode')
+                    if retry_mode == 'disabled':
+                        # 重试已禁用，使用默认检查间隔
+                        next_wait = CONFIG.get('check_interval', 30)
+                    elif retry_mode == 'polling':
+                        # 轮询模式：根据连续失败次数计算轮询等待时间（循环使用 5/15/30/60）
+                        idx = (cur - 1) % len(POLLING_SEQUENCE)
+                        next_wait = POLLING_SEQUENCE[idx]
+                    else:
+                        # 固定间隔模式
+                        next_wait = int(CONFIG.get('retry_interval', 5))
                     cprint(f"[下次等待] {domain}({ip}) 失败次数 {cur}，等待 {next_wait} 秒", 'debug')
 
             # 防御：确保等待时间至少为 1 秒，避免疯狂循环
@@ -3877,7 +3902,7 @@ def _ensure_ip_threads(name: str):
             return
         active_ips = [
             ip_obj.copy() for ip_obj in td.get('ips', [])
-            if not ip_obj.get('removed')
+            if not ip_obj.get('removed') and not ip_obj.get('paused')
         ]
 
     for ip_obj in active_ips:
@@ -4020,7 +4045,8 @@ def _periodic_save_loop():
     彻底消除因频繁写磁盘导致的高 I/O 问题。
     """
     while True:
-        time.sleep(120)          # 保存到硬盘的间隔
+        save_interval = CONFIG.get('save_interval', 120)
+        time.sleep(save_interval)          # 保存到硬盘的间隔（可配置）
         try:
             if CONFIG.get('cache_history', True):
                 # 只追加到 .append 文件（合并在启动时进行）
@@ -4778,6 +4804,11 @@ def api_pause():
                 td['paused'] = paused
                 for ip_obj in td.get('ips', []):
                     ip_obj['paused'] = paused
+                    # 标记是否为用户手动暂停（用于重启时区分手动暂停和自动暂停）
+                    if paused:
+                        ip_obj['paused_by_user'] = True
+                    else:
+                        ip_obj.pop('paused_by_user', None)  # 恢复时删除标记
                     key = (d, ip_obj.get('ip'))
                     if paused:
                         db._active_ips.discard(key)
@@ -4786,6 +4817,7 @@ def api_pause():
                         if not ip_obj.get('removed'):
                             db._active_ips.add(key)
                             db._ip_map[key] = ip_obj
+                db._dirty_trackers.add(d)  # 标记需要保存
                 changed.append(d)
         elif domain and ip:
             # 单个 IP
@@ -4802,6 +4834,11 @@ def api_pause():
                         break
             if ip_obj:
                 ip_obj['paused'] = paused
+                # 标记是否为用户手动暂停（用于重启时区分手动暂停和自动暂停）
+                if paused:
+                    ip_obj['paused_by_user'] = True
+                else:
+                    ip_obj.pop('paused_by_user', None)  # 恢复时删除标记
                 key = (domain, ip)
                 if paused:
                     db._active_ips.discard(key)
@@ -4809,6 +4846,7 @@ def api_pause():
                     if not ip_obj.get('removed'):
                         db._active_ips.add(key)
                         db._ip_map[key] = ip_obj
+                db._dirty_trackers.add(domain)  # 标记需要保存
                 changed.append(f"{domain}/{ip}")
         elif domain:
             # 整个域名
@@ -4818,6 +4856,11 @@ def api_pause():
             td['paused'] = paused
             for ip_obj in td.get('ips', []):
                 ip_obj['paused'] = paused
+                # 标记是否为用户手动暂停（用于重启时区分手动暂停和自动暂停）
+                if paused:
+                    ip_obj['paused_by_user'] = True
+                else:
+                    ip_obj.pop('paused_by_user', None)  # 恢复时删除标记
                 key = (domain, ip_obj.get('ip'))
                 if paused:
                     db._active_ips.discard(key)
@@ -4826,6 +4869,7 @@ def api_pause():
                     if not ip_obj.get('removed'):
                         db._active_ips.add(key)
                         db._ip_map[key] = ip_obj
+            db._dirty_trackers.add(domain)  # 标记需要保存
             changed.append(domain)
         else:
             return jsonify({'error': '参数错误'}), 400
@@ -5348,7 +5392,7 @@ def api_config():
                 'cleanup_interval','trust_cf_ip',
                 'probe_fail_threshold','probe_ipv6_targets',
                 'probe_timeout','probe_ipv4_targets',
-                'auto_pause_enabled','auto_pause_threshold',
+                'auto_pause_enabled','auto_pause_threshold','auto_pause_persist',
                 'dns_refresh_interval']
         labels = {
             'check_interval':        '监控间隔',
@@ -5401,6 +5445,7 @@ def api_config():
             'probe_ipv4_targets':    'IPv4探针目标',
             'auto_pause_enabled':    '自动暂停开关',
             'auto_pause_threshold':  '自动暂停累计失败次数',
+            'auto_pause_persist':    '重启保持自动暂停',
         }
         suffixes = {
             'check_interval': 's', 'timeout': 's', 'retry_interval': 's', 'dns_timeout': 's',
@@ -5427,11 +5472,11 @@ def api_config():
         persist_config(CONFIG)
         # 如果代理相关配置变化，重置 SOCKS5 连接池
         proxy_changed_keys = {'udp_proxy', 'timeout', 'udp_proxy_enabled', 'http_proxy_enabled'}
-        if any(k in data for k in proxy_changed_keys):
+        if any(k in data and data[k] != CONFIG.get(k) for k in proxy_changed_keys):
             _socks5_pool.invalidate()
             cprint('[SOCKS5Pool] 代理配置变更，连接池已重置', 'debug')
         # 如果并发检测数变化，更新信号量
-        if 'monitor_workers' in data:
+        if 'monitor_workers' in data and data['monitor_workers'] != CONFIG.get('monitor_workers'):
             global _probe_semaphore
             max_workers = data['monitor_workers']
             _probe_semaphore = threading.Semaphore(max_workers)
@@ -5452,7 +5497,7 @@ def api_config():
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
                 'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width',
                 'allow_private_ips','min_password_length','cleanup_interval','trust_cf_ip',
-                'probe_fail_threshold','probe_ipv6_targets','probe_timeout','probe_ipv4_targets','auto_pause_enabled','auto_pause_threshold',
+                'probe_fail_threshold','probe_ipv6_targets','probe_timeout','probe_ipv4_targets','auto_pause_enabled','auto_pause_threshold','auto_pause_persist',
                 'dns_refresh_interval']
     return jsonify({k: CONFIG.get(k) for k in all_keys})
 

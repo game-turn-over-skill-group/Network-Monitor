@@ -148,6 +148,8 @@ window.__i18n_ja = {
     retryPolling: 'ポーリング',
     retryInterval: '固定間隔',
     retryIntervalDesc: '固定秒数でリトライ（ポーリングに置き換え）',
+    retryDisabled: '無効',
+    retryDisabledDesc: 'リトライを無効にし、失敗後はデフォルトの確認間隔に戻る',
     consoleLog: 'ログレベル',
     consoleLogDesc: 'コンソールとディスクログ出力の詳細レベル',
     consoleNone: 'なし - 出力なし',
@@ -177,6 +179,7 @@ window.__i18n_ja = {
     defaultLayoutWidthDesc: '新規ユーザーのデフォルトページ幅；既存クッキーが優先',
     logToDisk: 'ディスクにログを保存',
     logToDiskDesc: '再起動後もログを保持',
+    saveInterval: '保存間隔',
     enable: '有効',
     httpProxy: 'HTTPプロキシ',
     httpProxyPlaceholder: 'http://127.0.0.1:7890 または socks5://127.0.0.1:1080',
@@ -322,6 +325,8 @@ window.__i18n_ja = {
     autoPauseThreshLabel:  '一時停止までの連続失敗回数',
     autoPauseThreshDesc:   '自動一時停止をトリガーする連続失敗回数（デフォルト 30回）。INFOログがコンソールとWebログに出力されます',
     autoPauseHint:         '自動一時停止されたIPはモニタリングリストで手動再開できます。再開後、失敗カウンターはリセットされます',
+    autoPausePersistLabel: '再起動時に自動一時停止を保持',
+    autoPausePersistDesc:  '有効にすると、自動一時停止されたIPは再起動後も一時停止状態を維持します。無効にすると監視を再開します（推奨：無効）',
     probeIPv6NotConfigured:'IPv6プローブ未設定',
   });
 })();

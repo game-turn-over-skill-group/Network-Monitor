@@ -148,6 +148,8 @@ window.__i18n_ko = {
     retryPolling: '폴링',
     retryInterval: '고정 간격',
     retryIntervalDesc: '고정 초수로 재시도 (폴링 대체)',
+    retryDisabled: '사용 안 함',
+    retryDisabledDesc: '재시도 비활성화, 실패 후 기본 확인 간격 사용',
     consoleLog: '로그 레벨',
     consoleLogDesc: '콘솔 및 디스크 로그 출력의 상세 수준',
     consoleNone: '없음 - 출력 없음',
@@ -177,6 +179,7 @@ window.__i18n_ko = {
     defaultLayoutWidthDesc: '새 사용자의 기본 페이지 너비; 기존 쿠키가 우선',
     logToDisk: '디스크에 로그 저장',
     logToDiskDesc: '재시작 후에도 로그 유지',
+    saveInterval: '저장 간격',
     enable: '사용',
     httpProxy: 'HTTP 프록시',
     httpProxyPlaceholder: 'http://127.0.0.1:7890 또는 socks5://127.0.0.1:1080',
@@ -322,6 +325,8 @@ window.__i18n_ko = {
     autoPauseThreshLabel:  '일시정지까지 연속 실패 횟수',
     autoPauseThreshDesc:   '자동 일시정지를 트리거하는 연속 실패 횟수 (기본값 30회). INFO 로그가 콘솔과 Web 로그에 출력됩니다',
     autoPauseHint:         '자동 일시정지된 IP는 모니터링 목록에서 수동으로 재개할 수 있습니다. 재개 시 실패 카운터가 초기화됩니다',
+    autoPausePersistLabel: '재시작 시 자동 일시정지 유지',
+    autoPausePersistDesc:  '활성화 시, 자동 일시정지된 IP는 재시작 후에도 일시정지 상태를 유지합니다; 비활성화 시 모니터링을 재개합니다 (권장: 비활성화)',
     probeIPv6NotConfigured:'IPv6 프로브 미설정',
   });
 })();

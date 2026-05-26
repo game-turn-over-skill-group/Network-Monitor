@@ -148,6 +148,8 @@ window.__i18n_fr = {
     retryPolling: 'Polling',
     retryInterval: 'Intervalle fixe',
     retryIntervalDesc: 'Réessai toutes les X secondes (remplace le polling)',
+    retryDisabled: 'Désactivé',
+    retryDisabledDesc: 'Réessai désactivé, utilisez l\'intervalle de vérification par défaut après échec',
     consoleLog: 'Niveau de journalisation',
     consoleLogDesc: 'Verbosité de la sortie des journaux console et disque',
     consoleNone: 'Aucun - pas de sortie',
@@ -177,6 +179,7 @@ window.__i18n_fr = {
     defaultLayoutWidthDesc: 'Largeur de page par défaut pour les nouveaux utilisateurs ; le cookie existant a la priorité',
     logToDisk: 'Enregistrer les journaux sur disque',
     logToDiskDesc: 'Conserver les journaux après redémarrage',
+    saveInterval: 'Intervalle de sauvegarde',
     enable: 'Activer',
     httpProxy: 'Proxy HTTP',
     httpProxyPlaceholder: 'http://127.0.0.1:7890 ou socks5://127.0.0.1:1080',
@@ -322,6 +325,8 @@ window.__i18n_fr = {
     autoPauseThreshLabel:  'Échecs consécutifs avant pause',
     autoPauseThreshDesc:   'Nombre d\'échecs consécutifs déclenchant la pause auto (défaut 30). Un log INFO est écrit en console et dans les journaux Web',
     autoPauseHint:         'Les IP mises en pause automatiquement peuvent être relancées manuellement dans la liste. Le compteur d\'échecs se remet à zéro à la reprise',
+    autoPausePersistLabel: 'Conserver la pause auto au redémarrage',
+    autoPausePersistDesc:  'Si activé, les IP mises en pause auto restent en pause après redémarrage ; sinon, elles reprennent la surveillance (recommandé : désactivé)',
     probeIPv6NotConfigured:'Sonde IPv6 non configurée',
   });
 })();

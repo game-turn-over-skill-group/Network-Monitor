@@ -148,6 +148,8 @@ window.__i18n_zh = {
     retryPolling: '轮询',
     retryInterval: '固定间隔',
     retryIntervalDesc: '固定秒数重试（替代轮询）',
+    retryDisabled: '关闭',
+    retryDisabledDesc: '关闭重试，失败后直接进入默认的监控间隔周期',
     consoleLog: '日志级别',
     consoleLogDesc: '控制台输出和磁盘日志的详细程度',
     consoleNone: '无 - 不输出任何内容',
@@ -177,6 +179,7 @@ window.__i18n_zh = {
     defaultLayoutWidthDesc: '新用户/未设置cookie时的默认视野宽度；已有cookie的用户不受影响',
     logToDisk: '日志存盘',
     logToDiskDesc: '重启后日志不丢失',
+    saveInterval: '存盘间隔',
     enable: '启用',
     httpProxy: 'HTTP代理',
     httpProxyPlaceholder: 'http://127.0.0.1:7890 或 socks5://127.0.0.1:1080',
@@ -322,6 +325,8 @@ window.__i18n_zh = {
     autoPauseThreshLabel:  '连续失败暂停阈值',
     autoPauseThreshDesc:   '连续失败多少次后自动暂停该 IP（默认 30 次）。暂停后控制台和 Web 日志均输出 INFO 提示',
     autoPauseHint:         '自动暂停的 IP 可在监控列表中手动恢复。恢复后连续失败计数重置',
+    autoPausePersistLabel: '重启保持自动暂停',
+    autoPausePersistDesc:  '开启后，自动暂停的IP在重启后保持暂停状态；关闭则重启后恢复检测（建议保持关闭）',
     probeIPv6NotConfigured:'IPv6探针未配置',
   });
 })();

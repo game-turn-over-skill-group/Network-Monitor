@@ -10,8 +10,9 @@ history.json 修复 & 格式化工具
   4. 原子写入：先写 history.json.tmp，再替换，避免写入中断损坏数据
 
 用法（把本脚本放到与 history.json 同一目录）：
-  python fix_history.py              # 默认处理 history.json
-  python fix_history.py my.json      # 处理指定文件
+  双击运行本脚本即可（需确保 Python 已安装）
+  或：python fix_history.py              # 默认处理 history.json
+  或：python fix_history.py my.json      # 处理指定文件
 
 完成后会输出统计：有多少域名/IP、过滤了多少无效IP。
 """
@@ -33,12 +34,17 @@ def is_invalid(ip_str: str) -> bool:
 
 # ── 主逻辑 ─────────────────────────────────────────────
 def main():
+    # 切换到脚本所在目录（解决双击运行时工作目录错误的问题）
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    os.chdir(script_dir)
+    
     print(f"=== history.json 修复工具 ===")
     print(f"目标文件: {os.path.abspath(HISTORY_FILE)}\n")
 
     # 1. 检查文件是否存在
     if not os.path.exists(HISTORY_FILE):
         print(f"[错误] 文件不存在: {HISTORY_FILE}")
+        input("\n按 Enter 键退出...")
         sys.exit(1)
 
     file_size = os.path.getsize(HISTORY_FILE)
@@ -54,10 +60,16 @@ def main():
         print(f"✗ JSON 解析失败: {e}")
         print("\n提示：你可以尝试用文本编辑器定位到错误位置手动修复，")
         print(f"      错误在第 {e.lineno} 行，第 {e.colno} 列（字符位置 {e.pos}）")
+        input("\n按 Enter 键退出...")
+        sys.exit(1)
+    except Exception as e:
+        print(f"✗ 读取文件失败: {e}")
+        input("\n按 Enter 键退出...")
         sys.exit(1)
 
     if not isinstance(raw, dict):
         print("[错误] history.json 顶层不是 dict，格式异常。")
+        input("\n按 Enter 键退出...")
         sys.exit(1)
 
     # 3. 统计 & 过滤
@@ -99,8 +111,13 @@ def main():
 
     # 4. 备份原文件
     backup = HISTORY_FILE + '.bak'
-    shutil.copy2(HISTORY_FILE, backup)
-    print(f"\n✓ 已备份原文件到: {backup}")
+    try:
+        shutil.copy2(HISTORY_FILE, backup)
+        print(f"\n✓ 已备份原文件到: {backup}")
+    except Exception as e:
+        print(f"[错误] 备份失败: {e}")
+        input("\n按 Enter 键退出...")
+        sys.exit(1)
 
     # 5. 原子写入格式化后的文件
     tmp_file = HISTORY_FILE + '.tmp'
@@ -125,6 +142,7 @@ def main():
         print(f"[错误] 写入失败: {e}")
         if os.path.exists(tmp_file):
             os.remove(tmp_file)
+        input("\n按 Enter 键退出...")
         sys.exit(1)
 
     new_size = os.path.getsize(HISTORY_FILE)
@@ -137,6 +155,15 @@ def main():
     print('      "ip:1.2.3.4": [[1700000000,1],[1700000030,0]],   <-- 删除这行时同时删逗号')
     print('      "ip:5.6.7.8": [[1700000000,1]]                   <-- 最后一个IP无逗号')
     print('    }')
+    
+    input("\n按 Enter 键退出...")
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"\n[严重错误] 程序异常退出: {e}")
+        import traceback
+        traceback.print_exc()
+        input("\n按 Enter 键退出...")
+        sys.exit(1)
