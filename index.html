@@ -1395,33 +1395,36 @@
 
                 <!-- 卡1：在线 / 监控 -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
-                    <div class="stat-card-new card" style="justify-content:space-between;">
+                    <div class="stat-card-new card" style="justify-content:flex-start;">
                         <!-- 顶部标题：对半 -->
-                        <div style="display:flex;width:100%;border-bottom:1px solid var(--glass-border);padding-bottom:4px;margin-bottom:6px;">
+                        <div style="display:flex;width:100%;border-bottom:1px solid var(--glass-border);padding-bottom:4px;">
                             <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;border-right:1px solid var(--glass-border);">{{ t('stats.alive') }}</div>
                             <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;">{{ t('stats.total') }}</div>
                         </div>
-                        <!-- 大数字：对半 -->
-                        <div style="display:flex;width:100%;margin-bottom:4px;">
-                            <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
-                                <span class="ok" style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.alive||0 }}</span>
+                        <!-- 内容区域：居中 -->
+                        <div style="flex:1;display:flex;flex-direction:column;justify-content:center;">
+                            <!-- 大数字：对半 -->
+                            <div style="display:flex;width:100%;margin-bottom:6px;">
+                                <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
+                                    <span class="ok" style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.alive||0 }}</span>
+                                </div>
+                                <div style="flex:1;text-align:center;">
+                                    <span style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.total||0 }}</span>
+                                </div>
                             </div>
-                            <div style="flex:1;text-align:center;">
-                                <span style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.total||0 }}</span>
+                            <!-- 在线率% | 空 -->
+                            <div style="display:flex;width:100%;">
+                                <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
+                                    <span style="font-size:.82rem;font-weight:700;"
+                                        :class="stats.total>0&&(stats.alive/stats.total)>=0.8?'ok':stats.total>0&&(stats.alive/stats.total)>=0.5?'warn':'err'">
+                                        {{ stats.total>0 ? ((stats.alive||0)/stats.total*100).toFixed(1)+'%' : '-' }}
+                                    </span>
+                                </div>
+                                <div style="flex:1;"></div>
                             </div>
-                        </div>
-                        <!-- 在线率% | 空 -->
-                        <div style="display:flex;width:100%;margin-bottom:auto;">
-                            <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
-                                <span style="font-size:.82rem;font-weight:700;"
-                                    :class="stats.total>0&&(stats.alive/stats.total)>=0.8?'ok':stats.total>0&&(stats.alive/stats.total)>=0.5?'warn':'err'">
-                                    {{ stats.total>0 ? ((stats.alive||0)/stats.total*100).toFixed(1)+'%' : '-' }}
-                                </span>
-                            </div>
-                            <div style="flex:1;"></div>
                         </div>
                         <!-- IPv4 行：对半，左=在线 右=总数 -->
-                        <div style="display:flex;width:100%;border-top:1px solid var(--glass-border);padding-top:3px;margin-top:6px;">
+                        <div style="display:flex;width:100%;border-top:1px solid var(--glass-border);padding-top:3px;">
                             <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
                                 <div style="font-size:.6rem;color:var(--muted);">IPv4</div>
                                 <div style="font-size:.8rem;font-weight:600;" :class="stats.alive_v4===stats.ipv4?'':'ok'">{{ stats.alive_v4||0 }}</div>
@@ -1447,31 +1450,34 @@
 
                 <!-- 卡2：故障 / 未知 -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
-                    <div class="stat-card-new card" style="justify-content:space-between;">
+                    <div class="stat-card-new card" style="justify-content:flex-start;">
                         <!-- 顶部标题：对半 -->
-                        <div style="display:flex;width:100%;border-bottom:1px solid var(--glass-border);padding-bottom:4px;margin-bottom:6px;">
+                        <div style="display:flex;width:100%;border-bottom:1px solid var(--glass-border);padding-bottom:4px;">
                             <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;border-right:1px solid var(--glass-border);">{{ t('stats.offline') }}</div>
                             <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;">{{ t('stats.unknownLabel') }}</div>
                         </div>
-                        <!-- 大数字：对半 -->
-                        <div style="display:flex;width:100%;margin-bottom:4px;">
-                            <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
-                                <span :class="stats.offline>0?'err':''" style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.offline||0 }}</span>
+                        <!-- 内容区域：居中 -->
+                        <div style="flex:1;display:flex;flex-direction:column;justify-content:center;">
+                            <!-- 大数字：对半 -->
+                            <div style="display:flex;width:100%;margin-bottom:6px;">
+                                <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
+                                    <span :class="stats.offline>0?'err':''" style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.offline||0 }}</span>
+                                </div>
+                                <div style="flex:1;text-align:center;">
+                                    <span :style="{ color: stats.unknown ? 'var(--warn)' : '' }" style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.unknown||0 }}</span>
+                                </div>
                             </div>
-                            <div style="flex:1;text-align:center;">
-                                <span :style="{ color: stats.unknown ? 'var(--warn)' : '' }" style="font-size:1.8rem;font-weight:700;line-height:1;">{{ stats.unknown||0 }}</span>
-                            </div>
-                        </div>
-                        <!-- 空 | 已暂停 -->
-                        <div style="display:flex;width:100%;margin-bottom:auto;">
-                            <div style="flex:1;border-right:1px solid var(--glass-border);"></div>
-                            <div style="flex:1;text-align:center;">
-                                <span v-if="stats.paused_count>0" style="font-size:.72rem;font-weight:600;color:#eab308;">⏸ {{ t('stats.paused') }} {{ stats.paused_count }}</span>
-                                <span v-else style="font-size:.72rem;color:var(--muted);">-</span>
+                            <!-- 空 | 已暂停 -->
+                            <div style="display:flex;width:100%;">
+                                <div style="flex:1;border-right:1px solid var(--glass-border);"></div>
+                                <div style="flex:1;text-align:center;">
+                                    <span v-if="stats.paused_count>0" style="font-size:.72rem;font-weight:600;color:#eab308;">⏸ {{ t('stats.paused') }} {{ stats.paused_count }}</span>
+                                    <span v-else style="font-size:.72rem;color:var(--muted);">-</span>
+                                </div>
                             </div>
                         </div>
                         <!-- IPv4 行：对半，左=故障 右=未知 -->
-                        <div style="display:flex;width:100%;border-top:1px solid var(--glass-border);padding-top:3px;margin-top:6px;">
+                        <div style="display:flex;width:100%;border-top:1px solid var(--glass-border);padding-top:3px;">
                             <div style="flex:1;text-align:center;border-right:1px solid var(--glass-border);">
                                 <div style="font-size:.6rem;color:var(--muted);">IPv4</div>
                                 <div style="font-size:.8rem;font-weight:600;" :class="(stats.offline_v4||0)>0?'err':''">{{ stats.offline_v4||0 }}</div>
@@ -1497,45 +1503,47 @@
 
                 <!-- 卡3：平均延迟 -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
-                    <div class="stat-card-new card" style="justify-content:space-between;">
+                    <div class="stat-card-new card" style="justify-content:flex-start;">
                         <!-- 标题 -->
-                        <div style="text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;border-bottom:1px solid var(--glass-border);padding-bottom:4px;">
+                        <div style="text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;border-bottom:1px solid var(--glass-border);padding-bottom:6px;">
                             {{ t('stats.avgLatency') }}
                         </div>
-                        <!-- 各行：标签左对齐 | 延迟居中 -->
-                        <div style="display:flex;align-items:center;width:100%;">
-                            <div style="font-size:.68rem;color:var(--muted);width:32px;flex-shrink:0;">{{ t('stats.total')||'总' }}</div>
-                            <div style="flex:1;text-align:center;font-size:1.4rem;font-weight:700;"
-                                :class="stats.avg_latency>1000?'err':stats.avg_latency>500?'warn':''">
-                                {{ stats.avg_latency>0 ? stats.avg_latency+'ms' : '-' }}
+                        <!-- 内容区域：居中布局 -->
+                        <div style="flex:1;display:flex;flex-direction:column;justify-content:center;">
+                            <div style="display:flex;width:100%;margin-bottom:4px;">
+                                <div style="flex:1;text-align:center;font-size:.8rem;color:var(--muted);font-weight:500;">{{ t('stats.total')||'所有IP' }}</div>
+                                <div style="flex:1;text-align:center;font-size:.8rem;font-weight:600;"
+                                    :class="stats.avg_latency>1000?'err':stats.avg_latency>500?'warn':''">
+                                    {{ stats.avg_latency>0 ? stats.avg_latency+'ms' : '-' }}
+                                </div>
                             </div>
-                        </div>
-                        <div style="display:flex;align-items:center;width:100%;">
-                            <div style="font-size:.68rem;color:var(--muted);width:32px;flex-shrink:0;">IPv4</div>
-                            <div style="flex:1;text-align:center;font-size:.9rem;font-weight:600;"
-                                :class="stats.avg_latency_v4>1000?'err':stats.avg_latency_v4>500?'warn':''">
-                                {{ stats.avg_latency_v4>0 ? stats.avg_latency_v4+'ms' : '-' }}
+                            <div style="display:flex;width:100%;margin-bottom:4px;">
+                                <div style="flex:1;text-align:center;font-size:.8rem;color:var(--muted);font-weight:500;">IPv4</div>
+                                <div style="flex:1;text-align:center;font-size:.8rem;font-weight:600;"
+                                    :class="stats.avg_latency_v4>1000?'err':stats.avg_latency_v4>500?'warn':''">
+                                    {{ stats.avg_latency_v4>0 ? stats.avg_latency_v4+'ms' : '-' }}
+                                </div>
                             </div>
-                        </div>
-                        <div style="display:flex;align-items:center;width:100%;">
-                            <div style="font-size:.68rem;color:var(--muted);width:32px;flex-shrink:0;">IPv6</div>
-                            <div style="flex:1;text-align:center;font-size:.9rem;font-weight:600;"
-                                :class="stats.avg_latency_v6>1000?'err':stats.avg_latency_v6>500?'warn':''">
-                                {{ stats.avg_latency_v6>0 ? stats.avg_latency_v6+'ms' : '-' }}
+                            <div style="display:flex;width:100%;margin-bottom:4px;">
+                                <div style="flex:1;text-align:center;font-size:.8rem;color:var(--muted);font-weight:500;">IPv6</div>
+                                <div style="flex:1;text-align:center;font-size:.8rem;font-weight:600;"
+                                    :class="stats.avg_latency_v6>1000?'err':stats.avg_latency_v6>500?'warn':''">
+                                    {{ stats.avg_latency_v6>0 ? stats.avg_latency_v6+'ms' : '-' }}
+                                </div>
                             </div>
-                        </div>
-                        <div style="display:flex;align-items:center;width:100%;">
-                            <div style="font-size:.68rem;color:var(--muted);width:32px;flex-shrink:0;">TCP</div>
-                            <div style="flex:1;text-align:center;font-size:.9rem;font-weight:600;"
-                                :class="stats.avg_latency_tcp>1000?'err':stats.avg_latency_tcp>500?'warn':''">
-                                {{ stats.avg_latency_tcp>0 ? stats.avg_latency_tcp+'ms' : '-' }}
+                            <div style="display:flex;width:100%;margin-bottom:4px;">
+                                <div style="flex:1;text-align:center;font-size:.8rem;color:var(--muted);font-weight:500;">TCP</div>
+                                <div style="flex:1;text-align:center;font-size:.8rem;font-weight:600;"
+                                    :class="stats.avg_latency_tcp>1000?'err':stats.avg_latency_tcp>500?'warn':''">
+                                    {{ stats.avg_latency_tcp>0 ? stats.avg_latency_tcp+'ms' : '-' }}
+                                </div>
                             </div>
-                        </div>
-                        <div style="display:flex;align-items:center;width:100%;">
-                            <div style="font-size:.68rem;color:var(--muted);width:32px;flex-shrink:0;">UDP</div>
-                            <div style="flex:1;text-align:center;font-size:.9rem;font-weight:600;"
-                                :class="stats.avg_latency_udp>1000?'err':stats.avg_latency_udp>500?'warn':''">
-                                {{ stats.avg_latency_udp>0 ? stats.avg_latency_udp+'ms' : '-' }}
+                            <div style="display:flex;width:100%;">
+                                <div style="flex:1;text-align:center;font-size:.8rem;color:var(--muted);font-weight:500;">UDP</div>
+                                <div style="flex:1;text-align:center;font-size:.8rem;font-weight:600;"
+                                    :class="stats.avg_latency_udp>1000?'err':stats.avg_latency_udp>500?'warn':''">
+                                    {{ stats.avg_latency_udp>0 ? stats.avg_latency_udp+'ms' : '-' }}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1543,85 +1551,79 @@
 
                 <!-- 卡4：网络健康 -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
-                    <div class="stat-card-new card" style="justify-content:space-between;cursor:default;"
-                         @mousemove="probeTooltipX=$event.clientX; probeTooltipY=$event.clientY"
-                         @mouseenter="showProbeTooltip=true" @mouseleave="showProbeTooltip=false">
+                    <div class="stat-card-new card" style="justify-content:flex-start;">
                         <!-- 标题 -->
                         <div style="text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;border-bottom:1px solid var(--glass-border);padding-bottom:4px;">
                             {{ t('stats.netHealth') }}
                         </div>
-                        <!-- 大符号 -->
-                        <div style="text-align:center;font-size:2rem;line-height:1;" :class="stats.net_healthy===false?'err':'ok'">
-                            {{ stats.net_healthy===false ? '✗' : '✔' }}
+                        <!-- 探针详情：居中 -->
+                        <div style="flex:1;display:flex;flex-direction:column;justify-content:center;padding:0 6px;">
+                            <!-- IPv4 分组 -->
+                            <div v-if="Object.values(stats.probe_details||{}).some(d=>d.version==='ipv4')"
+                                 style="font-size:.64rem;color:var(--muted);margin-bottom:3px;font-weight:600;">
+                                IPv4
+                            </div>
+                            <template v-for="(d, ip) in (stats.probe_details||{})" :key="'v4-'+ip">
+                                <div v-if="d.version==='ipv4'"
+                                     style="font-size:.68rem;font-weight:600;line-height:1.5;display:flex;align-items:center;justify-content:space-between;">
+                                    <span style="display:flex;align-items:center;gap:2px;" :style="{ color: d.ok ? 'var(--ok)' : 'var(--err)' }">
+                                        <span style="font-size:.56rem;">{{ d.ok ? '✔' : '✗' }}</span>
+                                        <span>{{ ip }}</span>
+                                    </span>
+                                    <span v-if="d.ok && d.latency >= 0" 
+                                          style="font-size:.68rem;font-weight:600;"
+                                          :class="d.latency>1000?'err':d.latency>500?'warn':''">
+                                        {{ d.latency+'ms' }}
+                                    </span>
+                                </div>
+                            </template>
+                            <!-- IPv6 分组 -->
+                            <div v-if="Object.values(stats.probe_details||{}).some(d=>d.version==='ipv6')"
+                                 style="font-size:.64rem;color:var(--muted);margin-top:4px;margin-bottom:3px;font-weight:600;">
+                                IPv6
+                            </div>
+                            <template v-for="(d, ip) in (stats.probe_details||{})" :key="'v6-'+ip">
+                                <div v-if="d.version==='ipv6'"
+                                     style="font-size:.64rem;font-weight:600;line-height:1.5;display:flex;align-items:center;justify-content:space-between;">
+                                    <span style="display:flex;align-items:center;gap:2px;flex:1;overflow:hidden;" :style="{ color: d.ok ? 'var(--ok)' : 'var(--err)' }">
+                                        <span style="font-size:.56rem;flex-shrink:0;">{{ d.ok ? '✔' : '✗' }}</span>
+                                        <span style="overflow:hidden;text-overflow:ellipsis;">{{ ip }}</span>
+                                    </span>
+                                    <span v-if="d.ok && d.latency >= 0" 
+                                          style="font-size:.68rem;font-weight:600;flex-shrink:0;"
+                                          :class="d.latency>1000?'err':d.latency>500?'warn':''">
+                                        {{ d.latency+'ms' }}
+                                    </span>
+                                </div>
+                            </template>
                         </div>
-                        <!-- 状态文字 -->
-                        <div style="text-align:center;font-size:.82rem;font-weight:600;" :class="stats.net_healthy===false?'err':'ok'">
-                            {{ stats.net_healthy===false ? t('stats.netBad') : t('stats.netOk') }}
-                        </div>
-                        <!-- 探针摘要 -->
-                        <div style="text-align:center;font-size:.68rem;color:var(--muted);">
-                            {{ t('stats.probe') }} {{ stats.net_probe_ok===false ? t('stats.probeDown') : t('stats.probeOk') }}
+                        <!-- 底部状态 -->
+                        <div style="border-top:1px solid var(--glass-border);padding:4px;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;height:100%;">
+                                <!-- 状态图标和文字 -->
+                                <div style="flex:1;text-align:center;">
+                                    <span style="display:inline-flex;align-items:center;gap:2px;" :style="{color: stats.net_healthy ? 'var(--ok)' : 'var(--err)' }">
+                                        <span style="font-size:.75rem;">{{ stats.net_healthy ? '✔' : '✗' }}</span>
+                                        <span style="font-size:.64rem;font-weight:600;">{{ stats.net_healthy ? t('stats.netOk') : t('stats.netBad') }}</span>
+                                    </span>
+                                </div>
+                                <!-- IPv4状态 -->
+                                <div style="flex:1;text-align:center;">
+                                    <span style="font-size:.64rem;font-weight:500;" :style="{color: stats.net_probe_v4_ok ? 'var(--ok)' : 'var(--err)' }">
+                                        IPv4: {{ stats.net_probe_v4_ok ? t('stats.netOk') : t('stats.netBad') }}
+                                    </span>
+                                </div>
+                                <!-- IPv6状态 -->
+                                <div v-if="stats.net_probe_v6_ok !== null && stats.net_probe_v6_ok !== undefined" style="flex:1;text-align:center;">
+                                    <span style="font-size:.64rem;font-weight:500;"
+                                          :style="{color: stats.net_probe_v6_ok ? 'var(--ok)' : 'var(--err)' }">
+                                        IPv6: {{ stats.net_probe_v6_ok ? t('stats.netOk') : t('stats.netBad') }}
+                                    </span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-
-                <!-- 探针详情浮层（fixed，跟随鼠标，脱离所有层叠上下文） -->
-                <teleport to="body">
-                    <div v-if="showProbeTooltip"
-                         :style="{ position:'fixed', left:(probeTooltipX+14)+'px', top:(probeTooltipY+14)+'px', zIndex:99999,
-                                   background:'var(--probe-tooltip-bg, var(--glass-nav))', border:'1px solid var(--glass-border)',
-                                   borderRadius:'8px', padding:'8px 14px', minWidth:'200px',
-                                   backdropFilter:'blur(14px)', boxShadow:'var(--probe-tooltip-shadow, 0 6px 24px rgba(0,0,0,.5))',
-                                   whiteSpace:'nowrap', pointerEvents:'none' }">
-                        <div style="font-size:.65rem;color:var(--muted);margin-bottom:4px;font-weight:600;letter-spacing:.3px;">
-                            {{ t('stats.probe') }}
-                        </div>
-                        <!-- IPv4 分组：用 template v-for 避免 Vue3 v-for+v-if 同元素限制 -->
-                        <div v-if="Object.values(stats.probe_details||{}).some(d=>d.version==='ipv4')"
-                             style="font-size:.6rem;color:var(--muted);margin-top:2px;margin-bottom:1px;font-weight:600;letter-spacing:.2px;">
-                            IPv4
-                        </div>
-                        <template v-for="(d, ip) in (stats.probe_details||{})" :key="'v4-'+ip">
-                            <div v-if="d.version==='ipv4'"
-                                 style="font-size:.78rem;font-weight:600;line-height:1.9;display:flex;align-items:center;gap:6px;"
-                                 :style="{ color: d.ok ? 'var(--ok)' : 'var(--err)' }">
-                                <span>{{ d.ok ? '✔' : '✗' }}</span>
-                                <span>{{ ip }}</span>
-                                <span style="font-size:.7rem;opacity:.8;">{{ d.ok && d.latency >= 0 ? d.latency+'ms' : (d.ok ? '' : t('stats.timeout')||'超时') }}</span>
-                            </div>
-                        </template>
-                        <!-- IPv6 分组 -->
-                        <div v-if="Object.values(stats.probe_details||{}).some(d=>d.version==='ipv6')"
-                             style="font-size:.6rem;color:var(--muted);margin-top:4px;margin-bottom:1px;font-weight:600;letter-spacing:.2px;">
-                            IPv6
-                        </div>
-                        <template v-for="(d, ip) in (stats.probe_details||{})" :key="'v6-'+ip">
-                            <div v-if="d.version==='ipv6'"
-                                 style="font-size:.78rem;font-weight:600;line-height:1.9;display:flex;align-items:center;gap:6px;"
-                                 :style="{ color: d.ok ? 'var(--ok)' : 'var(--err)' }">
-                                <span>{{ d.ok ? '✔' : '✗' }}</span>
-                                <span style="max-width:150px;overflow:hidden;text-overflow:ellipsis;">{{ ip }}</span>
-                                <span style="font-size:.7rem;opacity:.8;">{{ d.ok && d.latency >= 0 ? d.latency+'ms' : (d.ok ? '' : t('stats.timeout')||'超时') }}</span>
-                            </div>
-                        </template>
-                        <!-- IPv6 未配置提示 -->
-                        <div v-if="stats.net_probe_v6_ok===null || stats.net_probe_v6_ok===undefined"
-                             style="font-size:.65rem;color:var(--muted);margin-top:4px;opacity:.6;">
-                            {{ t('config.probeIPv6NotConfigured') }}
-                        </div>
-                        <!-- 网络状态摘要 -->
-                        <div style="margin-top:5px;padding-top:4px;border-top:1px solid var(--glass-border);font-size:.68rem;">
-                            <span :style="{color: stats.net_probe_v4_ok ? 'var(--ok)' : 'var(--err)'}">
-                                IPv4: {{ stats.net_probe_v4_ok ? t('stats.netOk') : t('stats.netBad') }}
-                            </span>
-                            <span v-if="stats.net_probe_v6_ok !== null && stats.net_probe_v6_ok !== undefined"
-                                  style="margin-left:10px;"
-                                  :style="{color: stats.net_probe_v6_ok ? 'var(--ok)' : 'var(--err)'}">
-                                IPv6: {{ stats.net_probe_v6_ok ? t('stats.netOk') : t('stats.netBad') }}
-                            </span>
-                        </div>
-                    </div>
-                </teleport>
 
                 <!-- 卡5：TCP -->
                 <div class="col-xl-2 col-lg-4 col-md-4 col-6">
@@ -2423,6 +2425,7 @@
                             <option value="">{{ t('logs.all') }}</option>
                             <option value="info">Info</option>
                             <option value="error">Error</option>
+                            <option value="debug">Debug</option>
                             <option value="success">Success</option>
                         </select>
                         <button class="btn btn-sm btn-outline-secondary" @click="exportErrorLog"><i class="bi bi-download"></i> {{ t('dash.exportLog') }}</button>
@@ -2705,24 +2708,22 @@
                             </select>
                             <div class="form-text">{{ t('config.consoleLogDesc') }}</div>
                         </div>
-                        <div class="col-md-4 d-flex align-items-center">
-                            <div class="cfg-row w-100">
-                                <div>
-                                    <strong>{{ t('config.tabSwitchRefresh') }}</strong>
-                                    <p class="text-secondary mb-0" style="font-size:.8rem;">{{ t('config.tabSwitchRefreshDesc') }}</p>
-                                </div>
-                                <div class="form-check form-switch mb-0">
-                                    <input class="form-check-input" type="checkbox" v-model="cfg.tab_switch_refresh" @change="saveCfg" style="cursor:pointer;">
-                                </div>
+                        <!-- 切换时刷新数据（开关居中，描述放最底部） -->
+                        <div class="col-md-4 mt-3">
+                            <label class="form-label">{{ t('config.tabSwitchRefresh') }}</label>
+                            <div class="form-check form-switch mt-2 mb-3">
+                                <input class="form-check-input" type="checkbox" v-model="cfg.tab_switch_refresh" @change="saveCfg" style="cursor:pointer;">
                             </div>
+                            <div class="form-text">{{ t('config.tabSwitchRefreshDesc') }}</div>
                         </div>
+                        <!-- 可用率统计算法 -->
                         <div class="col-md-4">
                             <label class="form-label">{{ t('config.uptimeAlgorithm') }}</label>
                             <select class="form-select" v-model="cfg.uptime_algorithm" @change="saveCfg">
                                 <option value="legacy">{{ t('config.uptimeAlgorithmLegacy') }}</option>
                                 <option value="current">{{ t('config.uptimeAlgorithmCurrent') }}</option>
                             </select>
-                            <div class="form-text">{{ t('config.uptimeAlgorithmDesc') }}</div>
+                            <div class="form-text mt-2">{{ t('config.uptimeAlgorithmDesc') }}</div>
                         </div>
                         <!-- 结束 -->
                     </div>
@@ -2835,6 +2836,14 @@
                             </div>
                             <div class="form-text">{{ t('config.allowPrivateIpsDesc') }}</div>
                         </div>
+                        <!-- 控制台error日志输出开关（第五位） -->
+                        <div class="col-md-8">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" v-model="cfg.console_error_log" @change="saveCfg" id="consoleErrorLogSwitch">
+                                <label class="form-check-label" for="consoleErrorLogSwitch">{{ t('config.consoleErrorLog') }}</label>
+                            </div>
+                            <div class="form-text">{{ t('config.consoleErrorLogDesc') }}</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -2938,39 +2947,43 @@
                     </div>
                     <hr style="border-color:var(--glass-border);margin:14px 0 10px;">
                     <div class="row g-3">
-                        <!-- 自动暂停开关 -->
+                        <!-- 连续失败 自动暂停开关 -->
                         <div class="col-md-4">
                             <label class="form-label"><i class="bi bi-pause-circle me-1"></i>{{ t('config.autoPauseLabel') }}</label>
-                            <div class="form-check form-switch mt-1">
-                                <input class="form-check-input" type="checkbox" v-model="cfg.auto_pause_enabled"
+                            <div class="form-check form-switch mt-0">
+                                <input class="form-check-input mt-3 mb-3" type="checkbox" v-model="cfg.auto_pause_enabled"
                                        @change="saveCfg" id="autoPauseSwitch">
-                                <label class="form-check-label" for="autoPauseSwitch" style="cursor:pointer;">
+                                <label class="form-check-label mt-3 mb-1" for="autoPauseSwitch" style="cursor:pointer;">
                                     {{ cfg.auto_pause_enabled ? t('config.autoPauseEnabled') : t('config.autoPauseDisabled') }}
                                 </label>
                             </div>
-                            <div class="form-text">{{ t('config.autoPauseDesc') }}</div>
+                            <div class="form-text mt-3">{{ t('config.autoPauseDesc') }}</div>
                         </div>
                         <!-- 自动暂停次数 -->
                         <div class="col-md-4" :style="cfg.auto_pause_enabled ? '' : 'opacity:.4;pointer-events:none;'">
                             <label class="form-label"><i class="bi bi-123 me-1"></i>{{ t('config.autoPauseThreshLabel') }}</label>
-                            <div class="input-group">
+                            <div class="input-group mt-0">
                                 <input type="number" class="form-control" v-model.number="cfg.auto_pause_threshold"
                                        @change="saveCfg" min="5" max="500" :disabled="!cfg.auto_pause_enabled">
                                 <span class="input-group-text">{{ t('config.times') }}</span>
                             </div>
-                            <div class="form-text">{{ t('config.autoPauseThreshDesc') }}</div>
+                            <div class="form-text mt-3">{{ t('config.autoPauseThreshDesc') }}</div>
                         </div>
-                        <!-- 重启保持自动暂停 -->
+                        <!-- 重启保持自动暂停（增加符号 + 统一高度） -->
                         <div class="col-md-4" :style="cfg.auto_pause_enabled ? '' : 'opacity:.4;pointer-events:none;'">
-                            <label class="form-label"><i class="bi bi-reboot me-1"></i>{{ t('config.autoPausePersistLabel') }}</label>
-                            <div class="form-check form-switch mt-1">
+                            <label class="form-label">
+                                <i class="bi bi-reboot me-1"></i>
+                                <span style="font-weight:600;">↻</span>
+                                <span class="ms-1">{{ t('config.autoPausePersistLabel') }}</span>
+                            </label>
+                            <div class="form-check form-switch mt-0" style="min-height: 38px; display: flex; align-items: center;">
                                 <input class="form-check-input" type="checkbox" v-model="cfg.auto_pause_persist"
                                        @change="saveCfg" :disabled="!cfg.auto_pause_enabled" id="autoPausePersistSwitch">
-                                <label class="form-check-label" for="autoPausePersistSwitch" style="cursor:pointer;">
+                                <label class="form-check-label ms-2" for="autoPausePersistSwitch" style="cursor:pointer;">
                                     {{ cfg.auto_pause_persist ? t('config.enabled') : t('config.disabled') }}
                                 </label>
                             </div>
-                            <div class="form-text">{{ t('config.autoPausePersistDesc') }}</div>
+                            <div class="form-text mt-3">{{ t('config.autoPausePersistDesc') }}</div>
                         </div>
                     </div>
                 </div>
@@ -3290,6 +3303,7 @@ createApp({
             export_suffix: '/announce',
             show_removed_ips: true,
             allow_private_ips: false,
+            console_error_log: false,
             default_layout_width: '1700',
             listen_port: 443,
             listen_ipv4: 'global',
@@ -3965,6 +3979,7 @@ createApp({
                     retry_mode: cfg.value.retry_mode,
                     retry_interval:cfg.value.retry_interval,
                     console_log_level: cfg.value.console_log_level,
+                    console_error_log: cfg.value.console_error_log,
                     http_proxy:cfg.value.http_proxy,
                     udp_proxy:cfg.value.udp_proxy,
                     dns_mode:cfg.value.dns_mode,

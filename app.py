@@ -13,7 +13,10 @@ import struct
 import logging
 import threading
 import random
+import select
+import subprocess
 import re
+import platform
 import hashlib
 import secrets
 from datetime import datetime, timedelta
@@ -51,6 +54,7 @@ DEFAULT_CONFIG = {
     'stagger_delay_direct': 100,       # 直连模式：批间延迟 ms
     'log_to_disk': False,              # 日志存盘（access.log、error.log）
     'log_level': 'info',               # none | info | error | debug
+    'console_error_log': False,        # 控制台 error 日志输出开关（默认关闭）
     'debug_save_trace': False,         # 调试：输出异步保存耗时/队列状态（仅 debug 级别打印）
     'log_file': 'error.log',
     'data_file': 'data.json',
@@ -84,13 +88,15 @@ DEFAULT_CONFIG = {
     'probe_ipv4_targets': [            # IPv4 探针目标列表（任一可达即认为 IPv4 正常）
         '8.8.8.8',                     # Google Public DNS
         '1.1.1.1',                     # Cloudflare DNS
-        '114.114.114.114',             # 国内 114 DNS
+        '223.6.6.6',                   # 国内 阿里 DNS
     ],
     'probe_ipv6_targets': [            # IPv6 探针目标列表（任一可达即认为 IPv6 正常，留空则禁用）
         '2001:4860:4860::8888',        # Google IPv6 DNS
         '2606:4700:4700::1111',        # Cloudflare IPv6 DNS
         '2400:3200:baba::1',           # 阿里巴巴 IPv6 DNS（替换失效的 240c::6666 CNNIC）
     ],
+    'probe_stable_count': 10,           # 探针延迟ms连续相同N次后强制重连（默认10次，0=禁用）
+    'probe_max_conn_age': 120,          # 探针连接最大存活时间（秒），超时强制重建（默认120秒，0=禁用）
     # ── 连续失败自动暂停 ──
     'auto_pause_enabled': True,        # 是否开启连续失败自动暂停
     'auto_pause_threshold': 30,        # 连续失败多少次后自动暂停该IP
@@ -127,7 +133,7 @@ def load_config():
                 saved = json.load(f)
             for k in ['check_interval','timeout','retry_mode','retry_interval',
                       'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
-                      'log_to_disk','log_level','log_level','save_interval','console_log_level','debug_save_trace',
+                      'log_to_disk','log_level','console_error_log','save_interval','console_log_level','debug_save_trace',
                       'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                       'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                       'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
@@ -135,8 +141,9 @@ def load_config():
                       'show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
                       'cleanup_interval','trust_cf_ip',
                       'probe_fail_threshold','probe_ipv6_targets',
-                      'probe_timeout','probe_ipv4_targets',
-                      'auto_pause_enabled','auto_pause_threshold','auto_pause_persist']:
+                    'probe_timeout','probe_ipv4_targets',
+                    'probe_stable_count','probe_max_conn_age',
+                    'auto_pause_enabled','auto_pause_threshold','auto_pause_persist']:
                 if k in saved:
                     cfg[k] = saved[k]
             # 向后兼容：旧配置文件用 rank_stat_period，迁移到 dashboard_stat_period
@@ -153,7 +160,7 @@ def persist_config(cfg):
     try:
         savable = {k: cfg[k] for k in ['check_interval','timeout','retry_mode','retry_interval',
                                         'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
-                                        'log_to_disk','log_level','save_interval','debug_save_trace',
+                                        'log_to_disk','log_level','console_error_log','save_interval','debug_save_trace',
                                         'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                                         'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                                         'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
@@ -163,6 +170,7 @@ def persist_config(cfg):
                                         'cleanup_interval','trust_cf_ip',
                                         'probe_fail_threshold','probe_ipv6_targets',
                                         'probe_timeout','probe_ipv4_targets',
+                                        'probe_stable_count','probe_max_conn_age',
                                         'auto_pause_enabled','auto_pause_threshold','auto_pause_persist']
                    if k in cfg}
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
@@ -322,7 +330,7 @@ _rate_limit_lock = threading.Lock()
 _rate_limit_warned = {}       # {ip: last_warn_time} 限流警告去重（避免日志刷屏）
 _rate_limit_warned_lock = threading.Lock()
 
-def rate_limit(limit: int = 60, window: int = 60):
+def rate_limit(limit: int = 120, window: int = 60):
     def decorator(f):
         @wraps(f)
         def wrapper(*args, **kwargs):
@@ -356,7 +364,7 @@ _NOISY_PATHS = {'/api/nav'}
 _ACCESS_LOG_FILE = 'access.log'
 
 def cprint(msg: str, level: str = 'info', raw: bool = False):
-    """根据 log_level 决定是否打印到控制台。加锁保证多线程下不截断。
+    """根据 log_level 和 console_error_log 配置决定是否打印到控制台。加锁保证多线程下不截断。
     raw=True：原样输出（nginx access log 格式，不加前缀）
     raw=False：加 YYYY/M/D HH:MM:SS [LEVEL] 前缀；info级别同步写入 access.log
     """
@@ -364,6 +372,9 @@ def cprint(msg: str, level: str = 'info', raw: bool = False):
     if cl == 'none':
         return
     if level == 'success':
+        return
+    # console_error_log 配置控制 error 级别日志是否输出到控制台
+    if level == 'error' and not CONFIG.get('console_error_log', False):
         return
     if cl == 'info' and level not in ('info',):
         return
@@ -974,13 +985,21 @@ class TrackerDB:
                 ip_obj = td['ips'][i]
                 ip = ip_obj['ip']
                 if ip in new_ips:
-                    # IP 仍然存在：若有 removed 标记则清除
-                    if ip_obj.pop('removed', None) is not None:
+                    # IP 仍然存在：若有 removed=True 标记则清除（保留 removed=False 的锁定标记）
+                    if ip_obj.get('removed') is True:
+                        ip_obj.pop('removed', None)
                         self._active_ips.add((domain, ip))
                         self._ip_map[(domain, ip)] = ip_obj
                         changed = True
                 else:
                     # IP 消失
+                    # 如果 removed 字段明确为 false，则跳过移除处理（IP被锁定）
+                    if ip_obj.get('removed') is False:
+                        # 确保被锁定的 IP 始终在活跃列表中，继续被探测
+                        key = (domain, ip)
+                        self._active_ips.add(key)
+                        self._ip_map[key] = ip_obj
+                        continue
                     key = (domain, ip)
                     if key in self._active_ips:
                         self._active_ips.discard(key)
@@ -3289,6 +3308,85 @@ def udp_ping(ip, port):
             except: pass
 
 
+def icmp_ping(host: str, timeout: float = 3, payload: bytes = b'\x00') -> tuple:
+    """
+    使用系统 ping 命令发送 ICMP Echo Request（同时支持 IPv4 和 IPv6）。
+    返回 (成功: bool, 延迟毫秒: int, 错误信息: str)
+    
+    参数:
+        host    : 目标域名或 IP 地址（自动识别 IPv4/IPv6）
+        timeout : 超时时间（秒）
+        payload : 忽略，系统 ping 不支持自定义负载，保留仅为兼容原有调用
+    
+    返回:
+        (True, 延迟ms, None)   : 成功收到回包
+        (False, -1, 错误描述)  : 失败（超时、不可达等）
+    
+    说明:
+        直接调用操作系统原生的 ping 命令，Windows/Linux/macOS 均支持，
+        准确读取 ICMP 延迟，无第三方库兼容性问题。
+    """
+    # 忽略 payload 参数（系统 ping 不支持自定义数据）
+    is_windows = platform.system().lower() == 'windows'
+    
+    # 构建命令
+    if is_windows:
+        # Windows: ping -n 1 -w timeout_ms host
+        timeout_ms = int(timeout * 1000)
+        cmd = ['ping', '-n', '1', '-w', str(timeout_ms), host]
+    else:
+        # Linux / macOS: ping -c 1 -W timeout host
+        cmd = ['ping', '-c', '1', '-W', str(int(timeout)), host]
+    
+    try:
+        start = time.perf_counter()
+        # 执行命令，超时设置为 timeout + 1 秒（给命令本身留出时间）
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 1)
+        elapsed = time.perf_counter() - start
+        
+        if result.returncode == 0:
+            output = result.stdout
+            # 解析延迟值
+            if is_windows:
+                # Windows 输出示例: "来自 2400:3200:baba::1 的回复: 时间=21ms"
+                # 或 "Reply from 2001:4860:4860::8844: time=234ms"
+                match = re.search(r'时间[=:](\d+)ms', output, re.IGNORECASE)
+                if not match:
+                    # 兼容英文系统: "time=21ms"
+                    match = re.search(r'time[=:](\d+)ms', output, re.IGNORECASE)
+                if match:
+                    latency_ms = int(match.group(1))
+                else:
+                    # 解析失败则回退到总耗时（可能不准）
+                    latency_ms = int(elapsed * 1000)
+            else:
+                # Linux/macOS: "time=21.3 ms"
+                match = re.search(r'time[= ](\d+(?:\.\d+)?) ?ms', output, re.IGNORECASE)
+                if match:
+                    latency_ms = int(float(match.group(1)))
+                else:
+                    latency_ms = int(elapsed * 1000)
+            return True, latency_ms, None
+        else:
+            # ping 失败：解析错误信息
+            error_output = result.stderr or result.stdout
+            if not error_output:
+                error_output = f"ping 返回码 {result.returncode}"
+            error_lower = error_output.lower()
+            if "unreachable" in error_lower:
+                return False, -1, "目标不可达"
+            elif "timeout" in error_lower or "timed out" in error_lower:
+                return False, -1, f"超时 (>{timeout}s)"
+            elif "could not find host" in error_lower or "无法解析" in error_output:
+                return False, -1, f"DNS 解析失败: {host}"
+            else:
+                return False, -1, f"Ping 失败: {error_output.strip()}"
+    except subprocess.TimeoutExpired:
+        return False, -1, f"命令执行超时 (>{timeout+1}s)"
+    except Exception as e:
+        return False, -1, f"{type(e).__name__}: {e}"
+
+
 # ==================== 轮询重试逻辑 ====================
 # 每个 domain 独立维护轮询步骤
 _poll_step = {}
@@ -3395,76 +3493,23 @@ _consec_fail_lock  = threading.Lock()
 # 归属地查询线程池（异步执行，避免阻塞探测线程）
 _geo_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="geo")
 
-class ProbeTcpPool:
-    """网络探针 TCP 长连接池，每个目标保持一条长连接"""
-    def __init__(self):
-        self._conns: dict = {}          # (host, port) -> socket.socket
-        self._latency: dict = {}        # (host, port) -> int (ms)
-        self._lock = threading.RLock()
-
-    def check(self, host: str, port: int, timeout: float) -> tuple:
-        """返回 (可达: bool, 延迟ms: int)"""
-        key = (host, port)
-        with self._lock:
-            sock = self._conns.get(key)
-            alive = self._is_socket_alive(sock) if sock else False
-            if alive:
-                # 复用成功，直接返回 True 和上次记录的延迟（不新建连接）
-                return True, self._latency.get(key, 0)
-            # 连接无效或不存在 -> 新建
-            ok, lat, new_sock = self._connect(host, port, timeout)
-            if ok:
-                self._conns[key] = new_sock
-                self._latency[key] = lat
-            else:
-                self._conns.pop(key, None)
-                self._latency.pop(key, None)
-            return ok, lat
-
-    def _is_socket_alive(self, sock: socket.socket) -> bool:
-        """检查 socket 是否仍然处于已连接状态"""
-        if not sock:
-            return False
-        try:
-            err = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
-            if err != 0:
-                return False
-            # 使用 select 检查是否有数据可读（不改变阻塞模式，Windows 兼容）
-            rlist, _, _ = _select_mod.select([sock], [], [], 0)
-            if rlist:
-                # 有数据可读，尝试 peek 一个字节，若为空则对端已关闭
-                data = sock.recv(1, socket.MSG_PEEK)
-                return data != b''
-            # 无数据可读，连接正常
-            return True
-        except OSError:
-            return False
-
-    def _connect(self, host: str, port: int, timeout: float) -> tuple:
-        """建立新连接并测量 RTT，返回 (ok, latency_ms, socket)"""
-        try:
-            infos = socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
-            if not infos:
-                return False, -1, None
-            fam, _, _, _, sockaddr = infos[0]
-            s = socket.socket(fam, socket.SOCK_STREAM)
-            s.settimeout(timeout)
-            t_start = time.perf_counter()
-            s.connect(sockaddr)
-            t_end = time.perf_counter()
-            lat = int((t_end - t_start) * 1000)
-            # 启用 keepalive 防止中间设备清理空闲连接
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-            return True, lat, s
-        except Exception:
-            return False, -1, None
-
-# 全局探针池实例（放在 _probe_one 定义之前）
-_probe_pool = ProbeTcpPool()
+def _check_icmp_permission():
+    """启动时检查 ICMP 权限，若不可用则记录一次错误但不影响主流程"""
+    try:
+        ok, _ = icmp_ping('1.1.1.1', timeout=5)
+        if not ok:
+            cprint("[ICMP] 权限检查失败：无法发送 ICMP 包，网络健康检测将不可用。", 'info')
+        else:
+            cprint("[ICMP] 权限检查通过，ICMP 探针正常工作。", 'info')
+    except Exception:
+        pass
 
 def _probe_one(host, port, timeout=3):
-    """探测单个目标，返回 (reachable: bool, latency_ms: int) —— 使用长连接池复用"""
-    return _probe_pool.check(host, port, timeout)
+    """
+    探测单个目标（忽略 port，只使用 ICMP ping）
+    返回 (可达: bool, 延迟ms: int, 错误信息: str)
+    """
+    return icmp_ping(host, timeout=timeout, payload=b'\x00')
 
 def _probe_loop():
     """后台探针线程：IPv4/IPv6 分组探测，分别维护可达状态和延迟。
@@ -3502,10 +3547,10 @@ def _probe_loop():
                 for future in as_completed(futures):
                     host, port, ver = futures[future]
                     try:
-                        ok, lat = future.result()
-                    except Exception:
-                        ok, lat = False, -1
-                    details[host] = {'ok': ok, 'latency': lat, 'version': ver}
+                        ok, lat, err = future.result()
+                    except Exception as e:
+                        ok, lat, err = False, -1, str(e)
+                    details[host] = {'ok': ok, 'latency': lat, 'version': ver, 'error': err}
                     if ok and not v4_reachable:
                         v4_reachable = True
                         v4_hit = f"{host}:{port}"
@@ -3514,19 +3559,23 @@ def _probe_loop():
         if IPV6_TARGETS:
             v6_reachable = False
             v6_hit = ''
+            # 用于收集所有失败的错误信息
+            v6_errors = []
             with ThreadPoolExecutor(max_workers=len(IPV6_TARGETS)) as executor:
                 futures = {executor.submit(_probe_one, host, port, PROBE_TIMEOUT): (host, port, ver)
                           for host, port, ver in IPV6_TARGETS}
                 for future in as_completed(futures):
                     host, port, ver = futures[future]
                     try:
-                        ok, lat = future.result()
-                    except Exception:
-                        ok, lat = False, -1
-                    details[host] = {'ok': ok, 'latency': lat, 'version': ver}
+                        ok, lat, err = future.result()
+                    except Exception as e:
+                        ok, lat, err = False, -1, str(e)
+                    details[host] = {'ok': ok, 'latency': lat, 'version': ver, 'error': err}
                     if ok and not v6_reachable:
                         v6_reachable = True
                         v6_hit = f"{host}:{port}"
+                    elif not ok and err:
+                        v6_errors.append(f"{host}: {err}")
         else:
             v6_reachable = None  # 未配置，不参与判断
 
@@ -3540,8 +3589,8 @@ def _probe_loop():
         v4_targets_str = ', '.join(f"{h}:{p}" for h,p,_ in IPV4_TARGETS) if IPV4_TARGETS else '(无)'
         if not v4_reachable and not _warned_v4:
             msg = f"[探针] IPv4全部目标({v4_targets_str})均不可达，IPv4网络可能异常"
-            db.add_log(msg, 'error')
-            cprint(msg, 'error')
+            db.add_log(msg, 'info')
+            cprint(msg, 'info')
             _warned_v4 = True
         elif v4_reachable and _warned_v4:
             msg = f"[探针] IPv4网络已恢复，{v4_hit} 可达"
@@ -3549,13 +3598,15 @@ def _probe_loop():
             cprint(msg, 'info')
             _warned_v4 = False
 
-        # ── IPv6 告警 ──────────────────────────────────────────────────
+        # ── IPv6 告警（附带具体错误原因）──────────────────────────────────
         if v6_reachable is not None:
             v6_targets_str = ', '.join(h for h,_,__ in IPV6_TARGETS)
             if not v6_reachable and not _warned_v6:
-                msg = f"[探针] IPv6全部目标({v6_targets_str})均不可达，IPv6网络可能异常"
-                db.add_log(msg, 'error')
-                cprint(msg, 'error')
+                # 构建详细的错误摘要
+                error_detail = '; '.join(v6_errors) if v6_errors else '所有目标均无响应'
+                msg = f"[探针] IPv6全部目标({v6_targets_str})均不可达: {error_detail}"
+                db.add_log(msg, 'info')
+                cprint(msg, 'info')
                 _warned_v6 = True
             elif v6_reachable and _warned_v6:
                 msg = f"[探针] IPv6网络已恢复，{v6_hit} 可达"
@@ -3710,8 +3761,8 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                     return  # tracker 已删除，退出线程
                 # 使用 _ip_map 快速查找，O(1) 复杂度
                 ip_obj = db._ip_map.get((domain, ip))
-                if ip_obj is None or ip_obj.get('removed'):
-                    return  # IP 已移除，退出线程
+                if ip_obj is None or ip_obj.get('removed') is True:
+                    return  # IP 已移除，退出线程（removed=False 的 IP 被锁定，继续探测）
                 if ip_obj.get('paused') or td.get('paused'):
                     should_skip = True
                     skip_reason = 'paused'
@@ -5410,7 +5461,7 @@ def api_config():
             return jsonify({'error': '配置参数无效', 'details': errors}), 400
         keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
-                'log_to_disk','log_level','console_log_level','debug_save_trace','save_interval','http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
+                'log_to_disk','log_level','console_log_level','debug_save_trace','save_interval','console_error_log','http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                 'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                 'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','uptime_algorithm',
@@ -5418,6 +5469,7 @@ def api_config():
                 'cleanup_interval','trust_cf_ip',
                 'probe_fail_threshold','probe_ipv6_targets',
                 'probe_timeout','probe_ipv4_targets',
+                'probe_stable_count','probe_max_conn_age',
                 'auto_pause_enabled','auto_pause_threshold','auto_pause_persist',
                 'dns_refresh_interval']
         labels = {
@@ -5435,6 +5487,7 @@ def api_config():
             'console_log_level':     '控制台日志级别',
             'debug_save_trace':      '保存调试日志',
             'save_interval':         '存盘间隔',
+            'console_error_log':     '控制台Error日志',
             'http_proxy':            'HTTP代理',
             'udp_proxy':             'UDP代理',
             'http_proxy_enabled':    'HTTP代理开关',
@@ -5520,12 +5573,14 @@ def api_config():
     if not session.get('role'):
         return jsonify({k: CONFIG.get(k) for k in public_keys})
     all_keys = ['check_interval','timeout','retry_mode','retry_interval',
-                'log_to_disk','log_level','debug_save_trace','save_interval','http_proxy','udp_proxy','http_proxy_enabled','udp_proxy_enabled',
+                'log_to_disk','log_level','debug_save_trace','save_interval','console_error_log','http_proxy','udp_proxy','http_proxy_enabled','udp_proxy_enabled',
                 'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','uptime_algorithm',
                 'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width',
                 'allow_private_ips','min_password_length','cleanup_interval','trust_cf_ip',
-                'probe_fail_threshold','probe_ipv6_targets','probe_timeout','probe_ipv4_targets','auto_pause_enabled','auto_pause_threshold','auto_pause_persist',
+                'probe_fail_threshold','probe_ipv6_targets','probe_timeout','probe_ipv4_targets',
+                'probe_stable_count','probe_max_conn_age',
+                'auto_pause_enabled','auto_pause_threshold','auto_pause_persist',
                 'dns_refresh_interval']
     return jsonify({k: CONFIG.get(k) for k in all_keys})
 
@@ -5735,6 +5790,9 @@ if __name__ == '__main__':
     t = threading.Thread(target=monitor_loop, daemon=True)
     t.start()
     # 注：monitor_loop 内部会调用 _start_all_tracker_threads()，无需手动触发
+
+    # 启动时检查 ICMP 权限
+    _check_icmp_permission()
 
     probe_t = threading.Thread(target=_probe_loop, daemon=True)
     probe_t.start()
