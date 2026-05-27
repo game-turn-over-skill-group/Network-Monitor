@@ -2716,6 +2716,14 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="col-md-4">
+                            <label class="form-label">{{ t('config.uptimeAlgorithm') }}</label>
+                            <select class="form-select" v-model="cfg.uptime_algorithm" @change="saveCfg">
+                                <option value="legacy">{{ t('config.uptimeAlgorithmLegacy') }}</option>
+                                <option value="current">{{ t('config.uptimeAlgorithmCurrent') }}</option>
+                            </select>
+                            <div class="form-text">{{ t('config.uptimeAlgorithmDesc') }}</div>
+                        </div>
                         <!-- 结束 -->
                     </div>
                 </div>
@@ -3273,6 +3281,7 @@ createApp({
             tracker_stat_period: '24h',
             cache_history: true,
             tab_switch_refresh: true,
+            uptime_algorithm: 'legacy',
             monitor_workers: 120,
             stagger_batch_proxy: 5,
             stagger_batch_direct: 5,
@@ -3968,6 +3977,7 @@ createApp({
                     dashboard_stat_period:cfg.value.dashboard_stat_period,
                     cache_history:cfg.value.cache_history,
                     tab_switch_refresh:cfg.value.tab_switch_refresh,
+                    uptime_algorithm:cfg.value.uptime_algorithm,
                     monitor_workers:cfg.value.monitor_workers||120,
                     stagger_batch_proxy:cfg.value.stagger_batch_proxy||5,
                     stagger_batch_direct:cfg.value.stagger_batch_direct||5,

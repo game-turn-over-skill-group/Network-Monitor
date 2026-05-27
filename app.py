@@ -49,7 +49,7 @@ DEFAULT_CONFIG = {
     'stagger_batch_direct': 5,         # 直连模式：每批发包数
     'stagger_delay_proxy': 150,        # 代理模式：批间延迟 ms
     'stagger_delay_direct': 100,       # 直连模式：批间延迟 ms
-    'log_to_disk': False,
+    'log_to_disk': False,              # 日志存盘（access.log、error.log）
     'log_level': 'info',               # none | info | error | debug
     'debug_save_trace': False,         # 调试：输出异步保存耗时/队列状态（仅 debug 级别打印）
     'log_file': 'error.log',
@@ -69,10 +69,11 @@ DEFAULT_CONFIG = {
     'max_log_error': 2000,             # Error 级日志最大条目数
     'page_refresh_ms': 30000,          # 前端页面自动刷新间隔(ms)，0=禁用
     'save_interval': 120,              # 日志存盘 (history.json.append) 定时保存间隔（秒），默认120秒
-    'cache_history': True,             # 是否缓存历史可用率到JSON（重启不丢失）
+    'cache_history': True,             # 缓存统计可用率：是否缓存历史可用率到 history.json（重启不丢失）
     'dashboard_stat_period': '24h',    # 仪表盘可用率统计周期：24h | 7d | 30d（排行TOP10+快速搜索）
     'tracker_stat_period': '7d',       # 监控列表可用率统计周期：24h | 7d | 30d
     'tab_switch_refresh': True,        # 切换仪表盘/监控列表时是否刷新数据
+    'uptime_algorithm': 'legacy',      # 可用率统计算法：legacy（含历史所有IP）| current（仅当前活跃IP）
     'export_suffix': '/announce',      # 导出 tracker 列表时追加的路径后缀
     'show_removed_ips': True,          # 是否显示已移除的历史IP（前端控制）
     'default_layout_width': '1700',    # 默认页面视野宽度（px字符串，对应50%~100%）
@@ -130,7 +131,7 @@ def load_config():
                       'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                       'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                       'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
-                      'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','export_suffix',
+                      'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','uptime_algorithm','export_suffix',
                       'show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
                       'cleanup_interval','trust_cf_ip',
                       'probe_fail_threshold','probe_ipv6_targets',
@@ -157,7 +158,7 @@ def persist_config(cfg):
                                         'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                                         'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
                                         'dashboard_stat_period','tracker_stat_period','cache_history',
-                                        'tab_switch_refresh','export_suffix','show_removed_ips','default_layout_width',
+                                        'tab_switch_refresh','uptime_algorithm','export_suffix','show_removed_ips','default_layout_width',
                                         'allow_private_ips','min_password_length','users',
                                         'cleanup_interval','trust_cf_ip',
                                         'probe_fail_threshold','probe_ipv6_targets',
@@ -568,6 +569,8 @@ class TrackerDB:
             # 标记该tracker有变化
             self._dirty_trackers.add(domain)
             # 延迟保存，不立即调用 _save_async()，由定时保存统一处理
+            # 立刻 异步保存 data.json
+            self._save_async()
 
     def update_status(self, domain, ip, status, latency, check_time=None):
         with self.lock:
@@ -591,10 +594,11 @@ class TrackerDB:
                 self._push_history(domain, ip, status)
                 self._recalc()
                 self._clear_uptime_cache(domain)
-                # 探测结果不标记tracker脏，只写入history
-                # data.json只在配置变化时保存（添加/删除/暂停/恢复）
-                # 避免每次探测都写磁盘导致高频 I/O
-                #self._save_async()  # 异步保存
+                # 标记tracker脏，由定时保存线程在（自定义）比如：120秒后 统一更新 data.json
+                # 这样既能保证data.json最终会更新，又不会导致高频I/O
+                # 如果你看到的100多KB/s 是正常的 是由data.json大小决定的
+                # 如果你拿掉下面的标记 那么 启动程序时 或 自定义save_interval存盘间隔 就不会触发 更新状态 更新data.json文件了 就只有启动时上一次 加载history.json的数据了
+                self._dirty_trackers.add(domain)
 
     def _push_history(self, domain, ip, status):
         """把探测结果写入 hdb（时间戳历史库）。
@@ -769,9 +773,14 @@ class TrackerDB:
                     t_copy[f'uptime_{pk}'] = cached
                     continue
                 if CONFIG.get('cache_history', True):
-                    s = hdb.get_domain_summary(domain, secs, 
-                                               excluded_ips=paused_ip_set if paused_ip_set else None,
-                                               included_ips=active_ip_set if active_ip_set else None)
+                    use_legacy = CONFIG.get('uptime_algorithm', 'legacy') == 'legacy'
+                    if use_legacy:
+                        s = hdb.get_domain_summary(domain, secs,
+                                                   excluded_ips=paused_ip_set if paused_ip_set else None)
+                    else:
+                        s = hdb.get_domain_summary(domain, secs,
+                                                   excluded_ips=paused_ip_set if paused_ip_set else None,
+                                                   included_ips=active_ip_set if active_ip_set else None)
                     uptime_val = round(s['ok'] / s['total'] * 100, 1) if s['total'] > 0 else None
                     t_copy[f'uptime_{pk}'] = uptime_val
                     t_copy[f'ok_{pk}']     = s['ok']
@@ -868,9 +877,14 @@ class TrackerDB:
                         versions.add(ip_obj.get('version', 'ipv4'))
                 if not active_ips:
                     continue
-                s = hdb.get_domain_summary(name, secs,
-                                           excluded_ips=paused_ip_set if paused_ip_set else None,
-                                           included_ips=active_ip_set if active_ip_set else None)
+                use_legacy = CONFIG.get('uptime_algorithm', 'legacy') == 'legacy'
+                if use_legacy:
+                    s = hdb.get_domain_summary(name, secs,
+                                               excluded_ips=paused_ip_set if paused_ip_set else None)
+                else:
+                    s = hdb.get_domain_summary(name, secs,
+                                               excluded_ips=paused_ip_set if paused_ip_set else None,
+                                               included_ips=active_ip_set if active_ip_set else None)
                 uptime = round(s['ok'] / s['total'] * 100, 2) if s['total'] > 0 else None
                 if uptime is None and min_uptime > 0:
                     continue
@@ -996,6 +1010,7 @@ class TrackerDB:
                 self._clear_uptime_cache(domain)
                 # 标记该tracker有配置变化（DNS更新导致IP变化）
                 self._dirty_trackers.add(domain)
+                # 立刻 异步保存 data.json
                 self._save_async()
 
     # 异步保存：将保存任务提交到线程池
@@ -1146,16 +1161,29 @@ class TrackerDB:
                 self._active_ips.clear()
                 self._ip_map.clear()
                 total_removed = 0
+                modified_trackers = set()  # 跟踪被修改的 tracker
                 for d, t in data.items():
                     all_ips    = t.get('ips', [])
-                    # 启动时删除 removed: true 的IP（但保留用户手动暂停的IP，自动暂停的IP仍会被删除）
-                    clean_ips   = [ip for ip in all_ips if not ip.get('removed', False) or ip.get('paused_by_user', False)]
+                    # 启动时删除 IP：
+                    # - removed: true 且不是用户手动暂停的 → 删除
+                    # - removed: true 且是用户手动暂停的 → 保留
+                    # - 其他情况 → 保留
+                    clean_ips = []
+                    for ip in all_ips:
+                        is_removed = ip.get('removed', False)
+                        is_user_paused = ip.get('paused_by_user', False)
+                        if is_removed and not is_user_paused:
+                            # 自动暂停的过时IP，删除
+                            continue
+                        # 其他情况都保留
+                        clean_ips.append(ip)
                     removed_cnt = len(all_ips) - len(clean_ips)
                     if removed_cnt:
                         total_removed += removed_cnt
+                        modified_trackers.add(d)  # 标记该 tracker 被修改
                         cprint(f"[load] {d}: 清理 {removed_cnt} 个已移除IP", 'debug')
                     for ip_obj in clean_ips:
-                        # 清理历史摘要字段
+                        # 清理 IP 级别的历史摘要字段（这些字段应该从 history.json 中实时计算）
                         for k in ('history_24h','history_7d','history_30d'):
                             ip_obj.pop(k, None)
                         # ===== 新增：为旧数据补充 last_check_ts =====
@@ -1165,13 +1193,14 @@ class TrackerDB:
                                 ip_obj['last_check_ts'] = dt.timestamp()
                             except Exception:
                                 ip_obj['last_check_ts'] = 0
-                    # 只保留非removed的IP
+                    # 只保留非removed的IP，同时清理域名级别的历史摘要字段
                     self.trackers[d] = {
                         'domain':t.get('domain',d),'port':t.get('port',80),
                         'protocol':t.get('protocol','tcp'),'ips':clean_ips,
                         'added_time':t.get('added_time',datetime.now().isoformat()),
                         'dns_error': t.get('dns_error', False),
                         'paused': t.get('paused', False)
+                        # 注意：history_24h, history_7d, history_30d 从 t 中排除，由 get_trackers() 实时计算
                     }
                     # 初始化活跃IP集合和IP快速查找表（只添加非paused的IP）
                     domain_paused = t.get('paused', False)
@@ -1192,13 +1221,10 @@ class TrackerDB:
                         warmed += 1
             if warmed:
                 cprint(f"[geo] 预热归属地缓存 {warmed} 条", 'info')
-            # 如果清理了 removed IP，保存更新后的 data.json
-            if total_removed > 0:
-                cprint(f"[load] 共清理 {total_removed} 个已移除IP，保存 data.json", 'info')
-                self._save_async()
             # 标记数据已同步，避免启动时全量保存
             self._dirty_trackers.clear()
-            return True
+            # 返回被修改的 tracker 列表和移除数量，由主程序在 hdb 加载完成后 再统一保存 data.json
+            return (True, modified_trackers, total_removed)
         except Exception as e:
             cprint(f"加载 data.json 失败: {e}", 'error')
             return False
@@ -5384,10 +5410,10 @@ def api_config():
             return jsonify({'error': '配置参数无效', 'details': errors}), 400
         keys = ['check_interval','timeout','retry_mode','retry_interval',
                 'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
-                'log_to_disk','log_level','console_log_level','debug_save_trace','http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
+                'log_to_disk','log_level','console_log_level','debug_save_trace','save_interval','http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
                 'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
                 'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
-                'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
+                'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','uptime_algorithm',
                 'export_suffix','show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
                 'cleanup_interval','trust_cf_ip',
                 'probe_fail_threshold','probe_ipv6_targets',
@@ -5408,6 +5434,7 @@ def api_config():
             'log_level':             '日志级别',
             'console_log_level':     '控制台日志级别',
             'debug_save_trace':      '保存调试日志',
+            'save_interval':         '存盘间隔',
             'http_proxy':            'HTTP代理',
             'udp_proxy':             'UDP代理',
             'http_proxy_enabled':    'HTTP代理开关',
@@ -5450,6 +5477,7 @@ def api_config():
         suffixes = {
             'check_interval': 's', 'timeout': 's', 'retry_interval': 's', 'dns_timeout': 's',
             'page_refresh_ms': 'ms', 'stagger_delay_proxy': 'ms', 'stagger_delay_direct': 'ms',
+            'save_interval': 's',
         }
         bool_fmt = {True: '开', False: '关'}
         changes = []
@@ -5488,13 +5516,13 @@ def api_config():
         return jsonify({'success':True,'config':{k:CONFIG[k] for k in keys if k != 'console_log_level'}})
     # GET 读取配置：未登录只返回前端行为控制必要字段（不含账户/代理等敏感信息）
     # 已登录用户额外返回运维相关字段（仍不含账户信息）
-    public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'dashboard_stat_period', 'tracker_stat_period', 'show_removed_ips', 'default_layout_width', 'allow_private_ips', 'min_password_length']
+    public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'uptime_algorithm', 'dashboard_stat_period', 'tracker_stat_period', 'show_removed_ips', 'default_layout_width', 'allow_private_ips', 'min_password_length']
     if not session.get('role'):
         return jsonify({k: CONFIG.get(k) for k in public_keys})
     all_keys = ['check_interval','timeout','retry_mode','retry_interval',
-                'log_to_disk','log_level','debug_save_trace','http_proxy','udp_proxy','http_proxy_enabled','udp_proxy_enabled',
+                'log_to_disk','log_level','debug_save_trace','save_interval','http_proxy','udp_proxy','http_proxy_enabled','udp_proxy_enabled',
                 'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
-                'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh',
+                'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','uptime_algorithm',
                 'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width',
                 'allow_private_ips','min_password_length','cleanup_interval','trust_cf_ip',
                 'probe_fail_threshold','probe_ipv6_targets','probe_timeout','probe_ipv4_targets','auto_pause_enabled','auto_pause_threshold','auto_pause_persist',
@@ -5558,9 +5586,23 @@ def api_users_save():
 
 # ==================== 主程序 ====================
 if __name__ == '__main__':
-    db.load()
+    # 加载 data.json，获取被修改的 tracker 列表和移除数量
+    load_result = db.load()
+    modified_trackers = set()
+    total_removed = 0
+    if isinstance(load_result, tuple):
+        success, modified_trackers, total_removed = load_result
+    else:
+        success = load_result
+    # 加载 history.json（必须在 data.json 之后，因为需要 tracker 列表）
     hdb.load()
     db._cleanup_hdb_on_startup()   # 清理已移除IP和domain级的hdb key
+    # 在 hdb 加载完成后，保存修改过的 tracker（此时 hdb 已就绪，可以正确计算历史统计）
+    if modified_trackers and total_removed > 0:
+        cprint(f"[load] 共清理 {total_removed} 个已移除IP，保存 data.json", 'info')
+        for d in modified_trackers:
+            db._dirty_trackers.add(d)
+        db._save_async()
     db.add_log("网络监控服务启动", 'info')
 
     def _get_geo_force(ip: str) -> dict:
