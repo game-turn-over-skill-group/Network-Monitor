@@ -1218,7 +1218,8 @@ class TrackerDB:
                         'protocol':t.get('protocol','tcp'),'ips':clean_ips,
                         'added_time':t.get('added_time',datetime.now().isoformat()),
                         'dns_error': t.get('dns_error', False),
-                        'paused': t.get('paused', False)
+                        'paused': t.get('paused', False),
+                        'paused_by_user': t.get('paused_by_user', False)
                         # 注意：history_24h, history_7d, history_30d 从 t 中排除，由 get_trackers() 实时计算
                     }
                     # 初始化活跃IP集合和IP快速查找表（只添加非paused的IP）
@@ -1228,6 +1229,22 @@ class TrackerDB:
                         if ip and not ip_obj.get('paused') and not domain_paused:
                             self._active_ips.add((d, ip))
                             self._ip_map[(d, ip)] = ip_obj
+                    # 重启时自动恢复非手动暂停的IP（auto_pause_persist关闭时）
+                    # 注意：只有当域名也未被手动暂停时才恢复IP
+                    if not CONFIG.get('auto_pause_persist', False):
+                        domain_paused_by_user = t.get('paused_by_user', False)
+                        if not domain_paused_by_user:
+                            for ip_obj in clean_ips:
+                                ip = ip_obj.get('ip')
+                                if ip and ip_obj.get('paused') and ip_obj.get('paused_by_user') is False:
+                                    ip_obj['paused'] = False
+                                    ip_obj.pop('paused_by_user', None)
+                                    self._active_ips.add((d, ip))
+                                    self._ip_map[(d, ip)] = ip_obj
+                                    modified_trackers.add(d)
+                                    log_msg = f"[load] {d}({ip}) 自动暂停已恢复，开始检测"
+                                    cprint(log_msg, 'info')
+                                    self.add_log(log_msg, 'info')
                 self._recalc()
             # 预热 geo 缓存（保持不变）
             warmed = 0
@@ -3840,6 +3857,7 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                         ip_obj2 = db._ip_map.get((domain, ip))
                         if ip_obj2:
                             ip_obj2['paused'] = True
+                            ip_obj2['paused_by_user'] = False  # 标记为自动暂停，非手动暂停
                             db._active_ips.discard((domain, ip))
                             db._ip_map.pop((domain, ip), None)
                             # 只有当 auto_pause_persist 开启时才保存暂停状态到磁盘
@@ -4879,13 +4897,13 @@ def api_pause():
             # 全部域名暂停/恢复
             for d, td in db.trackers.items():
                 td['paused'] = paused
+                if paused:
+                    td['paused_by_user'] = True
+                else:
+                    td.pop('paused_by_user', None)
                 for ip_obj in td.get('ips', []):
                     ip_obj['paused'] = paused
-                    # 标记是否为用户手动暂停（用于重启时区分手动暂停和自动暂停）
-                    if paused:
-                        ip_obj['paused_by_user'] = True
-                    else:
-                        ip_obj.pop('paused_by_user', None)  # 恢复时删除标记
+                    # 域名级暂停/恢复不影响IP的paused_by_user标记
                     key = (d, ip_obj.get('ip'))
                     if paused:
                         db._active_ips.discard(key)
@@ -4931,13 +4949,13 @@ def api_pause():
             if not td:
                 return jsonify({'error': '域名不存在'}), 404
             td['paused'] = paused
+            if paused:
+                td['paused_by_user'] = True
+            else:
+                td.pop('paused_by_user', None)
             for ip_obj in td.get('ips', []):
                 ip_obj['paused'] = paused
-                # 标记是否为用户手动暂停（用于重启时区分手动暂停和自动暂停）
-                if paused:
-                    ip_obj['paused_by_user'] = True
-                else:
-                    ip_obj.pop('paused_by_user', None)  # 恢复时删除标记
+                # 域名级暂停/恢复不影响IP的paused_by_user标记
                 key = (domain, ip_obj.get('ip'))
                 if paused:
                     db._active_ips.discard(key)
