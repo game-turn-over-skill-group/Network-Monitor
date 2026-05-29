@@ -1573,7 +1573,7 @@
                                     <span v-if="d.ok && d.latency >= 0" 
                                           style="font-size:.68rem;font-weight:600;"
                                           :class="d.latency>1000?'err':d.latency>500?'warn':''">
-                                        {{ d.latency+'ms' }}
+                                        {{ typeof d.latency === 'number' ? d.latency.toFixed(1)+'ms' : '-' }}
                                     </span>
                                 </div>
                             </template>
@@ -1592,7 +1592,7 @@
                                     <span v-if="d.ok && d.latency >= 0" 
                                           style="font-size:.68rem;font-weight:600;flex-shrink:0;"
                                           :class="d.latency>1000?'err':d.latency>500?'warn':''">
-                                        {{ d.latency+'ms' }}
+                                        {{ typeof d.latency === 'number' ? d.latency.toFixed(1)+'ms' : '-' }}
                                     </span>
                                 </div>
                             </template>
@@ -2907,6 +2907,7 @@
                 <div class="card-body">
                     <div class="row g-3">
                         <!-- 故障率阈值 -->
+                        <!-- 第一行：失败率阈值 + 探针超时 + 探测周期 + 探测模式 -->
                         <div class="col-md-3">
                             <label class="form-label"><i class="bi bi-speedometer2 me-1"></i>{{ t('config.probeFailLabel') }}</label>
                             <div class="input-group">
@@ -2916,7 +2917,6 @@
                             </div>
                             <div class="form-text">{{ t('config.probeFailDesc') }}</div>
                         </div>
-                        <!-- 探针超时 -->
                         <div class="col-md-2">
                             <label class="form-label"><i class="bi bi-hourglass-split me-1"></i>{{ t('config.probeTimeoutLabel') }}</label>
                             <div class="input-group">
@@ -2926,23 +2926,41 @@
                             </div>
                             <div class="form-text">{{ t('config.probeTimeoutDesc') }}</div>
                         </div>
-                        <!-- IPv4 探针列表 -->
+                        <div class="col-md-2">
+                            <label class="form-label"><i class="bi bi-clock me-1"></i>{{ t('config.probeIntervalLabel') }}</label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" v-model.number="cfg.probe_interval"
+                                       @change="saveCfg" min="1" max="60">
+                                <span class="input-group-text">{{ t('config.seconds') }}</span>
+                            </div>
+                            <div class="form-text">{{ t('config.probeIntervalDesc') }}</div>
+                        </div>
                         <div class="col-md-3">
-                            <label class="form-label"><i class="bi bi-4-circle me-1"></i>{{ t('config.probeIPv4Label') }}</label>
+                            <label class="form-label"><i class="bi bi-radio me-1"></i>{{ t('config.probeModeLabel') }}</label>
+                            <select class="form-select" v-model="cfg.probe_mode" @change="saveCfg">
+                                <option value="icmp">{{ t('config.probeModeIcmp') }}</option>
+                                <option value="tcp">{{ t('config.probeModeTcp') }}</option>
+                            </select>
+                            <div class="form-text">{{ t('config.probeModeDesc') }}</div>
+                        </div>
+                    </div>
+                    <div class="row g-2 mt-2">
+                        <!-- 第二行：IPv4 探针列表 + IPv6 探针列表 -->
+                        <div class="col-md-6">
+                            <label class="form-label mb-2"><i class="bi bi-4-circle me-1"></i>{{ t('config.probeIPv4Label') }}</label>
                             <textarea class="form-control" rows="3"
                                       :value="(cfg.probe_ipv4_targets||[]).join('\n')"
                                       @blur="e => { cfg.probe_ipv4_targets = e.target.value.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean); saveCfg(); }"
                                       placeholder="8.8.8.8&#10;1.1.1.1&#10;114.114.114.114"></textarea>
-                            <div class="form-text">{{ t('config.probeIPv4Desc') }}</div>
+                            <div class="form-text mt-2">{{ t('config.probeIPv4Desc') }}</div>
                         </div>
-                        <!-- IPv6 探针列表 -->
-                        <div class="col-md-4">
-                            <label class="form-label"><i class="bi bi-6-circle me-1"></i>{{ t('config.probeIPv6Label') }}</label>
+                        <div class="col-md-6">
+                            <label class="form-label mb-2"><i class="bi bi-6-circle me-1"></i>{{ t('config.probeIPv6Label') }}</label>
                             <textarea class="form-control" rows="3"
                                       :value="(cfg.probe_ipv6_targets||[]).join('\n')"
                                       @blur="e => { cfg.probe_ipv6_targets = e.target.value.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean); saveCfg(); }"
                                       placeholder="2001:4860:4860::8888&#10;2606:4700:4700::1111&#10;2400:3200:baba::1"></textarea>
-                            <div class="form-text">{{ t('config.probeIPv6Desc') }}</div>
+                            <div class="form-text mt-2">{{ t('config.probeIPv6Desc') }}</div>
                         </div>
                     </div>
                     <hr style="border-color:var(--glass-border);margin:14px 0 10px;">
@@ -2953,7 +2971,7 @@
                             <div class="form-check form-switch mt-0">
                                 <input class="form-check-input mt-3 mb-3" type="checkbox" v-model="cfg.auto_pause_enabled"
                                        @change="saveCfg" id="autoPauseSwitch">
-                                <label class="form-check-label mt-3 mb-1" for="autoPauseSwitch" style="cursor:pointer;">
+                                <label class="form-check-label mt-2 mb-2" for="autoPauseSwitch" style="cursor:pointer;">
                                     {{ cfg.auto_pause_enabled ? t('config.autoPauseEnabled') : t('config.autoPauseDisabled') }}
                                 </label>
                             </div>
@@ -3314,6 +3332,8 @@ createApp({
             udp_proxy_enabled: false,
             probe_fail_threshold: 50,
             probe_timeout: 5,
+            probe_interval: 1,
+            probe_mode: 'icmp',
             probe_ipv4_targets: ['8.8.8.8', '1.1.1.1', '114.114.114.114'],
             probe_ipv6_targets: ['2001:4860:4860::8888', '2606:4700:4700::1111', '2400:3200:baba::1'],
             auto_pause_enabled: true,
@@ -4011,6 +4031,8 @@ createApp({
                     udp_proxy_enabled: cfg.value.udp_proxy_enabled,
                     probe_fail_threshold: cfg.value.probe_fail_threshold ?? 50,
                     probe_timeout: cfg.value.probe_timeout || 5,
+                    probe_interval: cfg.value.probe_interval || 1,
+                    probe_mode: cfg.value.probe_mode || 'icmp',
                     probe_ipv4_targets: cfg.value.probe_ipv4_targets || ['8.8.8.8','1.1.1.1','114.114.114.114'],
                     probe_ipv6_targets: cfg.value.probe_ipv6_targets || [],
                     auto_pause_enabled: cfg.value.auto_pause_enabled !== false,

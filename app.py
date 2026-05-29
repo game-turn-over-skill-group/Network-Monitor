@@ -84,7 +84,9 @@ DEFAULT_CONFIG = {
     'allow_private_ips': False,        # 是否允许添加内网IP，默认禁止（SSRF防护）
     # ── 网络探针与故障检测 ──
     'probe_fail_threshold': 30,        # 本轮失败率达到多少%触发网络异常（默认30%）
-    'probe_timeout': 5,                # 探针单次 TCP 连接超时（秒），默认5s（原硬编码3s）
+    'probe_timeout': 5,                # 探针超时（秒），默认5s
+    'probe_interval': 1,               # 探测周期（秒），默认1秒
+    'probe_mode': 'icmp',              # 探测模式：icmp（ICMP ping）| tcp（TCP DNS探测）
     'probe_ipv4_targets': [            # IPv4 探针目标列表（任一可达即认为 IPv4 正常）
         '8.8.8.8',                     # Google Public DNS
         '1.1.1.1',                     # Cloudflare DNS
@@ -140,10 +142,9 @@ def load_config():
                       'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','uptime_algorithm','export_suffix',
                       'show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
                       'cleanup_interval','trust_cf_ip',
-                      'probe_fail_threshold','probe_ipv6_targets',
-                    'probe_timeout','probe_ipv4_targets',
-                    'probe_stable_count','probe_max_conn_age',
-                    'auto_pause_enabled','auto_pause_threshold','auto_pause_persist']:
+                      'probe_fail_threshold','probe_ipv6_targets','probe_timeout','probe_ipv4_targets',
+                      'probe_stable_count','probe_max_conn_age','probe_interval','probe_mode',
+                      'auto_pause_enabled','auto_pause_threshold','auto_pause_persist']:
                 if k in saved:
                     cfg[k] = saved[k]
             # 向后兼容：旧配置文件用 rank_stat_period，迁移到 dashboard_stat_period
@@ -168,9 +169,8 @@ def persist_config(cfg):
                                         'tab_switch_refresh','uptime_algorithm','export_suffix','show_removed_ips','default_layout_width',
                                         'allow_private_ips','min_password_length','users',
                                         'cleanup_interval','trust_cf_ip',
-                                        'probe_fail_threshold','probe_ipv6_targets',
-                                        'probe_timeout','probe_ipv4_targets',
-                                        'probe_stable_count','probe_max_conn_age',
+                                        'probe_fail_threshold','probe_ipv6_targets','probe_timeout','probe_ipv4_targets',
+                                        'probe_stable_count','probe_max_conn_age','probe_interval','probe_mode',
                                         'auto_pause_enabled','auto_pause_threshold','auto_pause_persist']
                    if k in cfg}
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
@@ -3040,6 +3040,18 @@ def validate_config(config: dict) -> list:
         if not isinstance(workers, int) or workers < 1 or workers > 1000:
             errors.append('并发检测线程数必须是1-1000之间的整数')
     
+    # 验证探测周期
+    if 'probe_interval' in config:
+        interval = config['probe_interval']
+        if not isinstance(interval, (int, float)) or interval < 0.1 or interval > 60:
+            errors.append('探测周期必须是0.1-60之间的数字')
+    
+    # 验证探测模式
+    if 'probe_mode' in config:
+        mode = config['probe_mode']
+        if mode not in ['icmp', 'tcp']:
+            errors.append('探测模式必须是 icmp 或 tcp')
+    
     # 验证代理地址
     if 'http_proxy' in config:
         if config.get('http_proxy_enabled') and config['http_proxy']:
@@ -3325,83 +3337,243 @@ def udp_ping(ip, port):
             except: pass
 
 
+# ==================== 网络探针：原生 ICMP Ping ====================
+# 从 icmp_ping.py 移植，使用非阻塞IO + select，避免 SO_RCVTIMEO 问题
+
+_PROBE_PAYLOAD_SIZE = 1
+
+def _probe_checksum(data):
+    """计算 ICMP 校验和"""
+    if len(data) % 2:
+        data += b'\x00'
+    s = 0
+    for i in range(0, len(data), 2):
+        w = (data[i] << 8) + data[i+1]
+        s += w
+    s = (s >> 16) + (s & 0xFFFF)
+    s += s >> 16
+    return ~s & 0xFFFF
+
+def _create_icmp4(ident, seq):
+    """创建 IPv4 ICMP Echo 请求包"""
+    header = struct.pack('!BBHHH', 8, 0, 0, ident, seq)
+    payload = b'\x00' * _PROBE_PAYLOAD_SIZE
+    cksum = _probe_checksum(header + payload)
+    header = struct.pack('!BBHHH', 8, 0, cksum, ident, seq)
+    return header + payload
+
+def _create_icmp6(ident, seq):
+    """创建 IPv6 ICMP Echo 请求包"""
+    header = struct.pack('!BBHHH', 128, 0, 0, ident, seq)
+    return header + b'\x00' * _PROBE_PAYLOAD_SIZE
+
+def _probe_resolve(target):
+    """解析目标地址，返回 (family, dest)"""
+    info = socket.getaddrinfo(target, 0)
+    return info[0][0], info[0][4]
+
 def icmp_ping(host: str, timeout: float = 3, payload: bytes = b'\x00') -> tuple:
     """
-    使用系统 ping 命令发送 ICMP Echo Request（同时支持 IPv4 和 IPv6）。
+    原生 ICMP Ping 探测（兼容 IPv4/IPv6）
     返回 (成功: bool, 延迟毫秒: int, 错误信息: str)
     
     参数:
-        host    : 目标域名或 IP 地址（自动识别 IPv4/IPv6）
+        host    : 目标域名或 IP 地址
         timeout : 超时时间（秒）
-        payload : 忽略，系统 ping 不支持自定义负载，保留仅为兼容原有调用
+        payload : 保留参数，兼容原有调用
     
     返回:
         (True, 延迟ms, None)   : 成功收到回包
         (False, -1, 错误描述)  : 失败（超时、不可达等）
     
     说明:
-        直接调用操作系统原生的 ping 命令，Windows/Linux/macOS 均支持，
-        准确读取 ICMP 延迟，无第三方库兼容性问题。
+        使用原生 socket 实现，非阻塞IO + select，支持 Windows/Linux/macOS
+        需要管理员权限才能创建原始 socket
     """
-    # 忽略 payload 参数（系统 ping 不支持自定义数据）
-    is_windows = platform.system().lower() == 'windows'
+    try:
+        family, dest = _probe_resolve(host)
+    except Exception as e:
+        return False, -1, f"DNS解析失败: {e}"
     
-    # 构建命令
-    if is_windows:
-        # Windows: ping -n 1 -w timeout_ms host
-        timeout_ms = int(timeout * 1000)
-        cmd = ['ping', '-n', '1', '-w', str(timeout_ms), host]
-    else:
-        # Linux / macOS: ping -c 1 -W timeout host
-        cmd = ['ping', '-c', '1', '-W', str(int(timeout)), host]
+    ident = random.randint(0, 0xFFFF)
+    seq = 0
     
     try:
-        start = time.perf_counter()
-        # 执行命令，超时设置为 timeout + 1 秒（给命令本身留出时间）
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 1)
-        elapsed = time.perf_counter() - start
-        
-        if result.returncode == 0:
-            output = result.stdout
-            # 解析延迟值
-            if is_windows:
-                # Windows 输出示例: "来自 2400:3200:baba::1 的回复: 时间=21ms"
-                # 或 "Reply from 2001:4860:4860::8844: time=234ms"
-                match = re.search(r'时间[=:](\d+)ms', output, re.IGNORECASE)
-                if not match:
-                    # 兼容英文系统: "time=21ms"
-                    match = re.search(r'time[=:](\d+)ms', output, re.IGNORECASE)
-                if match:
-                    latency_ms = int(match.group(1))
-                else:
-                    # 解析失败则回退到总耗时（可能不准）
-                    latency_ms = int(elapsed * 1000)
-            else:
-                # Linux/macOS: "time=21.3 ms"
-                match = re.search(r'time[= ](\d+(?:\.\d+)?) ?ms', output, re.IGNORECASE)
-                if match:
-                    latency_ms = int(float(match.group(1)))
-                else:
-                    latency_ms = int(elapsed * 1000)
-            return True, latency_ms, None
+        if family == socket.AF_INET:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_ICMP)
         else:
-            # ping 失败：解析错误信息
-            error_output = result.stderr or result.stdout
-            if not error_output:
-                error_output = f"ping 返回码 {result.returncode}"
-            error_lower = error_output.lower()
-            if "unreachable" in error_lower:
-                return False, -1, "目标不可达"
-            elif "timeout" in error_lower or "timed out" in error_lower:
-                return False, -1, f"超时 (>{timeout}s)"
-            elif "could not find host" in error_lower or "无法解析" in error_output:
-                return False, -1, f"DNS 解析失败: {host}"
-            else:
-                return False, -1, f"Ping 失败: {error_output.strip()}"
-    except subprocess.TimeoutExpired:
-        return False, -1, f"命令执行超时 (>{timeout+1}s)"
+            sock = socket.socket(socket.AF_INET6, socket.SOCK_RAW, socket.IPPROTO_ICMPV6)
+        sock.setblocking(False)
+    except PermissionError:
+        return False, -1, "需要管理员权限（ICMP原始socket）"
     except Exception as e:
-        return False, -1, f"{type(e).__name__}: {e}"
+        return False, -1, f"创建socket失败: {e}"
+    
+    try:
+        # 发送 ICMP 请求
+        if family == socket.AF_INET:
+            packet = _create_icmp4(ident, seq)
+        else:
+            packet = _create_icmp6(ident, seq)
+        
+        try:
+            sock.sendto(packet, dest)
+            send_time = time.time()
+        except OSError as e:
+            return False, -1, f"发送失败: {e}"
+        
+        # 接收响应
+        rtt = None
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            try:
+                ready, _, _ = select.select([sock], [], [], remaining)
+                if not ready:
+                    break
+                data, addr = sock.recvfrom(1024)
+                recv_time = time.time()
+                
+                # 校验响应
+                if family == socket.AF_INET:
+                    if len(data) < 28:
+                        continue
+                    icmp = data[20:28]
+                    itype, _, _, rid, rseq = struct.unpack('!BBHHH', icmp)
+                    if itype == 0 and rid == ident and rseq == seq:
+                        rtt = (recv_time - send_time) * 1000
+                        break
+                else:
+                    if len(data) < 8:
+                        continue
+                    itype, _, _, rid, rseq = struct.unpack('!BBHHH', data[:8])
+                    if itype == 129 and rid == ident and rseq == seq:
+                        rtt = (recv_time - send_time) * 1000
+                        break
+            except Exception:
+                pass
+        
+        if rtt is not None:
+            return True, rtt, None
+        else:
+            return False, -1, f"超时 (>{timeout}s)"
+    finally:
+        sock.close()
+
+
+# ==================== 网络探针：TCP 长连接探测 ====================
+# 从 tcping_long.py 移植，维持 TCP 连接，发送最小 DNS 查询测量 RTT
+
+def _build_dns_query():
+    """构建最小 DNS 查询报文（根域 NS 查询）"""
+    # Header: ID=0x0001, Standard query, RD=1
+    header = struct.pack('!HHHHHH', 0x0001, 0x0100, 1, 0, 0, 0)
+    # Question: 根域编码为 0x00，查询类型 NS (2)，类 IN (1)
+    question = b'\x00' + struct.pack('!HH', 2, 1)
+    return header + question
+
+_PROBE_DNS_QUERY = _build_dns_query()
+
+def _tcp_probe_connect(target, port=53, timeout=5):
+    """创建 TCP 连接到目标端口，返回 socket 或 None"""
+    try:
+        addrs = socket.getaddrinfo(target, port, proto=socket.IPPROTO_TCP)
+        for fam, stype, proto, _, addr in addrs:
+            sock = socket.socket(fam, stype, proto)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            sock.settimeout(timeout)
+            sock.connect(addr)
+            sock.setblocking(False)
+            return sock
+    except Exception:
+        pass
+    return None
+
+def _tcp_probe_recv_exact(sock, n, timeout=1.0):
+    """从非阻塞 socket 精确接收 n 字节，超时返回 None"""
+    data = b''
+    deadline = time.time() + timeout
+    while len(data) < n:
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            return None
+        try:
+            ready = select.select([sock], [], [], remaining)
+            if not ready[0]:
+                return None
+            chunk = sock.recv(n - len(data))
+            if not chunk:
+                return None
+            data += chunk
+        except (socket.error, ConnectionResetError, BrokenPipeError):
+            return None
+    return data
+
+def _tcp_probe_once(sock):
+    """发送 DNS 查询并接收响应，返回 RTT(毫秒) 或 None"""
+    try:
+        # TCP DNS：2字节长度 + 报文
+        msg = struct.pack('!H', len(_PROBE_DNS_QUERY)) + _PROBE_DNS_QUERY
+        sock.sendall(msg)
+        send_time = time.time()
+
+        # 先读 2 字节长度
+        len_data = _tcp_probe_recv_exact(sock, 2)
+        if len_data is None:
+            return None
+        pkt_len = struct.unpack('!H', len_data)[0]
+        if pkt_len < 12:  # DNS 头部至少 12 字节
+            return None
+        # 读取剩余报文
+        pkt = _tcp_probe_recv_exact(sock, pkt_len)
+        if pkt is None:
+            return None
+        rtt = (time.time() - send_time) * 1000
+        return rtt
+    except Exception:
+        return None
+
+def tcp_probe(host, port=53, timeout=5, probe_timeout=1.0):
+    """
+    TCP 长连接探测（通过 DNS 查询测量 RTT）
+    返回 (成功: bool, 延迟毫秒: int, 错误信息: str, socket或None)
+    
+    参数:
+        host         : 目标地址（支持带端口格式如 "8.8.8.8:53"）
+        port         : 默认端口（如果 host 不含端口）
+        timeout      : 连接超时时间（秒）
+        probe_timeout: 接收响应超时时间（秒）
+    
+    返回:
+        (True, 延迟ms, None, sock)    : 成功
+        (False, -1, 错误描述, None)   : 失败
+    """
+    # 解析目标地址中的端口
+    target_host = host
+    target_port = port
+    if ':' in host and not host.startswith('['):
+        # 格式: ip:port
+        parts = host.rsplit(':', 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            target_host = parts[0]
+            target_port = int(parts[1])
+    
+    sock = _tcp_probe_connect(target_host, target_port, timeout)
+    if sock is None:
+        return False, -1, "连接失败", None
+    
+    rtt = _tcp_probe_once(sock)
+    if rtt is not None:
+        return True, rtt, None, sock
+    else:
+        try:
+            sock.close()
+        except:
+            pass
+        return False, -1, "超时", None
 
 
 # ==================== 轮询重试逻辑 ====================
@@ -3521,45 +3693,162 @@ def _check_icmp_permission():
     except Exception:
         pass
 
-def _probe_one(host, port, timeout=3):
-    """
-    探测单个目标（忽略 port，只使用 ICMP ping）
-    返回 (可达: bool, 延迟ms: int, 错误信息: str)
-    """
+# TCP 探针连接缓存：{cache_key: (socket, last_use_time)}
+_probe_tcp_sockets = {}
+_probe_tcp_lock = threading.Lock()
+
+def _probe_one_icmp(host, timeout=3):
+    """ICMP 模式探测单个目标"""
     return icmp_ping(host, timeout=timeout, payload=b'\x00')
+
+def _probe_one_tcp(host, port=53, timeout=5):
+    """TCP 模式探测单个目标（维持长连接，失败自动重连）"""
+    # 解析目标地址中的端口
+    target_host = host
+    target_port = port
+    
+    # IPv6地址处理：
+    # - 带端口的IPv6格式：[2001:4860:4860::8888]:53
+    # - 不带端口的IPv6格式：2001:4860:4860::8888（不应解析端口）
+    if host.startswith('['):
+        # IPv6 带方括号格式
+        end_bracket = host.rfind(']')
+        if end_bracket > 0 and end_bracket < len(host) - 1 and host[end_bracket+1] == ':':
+            # 有端口：[addr]:port
+            try:
+                target_port = int(host[end_bracket+2:])
+                target_host = host[1:end_bracket]
+            except:
+                target_host = host[1:end_bracket]
+        else:
+            # 无端口：[addr]
+            target_host = host[1:end_bracket]
+    elif ':' in host and not host.count(':') > 1:
+        # 仅IPv4可能带端口且冒号数量为1（IPv6地址有多个冒号）
+        parts = host.rsplit(':', 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            target_host = parts[0]
+            target_port = int(parts[1])
+    # 纯IPv6地址（不带方括号）：不解析端口，直接使用
+    
+    cache_key = f"{target_host}:{target_port}"
+    
+    with _probe_tcp_lock:
+        sock = _probe_tcp_sockets.get(cache_key)
+    
+    if sock:
+        # 使用已有连接
+        rtt = _tcp_probe_once(sock)
+        if rtt is not None:
+            return True, rtt, None
+        # 连接失败，关闭并重新建立
+        try:
+            sock.close()
+        except:
+            pass
+        with _probe_tcp_lock:
+            if _probe_tcp_sockets.get(cache_key) == sock:
+                del _probe_tcp_sockets[cache_key]
+        sock = None
+    
+    # 建立新连接
+    sock = _tcp_probe_connect(target_host, target_port, timeout)
+    if sock is None:
+        return False, -1, "连接失败"
+    
+    rtt = _tcp_probe_once(sock)
+    if rtt is not None:
+        with _probe_tcp_lock:
+            _probe_tcp_sockets[cache_key] = sock
+        return True, rtt, None
+    else:
+        try:
+            sock.close()
+        except:
+            pass
+        return False, -1, "超时"
+
+def _probe_one(host, port=53, timeout=5, mode='icmp'):
+    """
+    探测单个目标
+    返回 (可达: bool, 延迟ms: int, 错误信息: str)
+    
+    参数:
+        host   : 目标地址（支持带端口格式如 "8.8.8.8:53"）
+        port   : 默认端口（ICMP模式忽略，TCP模式使用）
+        timeout: 超时时间（秒）
+        mode   : 探测模式 'icmp' 或 'tcp'
+    """
+    if mode == 'tcp':
+        return _probe_one_tcp(host, port, timeout)
+    else:
+        return _probe_one_icmp(host, timeout)
+
+def _parse_target(target):
+    """解析目标地址，返回 (host, port)，不含端口时默认使用53"""
+    # IPv6带方括号格式：[2001:4860::8888]:53 或 [2001:4860::8888]
+    if target.startswith('['):
+        end_bracket = target.rfind(']')
+        if end_bracket > 0 and end_bracket < len(target) - 1 and target[end_bracket+1] == ':':
+            # 有端口：[addr]:port
+            try:
+                return target[1:end_bracket], int(target[end_bracket+2:])
+            except:
+                return target[1:end_bracket], 53
+        else:
+            # 无端口：[addr]
+            return target[1:end_bracket], 53
+    # IPv4带端口格式：8.8.8.8:53（只有一个冒号）
+    elif ':' in target and target.count(':') == 1:
+        parts = target.rsplit(':', 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            return parts[0], int(parts[1])
+    # 纯地址（IPv4或IPv6）：不解析端口
+    return target, 53
 
 def _probe_loop():
     """后台探针线程：IPv4/IPv6 分组探测，分别维护可达状态和延迟。
-    - IPv4 探针：从 CONFIG['probe_ipv4_targets'] 读取（默认 8.8.8.8/1.1.1.1/114.114.114.114）
+    - IPv4 探针：从 CONFIG['probe_ipv4_targets'] 读取（默认 8.8.8.8/1.1.1.1/223.6.6.6）
     - IPv6 探针：从 CONFIG['probe_ipv6_targets'] 读取，可为空列表（禁用IPv6探测）
     - 超时：从 CONFIG['probe_timeout'] 读取（默认 5s）
+    - 周期：从 CONFIG['probe_interval'] 读取（默认 1s）
+    - 模式：从 CONFIG['probe_mode'] 读取（icmp 或 tcp）
     - 每组中任一可达即认为该栈正常
     - _probe_ok = IPv4 可达（向后兼容，monitor_loop 用此判断是否丢弃本轮）
     - _probe_ok_v6 = IPv6 可达 / None（未配置）
-    - 探测间隔固定为1秒（不跟随 check_interval），确保检测前网络状态是最新的
     """
     global _probe_ok, _probe_ok_v4, _probe_ok_v6, _probe_details
     _warned_v4 = False
     _warned_v6 = False
     while True:
-        PROBE_INTERVAL = 1   # 固定1秒，快速感知网络变化，与check_interval解耦
+        # 从配置读取参数
+        PROBE_INTERVAL = float(CONFIG.get('probe_interval', 1))
         PROBE_TIMEOUT  = int(CONFIG.get('probe_timeout', 5))
+        PROBE_MODE     = CONFIG.get('probe_mode', 'icmp')
 
         # 每轮从 CONFIG 动态读取目标列表，支持运行时热更新
-        ipv4_target_list = CONFIG.get('probe_ipv4_targets', ['8.8.8.8', '1.1.1.1', '114.114.114.114'])
-        IPV4_TARGETS = [(h, 53, 'ipv4') for h in ipv4_target_list] if ipv4_target_list else []
-
+        ipv4_target_list = CONFIG.get('probe_ipv4_targets', ['8.8.8.8', '1.1.1.1', '223.6.6.6'])
         ipv6_target_list = CONFIG.get('probe_ipv6_targets', [])
-        IPV6_TARGETS = [(h, 53, 'ipv6') for h in ipv6_target_list] if ipv6_target_list else []
+        
+        # 解析目标列表，提取端口
+        IPV4_TARGETS = []
+        for target in ipv4_target_list:
+            host, port = _parse_target(target)
+            IPV4_TARGETS.append((host, port, 'ipv4'))
+        
+        IPV6_TARGETS = []
+        for target in ipv6_target_list:
+            host, port = _parse_target(target)
+            IPV6_TARGETS.append((host, port, 'ipv6'))
 
         details = {}
 
-        # ── IPv4 探测（并行执行，最多等待一个超时时间）──────────────────────
+        # ── IPv4 探测（并行执行）───────────────────────────────────────────
         v4_reachable = False
         v4_hit = ''
         if IPV4_TARGETS:
             with ThreadPoolExecutor(max_workers=len(IPV4_TARGETS)) as executor:
-                futures = {executor.submit(_probe_one, host, port, PROBE_TIMEOUT): (host, port, ver)
+                futures = {executor.submit(_probe_one, host, port, PROBE_TIMEOUT, PROBE_MODE): (host, port, ver)
                           for host, port, ver in IPV4_TARGETS}
                 for future in as_completed(futures):
                     host, port, ver = futures[future]
@@ -3576,10 +3865,9 @@ def _probe_loop():
         if IPV6_TARGETS:
             v6_reachable = False
             v6_hit = ''
-            # 用于收集所有失败的错误信息
             v6_errors = []
             with ThreadPoolExecutor(max_workers=len(IPV6_TARGETS)) as executor:
-                futures = {executor.submit(_probe_one, host, port, PROBE_TIMEOUT): (host, port, ver)
+                futures = {executor.submit(_probe_one, host, port, PROBE_TIMEOUT, PROBE_MODE): (host, port, ver)
                           for host, port, ver in IPV6_TARGETS}
                 for future in as_completed(futures):
                     host, port, ver = futures[future]
@@ -3617,9 +3905,8 @@ def _probe_loop():
 
         # ── IPv6 告警（附带具体错误原因）──────────────────────────────────
         if v6_reachable is not None:
-            v6_targets_str = ', '.join(h for h,_,__ in IPV6_TARGETS)
+            v6_targets_str = ', '.join(f"{h}:{p}" for h,p,_ in IPV6_TARGETS)
             if not v6_reachable and not _warned_v6:
-                # 构建详细的错误摘要
                 error_detail = '; '.join(v6_errors) if v6_errors else '所有目标均无响应'
                 msg = f"[探针] IPv6全部目标({v6_targets_str})均不可达: {error_detail}"
                 db.add_log(msg, 'info')
@@ -5485,8 +5772,8 @@ def api_config():
                 'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','uptime_algorithm',
                 'export_suffix','show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
                 'cleanup_interval','trust_cf_ip',
-                'probe_fail_threshold','probe_ipv6_targets',
-                'probe_timeout','probe_ipv4_targets',
+                'probe_fail_threshold','probe_ipv6_targets','probe_timeout','probe_ipv4_targets',
+                'probe_interval','probe_mode',
                 'probe_stable_count','probe_max_conn_age',
                 'auto_pause_enabled','auto_pause_threshold','auto_pause_persist',
                 'dns_refresh_interval']
@@ -5541,6 +5828,8 @@ def api_config():
             'probe_ipv6_targets':    'IPv6探针目标',
             'probe_timeout':         '探针超时',
             'probe_ipv4_targets':    'IPv4探针目标',
+            'probe_interval':        '探测周期',
+            'probe_mode':            '探测模式',
             'auto_pause_enabled':    '自动暂停开关',
             'auto_pause_threshold':  '自动暂停累计失败次数',
             'auto_pause_persist':    '重启保持自动暂停',
@@ -5548,7 +5837,7 @@ def api_config():
         suffixes = {
             'check_interval': 's', 'timeout': 's', 'retry_interval': 's', 'dns_timeout': 's',
             'page_refresh_ms': 'ms', 'stagger_delay_proxy': 'ms', 'stagger_delay_direct': 'ms',
-            'save_interval': 's',
+            'save_interval': 's', 'probe_interval': 's',
         }
         bool_fmt = {True: '开', False: '关'}
         changes = []
