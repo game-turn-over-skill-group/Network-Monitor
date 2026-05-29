@@ -25147,6 +25147,7 @@ A：
 //icmping延迟改为浮点型支持小数点
 //网络健康支持到.小数点后1位数+优化[网络探针 & 故障检测 & 自动暂停]间距
 //tcping探针延迟改为浮点型支持小数点
+//修复修改web配置界面[探测周期]和[探测模式]F5刷丢失配置的问题
 
 移除现有的系统ping检测
 给app引入#icmp_ping.py和#tcping_long.py 作为网络健康检测（直接把他们改成调用函数 写入app 而不是额外调用这些py）
@@ -25376,6 +25377,183 @@ A：
 修改位置 ： app.py 第3535行 _tcp_probe_once 函数
 修复内容 ：将 return int(rtt) 改为 return rtt ，保持浮点精度
 现在 ICMP 和 TCP 两种探测模式都返回浮点型延迟，可以显示小数点后一位了。
+
+----------------
+Q：
+
+修复一下 html
+修改 探测周期 或 探测模式 能成功
+但是游览器F5刷新 又回退的问题 然后再改其中一个配置 另一个也被刷新的覆盖。。
+修改配置后 F5刷新回退 等于加载没成功 所以保存也变成初始化的配置了
+是app那边 缺少定义 还是html 你看看
+
+----------------
+A：
+
+## 问题分析
+从代码可以看到：
+
+- POST 保存配置 ： keys 列表包含 probe_interval 和 probe_mode （第5776行）
+- GET 读取配置 ： all_keys 列表 缺少 这两个字段（第5889行之前）
+这导致：
+
+1. ✅ 配置能保存到文件
+2. ❌ 刷新页面时 GET 请求返回的配置不包含这两个字段
+3. ❌ 前端使用初始化的默认值覆盖了已保存的配置
+4. ❌ 修改其他配置时，这两个字段以默认值重新保存，覆盖之前的设置
+## 修复内容
+在 all_keys 列表中添加了 probe_interval 和 probe_mode ：
+
+现在配置应该能正确保存和加载了。
+
+
+--------------------------------------
+
+
+//app默认配置新参数定义键的加载读取保存配置过于复杂繁琐改成统一调用+移除过期无用参数
+//统一共享调度默认配置[防止新增缺少键问题导致保存刷新失效]
+
+我真得会谢，服了你了 哥们 每次添加新的参数 总是能忘记这些添加定义？
+代码的：
+def load_config():、def persist_config(cfg):、def api_config():中的keys和labels和suffixes以及all_keys
+就不能自动从DEFAULT_CONFIG去读取吗？老要重复 添加一堆 配置键定义 添加新参数老是忘记添加到上面这些里面。。
+搞得 不是保存失效 就是F5刷新失效。。同样的错误 你每次都能犯 那就是代码的逻辑问题了。。
+probe_stable_count和probe_max_conn_age这2个已经没用了是过期参数了 从app中移除吧。。
+还有html看看有没有相关代码 有的话也移除。。这是旧代码的 判断达到多少次重连和连接最大存活时间 早就没用了。。
+
+----------------
+
+已完成配置系统重构，以下是修复内容：
+
+## 1. 配置键统一管理（核心改进）
+现在配置键 只需要在 DEFAULT_CONFIG 中定义一次 ，所有地方自动读取：
+
+- load_config() ：使用 DEFAULT_CONFIG.keys() 自动加载
+- persist_config() ：使用 DEFAULT_CONFIG.keys() 自动保存
+- api_config() ：
+  - POST 保存： keys = list(DEFAULT_CONFIG.keys())
+  - GET 读取： all_keys = list(DEFAULT_CONFIG.keys())
+以后添加新参数，只需在 DEFAULT_CONFIG 中定义，无需修改其他地方！
+
+## 2. 移除过期参数
+从 DEFAULT_CONFIG 中删除了两个无用参数：
+
+- probe_stable_count ：探针延迟连续相同N次后强制重连
+- probe_max_conn_age ：探针连接最大存活时间
+由于使用了自动读取，这些参数已从所有配置加载/保存/API 中自动移除。
+
+## 3. HTML 检查结果
+✅ HTML 中没有这两个过期参数，无需修改
+
+## 代码验证
+✅ Python 语法检查通过
+
+这样以后就不会再出现"添加新参数忘记添加到某个地方导致保存/加载失效"的问题了！
+
+----------------
+Q：
+
+@app.route里面的def api_config():里面的labels这个不用改？只是显示名称？
+还是属于过期的参数 已经在\static\language\多国语言.js中有了？还是啥？
+还有suffixes，
+我现在跟你说 是怕你以后又忘了改 忘了添加 知道吗……
+
+----------------
+A：
+
+已完成！总结如下：
+
+## 配置系统重构结果
+### 1. 核心改进：load_config、persist_config、api_config 的 keys
+现在只需在 DEFAULT_CONFIG 中定义一次 ，其他地方自动读取：
+
+```
+# load_config
+for k in DEFAULT_CONFIG.keys():  # 自动加载所有配置键
+
+# persist_config  
+savable = {k: cfg[k] for k in DEFAULT_CONFIG.keys()}  # 自动保存所有配置键
+
+# api_config POST
+keys = list(DEFAULT_CONFIG.keys())  # 自动返回所有配置键
+
+# api_config GET
+all_keys = list(DEFAULT_CONFIG.keys())  # 自动返回所有配置键
+```
+以后添加新参数，只需在 DEFAULT_CONFIG 中添加即可！
+
+### 2. 维护提示注释
+在 DEFAULT_CONFIG 前添加了注释说明：
+
+### 3. labels 和 suffixes 的处理
+情况 结果 忘记添加到 labels 日志显示英文键名（不影响功能） 忘记添加到 suffixes 单位后缀为空（不影响功能）
+
+代码有 fallback 机制（ labels.get(k, k) ），不会报错。
+
+### 4. 移除过期参数
+- ✅ 从 DEFAULT_CONFIG 移除 probe_stable_count 和 probe_max_conn_age
+- ✅ labels 和 suffixes 中已无这两个参数
+- ✅ HTML 中无这两个参数
+- ✅ 代码语法验证通过
+
+----------------
+Q：
+
+还有 我要修改 保存config.json文件的部分配置顺序
+……
+  "probe_fail_threshold": 30,
+  "probe_timeout": 5,
+  "probe_interval": 1,
+  "probe_mode": "tcp",
+  "probe_ipv4_targets": [
+    "8.8.4.4",
+    "1.1.1.1",
+    "223.6.6.6"
+  ],
+  "probe_ipv6_targets": [
+    "2001:4860:4860::8844",
+    "2606:4700:4700::1111",
+    "2400:3200:baba::1"
+  ],
+  "auto_pause_enabled": true,
+  "auto_pause_threshold": 30,
+  "auto_pause_persist": false
+……
+必须确保probe相关代码 通过web保存配置的顺序，是我上面输出的这样
+是要在html还是app中 改相关写入的位置代码？还是说 修改DEFAULT_CONFIG的排序？
+
+----------------
+A：
+
+已完成配置顺序调整！
+
+## 修改内容
+调整了 DEFAULT_CONFIG 中 probe 相关配置的位置，现在保存到 config.json 的顺序为：
+
+```
+"cleanup_interval": 3600,
+"trust_cf_ip": false,
+"probe_fail_threshold": 30,
+"probe_timeout": 5,
+"probe_interval": 1,
+"probe_mode": "icmp",
+"probe_ipv4_targets": [
+  "8.8.8.8",
+  "1.1.1.1",
+  "223.6.6.6"
+],
+"probe_ipv6_targets": [
+  "2001:4860:4860::8888",
+  "2606:4700:4700::1111",
+  "2400:3200:baba::1"
+],
+"auto_pause_enabled": true,
+"auto_pause_threshold": 30,
+"auto_pause_persist": false,
+"users": [...]
+```
+修改位置 ： app.py 中的 DEFAULT_CONFIG 定义
+原理 ：由于 persist_config() 使用 DEFAULT_CONFIG.keys() 保存配置，所以配置文件的顺序由 DEFAULT_CONFIG 的定义顺序决定。
 
 
 --------------------------------------

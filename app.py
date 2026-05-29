@@ -35,6 +35,13 @@ from werkzeug.exceptions import HTTPException
 
 # ==================== 配置持久化 ====================
 CONFIG_FILE  = 'config.json'
+# ─────────────────────────────────────────────────────────────
+# 配置维护说明：
+# 1. 新增配置项：只需在此处添加 DEFAULT_CONFIG 键值对
+# 2. 加载/保存/API：自动从 DEFAULT_CONFIG 读取，无需手动添加
+# 3. labels/suffixes：用于日志显示，如需中文名称请同步更新 api_config() 中的 labels 和 suffixes
+#    （不影响配置功能，仅日志显示英文键名）
+# ─────────────────────────────────────────────────────────────
 DEFAULT_CONFIG = {
     'listen_port': 443,                # 新增，默认端口
     'listen_ipv4': 'global',           # 新增，默认 IPv4 监听模式
@@ -82,27 +89,6 @@ DEFAULT_CONFIG = {
     'show_removed_ips': True,          # 是否显示已移除的历史IP（前端控制）
     'default_layout_width': '1700',    # 默认页面视野宽度（px字符串，对应50%~100%）
     'allow_private_ips': False,        # 是否允许添加内网IP，默认禁止（SSRF防护）
-    # ── 网络探针与故障检测 ──
-    'probe_fail_threshold': 30,        # 本轮失败率达到多少%触发网络异常（默认30%）
-    'probe_timeout': 5,                # 探针超时（秒），默认5s
-    'probe_interval': 1,               # 探测周期（秒），默认1秒
-    'probe_mode': 'icmp',              # 探测模式：icmp（ICMP ping）| tcp（TCP DNS探测）
-    'probe_ipv4_targets': [            # IPv4 探针目标列表（任一可达即认为 IPv4 正常）
-        '8.8.8.8',                     # Google Public DNS
-        '1.1.1.1',                     # Cloudflare DNS
-        '223.6.6.6',                   # 国内 阿里 DNS
-    ],
-    'probe_ipv6_targets': [            # IPv6 探针目标列表（任一可达即认为 IPv6 正常，留空则禁用）
-        '2001:4860:4860::8888',        # Google IPv6 DNS
-        '2606:4700:4700::1111',        # Cloudflare IPv6 DNS
-        '2400:3200:baba::1',           # 阿里巴巴 IPv6 DNS（替换失效的 240c::6666 CNNIC）
-    ],
-    'probe_stable_count': 10,           # 探针延迟ms连续相同N次后强制重连（默认10次，0=禁用）
-    'probe_max_conn_age': 120,          # 探针连接最大存活时间（秒），超时强制重建（默认120秒，0=禁用）
-    # ── 连续失败自动暂停 ──
-    'auto_pause_enabled': True,        # 是否开启连续失败自动暂停
-    'auto_pause_threshold': 30,        # 连续失败多少次后自动暂停该IP
-    'auto_pause_persist': False,       # 是否在重启后保持自动暂停状态（默认关闭，避免误暂停后无人处理）
     'min_password_length': 8,          # 用户修改密码最小长度
     'refresh_geo_on_restart': True,    # 重启时自动更新 IP 归属地
     # ── 安全/限流内存清理 ──
@@ -119,6 +105,25 @@ DEFAULT_CONFIG = {
                                        # 通过 Cloudflare 访问时设为 True，Flask 直接暴露公网时保持 False
                                        # 注意：设为 True 前必须确认请求确实来自CF（否则可伪造IP绕过限流）
                                        # 本地内网/http测试时设为 False 即可，不影响功能
+    # ── 网络探针与故障检测 ──
+    'probe_fail_threshold': 30,        # 本轮失败率达到多少%触发网络异常（默认30%）
+    'probe_timeout': 5,                # 探针超时（秒），默认5s
+    'probe_interval': 1,               # 探测周期（秒），默认1秒
+    'probe_mode': 'icmp',              # 探测模式：icmp（ICMP ping）| tcp（TCP DNS探测）
+    'probe_ipv4_targets': [            # IPv4 探针目标列表（任一可达即认为 IPv4 正常）
+        '8.8.8.8',                     # Google Public DNS
+        '1.1.1.1',                     # Cloudflare DNS
+        '223.6.6.6',                   # 国内 阿里 DNS
+    ],
+    'probe_ipv6_targets': [            # IPv6 探针目标列表（任一可达即认为 IPv6 正常，留空则禁用）
+        '2001:4860:4860::8888',        # Google IPv6 DNS
+        '2606:4700:4700::1111',        # Cloudflare IPv6 DNS
+        '2400:3200:baba::1',           # 阿里巴巴 IPv6 DNS（替换失效的 240c::6666 CNNIC）
+    ],
+    # ── 连续失败自动暂停 ──
+    'auto_pause_enabled': True,        # 是否开启连续失败自动暂停
+    'auto_pause_threshold': 30,        # 连续失败多少次后自动暂停该IP
+    'auto_pause_persist': False,       # 是否在重启后保持自动暂停状态（默认关闭，避免误暂停后无人处理）
     'users': [
         {"username": "admin",    "password": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", "role": "admin"},
         {"username": "operator", "password": "06e55b633481f7bb072957eabcf110c972e86691c3cfedabe088024bffe42f23", "role": "operator"},
@@ -133,18 +138,8 @@ def load_config():
         if os.path.exists(CONFIG_FILE):
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 saved = json.load(f)
-            for k in ['check_interval','timeout','retry_mode','retry_interval',
-                      'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
-                      'log_to_disk','log_level','console_error_log','save_interval','console_log_level','debug_save_trace',
-                      'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
-                      'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
-                      'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
-                      'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','uptime_algorithm','export_suffix',
-                      'show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
-                      'cleanup_interval','trust_cf_ip',
-                      'probe_fail_threshold','probe_ipv6_targets','probe_timeout','probe_ipv4_targets',
-                      'probe_stable_count','probe_max_conn_age','probe_interval','probe_mode',
-                      'auto_pause_enabled','auto_pause_threshold','auto_pause_persist']:
+            # 自动从 DEFAULT_CONFIG 获取所有配置键，避免重复定义
+            for k in DEFAULT_CONFIG.keys():
                 if k in saved:
                     cfg[k] = saved[k]
             # 向后兼容：旧配置文件用 rank_stat_period，迁移到 dashboard_stat_period
@@ -159,20 +154,8 @@ def load_config():
 
 def persist_config(cfg):
     try:
-        savable = {k: cfg[k] for k in ['check_interval','timeout','retry_mode','retry_interval',
-                                        'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
-                                        'log_to_disk','log_level','console_error_log','save_interval','debug_save_trace',
-                                        'http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
-                                        'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
-                                        'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
-                                        'dashboard_stat_period','tracker_stat_period','cache_history',
-                                        'tab_switch_refresh','uptime_algorithm','export_suffix','show_removed_ips','default_layout_width',
-                                        'allow_private_ips','min_password_length','users',
-                                        'cleanup_interval','trust_cf_ip',
-                                        'probe_fail_threshold','probe_ipv6_targets','probe_timeout','probe_ipv4_targets',
-                                        'probe_stable_count','probe_max_conn_age','probe_interval','probe_mode',
-                                        'auto_pause_enabled','auto_pause_threshold','auto_pause_persist']
-                   if k in cfg}
+        # 自动从 DEFAULT_CONFIG 获取所有配置键，避免重复定义
+        savable = {k: cfg[k] for k in DEFAULT_CONFIG.keys() if k in cfg}
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(savable, f, indent=2, ensure_ascii=False)
     except Exception as e:
@@ -5764,19 +5747,8 @@ def api_config():
         errors = validate_config(data)
         if errors:
             return jsonify({'error': '配置参数无效', 'details': errors}), 400
-        keys = ['check_interval','timeout','retry_mode','retry_interval',
-                'monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct',
-                'log_to_disk','log_level','console_log_level','debug_save_trace','save_interval','console_error_log','http_proxy','udp_proxy','http_proxy_enabled', 'udp_proxy_enabled',
-                'listen_port', 'listen_ipv4', 'listen_ipv4_custom', 'listen_ipv6', 'listen_ipv6_custom',
-                'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
-                'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','uptime_algorithm',
-                'export_suffix','show_removed_ips','default_layout_width','allow_private_ips','min_password_length','users',
-                'cleanup_interval','trust_cf_ip',
-                'probe_fail_threshold','probe_ipv6_targets','probe_timeout','probe_ipv4_targets',
-                'probe_interval','probe_mode',
-                'probe_stable_count','probe_max_conn_age',
-                'auto_pause_enabled','auto_pause_threshold','auto_pause_persist',
-                'dns_refresh_interval']
+        # 自动从 DEFAULT_CONFIG 获取所有配置键，避免重复定义
+        keys = list(DEFAULT_CONFIG.keys())
         labels = {
             'check_interval':        '监控间隔',
             'timeout':               '连接超时',
@@ -5879,16 +5851,8 @@ def api_config():
     public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'uptime_algorithm', 'dashboard_stat_period', 'tracker_stat_period', 'show_removed_ips', 'default_layout_width', 'allow_private_ips', 'min_password_length']
     if not session.get('role'):
         return jsonify({k: CONFIG.get(k) for k in public_keys})
-    all_keys = ['check_interval','timeout','retry_mode','retry_interval',
-                'log_to_disk','log_level','debug_save_trace','save_interval','console_error_log','http_proxy','udp_proxy','http_proxy_enabled','udp_proxy_enabled',
-                'dns_mode','dns_custom','dns_use_tcp','dns_timeout','dns_lb_enabled','max_log_entries','max_log_info','max_log_success','max_log_error','page_refresh_ms',
-                'dashboard_stat_period','tracker_stat_period','cache_history','tab_switch_refresh','uptime_algorithm',
-                'show_removed_ips','monitor_workers','stagger_batch_proxy','stagger_batch_direct','stagger_delay_proxy','stagger_delay_direct','export_suffix','default_layout_width',
-                'allow_private_ips','min_password_length','cleanup_interval','trust_cf_ip',
-                'probe_fail_threshold','probe_ipv6_targets','probe_timeout','probe_ipv4_targets',
-                'probe_stable_count','probe_max_conn_age',
-                'auto_pause_enabled','auto_pause_threshold','auto_pause_persist',
-                'dns_refresh_interval']
+    # 自动从 DEFAULT_CONFIG 获取所有配置键，避免重复定义
+    all_keys = list(DEFAULT_CONFIG.keys())
     return jsonify({k: CONFIG.get(k) for k in all_keys})
 
 @app.route('/api/users', methods=['GET'])
