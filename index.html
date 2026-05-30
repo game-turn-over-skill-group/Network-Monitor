@@ -1285,7 +1285,7 @@
                         </ul>
                     </div>
                     <!-- 视野宽度选择器 -->
-                    <select class="form-select form-select-sm" v-model="layoutWidth" @change="applyLayout" style="width:78px;font-size:.78rem;" title="页面视野宽度">
+                    <select class="form-select form-select-sm" v-model="layoutWidth" @change="applyLayout" style="width:78px;font-size:.78rem;" :title="t('nav.layoutWidth')">
                         <option value="1500">50%</option>
                         <option value="1600">60%</option>
                         <option value="1700">70%</option>
@@ -1307,10 +1307,10 @@
                             <i class="bi bi-person-circle me-1"></i>{{ authUser.username }}
                             <span :class="authUser.role==='admin'?'text-warning':authUser.role==='operator'?'text-info':'text-secondary'" style="font-size:.7rem;margin-left:3px;">[{{ authUser.role }}]</span>
                         </span>
-                        <button class="btn btn-outline-secondary btn-sm" @click="showChpw=true" title="修改密码">
+                        <button class="btn btn-outline-secondary btn-sm" @click="showChpw=true" :title="t('nav.changePassword')">
                             <i class="bi bi-key"></i>
                         </button>
-                        <button class="btn btn-outline-secondary btn-sm" @click="doLogout" title="退出登录">
+                        <button class="btn btn-outline-secondary btn-sm" @click="doLogout" :title="t('nav.logout')">
                             <i class="bi bi-box-arrow-right"></i>
                         </button>
                     </template>
@@ -1747,7 +1747,7 @@
                                         @click="qsFilterDomain = qsFilterDomain===item.domain ? '' : item.domain; qsPage=1"
                                         style="cursor:pointer;"
                                         :class="{'table-active': qsFilterDomain===item.domain}"
-                                        :title="qsFilterDomain===item.domain ? '再次点击取消筛选' : item.domain">
+                                        :title="qsFilterDomain===item.domain ? t('ranking.clickAgainToClear') : item.domain">
                                         <td style="color:#64748b;font-size:.75rem;">{{ idx+1 }}</td>
                                         <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="item.domain">{{ item.domain }}</td>
                                         <td style="text-align:right;">
@@ -1981,7 +1981,7 @@
                                     </td>
                                     <!-- 操作 -->
                                     <td style="text-align:center;">
-                                        <button v-if="authUser.logged_in" class="btn btn-outline-primary retry-sm" @click="retryIp(row.domain,row.ip)" title="重试"><i class="bi bi-arrow-repeat"></i></button>
+                                        <button v-if="authUser.logged_in" class="btn btn-outline-primary retry-sm" @click="retryIp(row.domain,row.ip)" :title="t('monitor.retryIpTitle')"><i class="bi bi-arrow-repeat"></i></button>
                                     </td>
                                 </tr>
                             </tbody>
@@ -2175,16 +2175,16 @@
                                 </div>
                                 <!-- 右：操作按钮 -->
                                 <div class="tl-domain-actions" @click.stop>
-                                    <button v-if="authUser.logged_in" class="btn tl-action-btn tl-btn-retry" @click="retryDomain(domain)" :disabled="tr.paused" title="重试全部IP">
+                                    <button v-if="authUser.logged_in" class="btn tl-action-btn tl-btn-retry" @click="retryDomain(domain)" :disabled="tr.paused" :title="t('monitor.retryAllIpTitle')">
                                         <i class="bi bi-arrow-repeat"></i>
                                     </button>
                                     <button v-if="authUser.role==='admin'||authUser.role==='operator'" class="btn tl-action-btn"
                                             :class="tr.paused?'tl-btn-resume':'tl-btn-pause'"
                                             @click="pauseDomain(domain,!tr.paused)"
-                                            :title="tr.paused?'恢复监控':'暂停监控'">
+                                            :title="tr.paused?t('monitor.resumeDomainTitle'):t('monitor.pauseDomainTitle')">
                                         <i class="bi" :class="tr.paused?'bi-play-fill':'bi-pause-fill'"></i>
                                     </button>
-                                    <button v-if="authUser.role==='admin'||authUser.role==='operator'" class="btn tl-action-btn tl-btn-del" @click="delTracker(domain)" title="删除"><i class="bi bi-trash"></i></button>
+                                    <button v-if="authUser.role==='admin'||authUser.role==='operator'" class="btn tl-action-btn tl-btn-del" @click="delTracker(domain)" :title="t('monitor.deleteTrackerTitle')"><i class="bi bi-trash"></i></button>
                                 </div>
                             </div>
 
@@ -2193,7 +2193,7 @@
                                 <div v-for="ip in tr.ips.filter(i => (cfg.show_removed_ips ? true : !i.removed) && (ipVerFilter==='all' || i.version===ipVerFilter))"
                                      :key="ip.ip"
                                      class="tl-ip-row"
-                                     :class="{paused: ip.paused, removed: ip.removed}">
+                                     :class="{paused: ip.paused, removed: ip.removed && !ip.lock}">
                                     <!-- IP地址 + 版本标 -->
                                     <div class="tl-ip-addr">
                                         <span class="ip-mono" :class="ip.version==='ipv6'?'ip-mono-v6':'ip-mono-v4'">{{ ip.ip }}</span><span class="ip-ver-badge" :class="ip.version==='ipv6'?'ipvb-v6':'ipvb-v4'">{{ ip.version==='ipv6'?'v6':'v4' }}</span>
@@ -2251,17 +2251,24 @@
                                     </div>
                                     <!-- 操作按钮 -->
                                     <div class="tl-ip-actions">
-                                        <button v-if="ip.status==='offline' && authUser.logged_in && !ip.paused"
+                                        <button v-if="ip.status==='offline' && authUser.logged_in && !ip.paused && !ip.lock"
                                                 class="btn tl-action-btn tl-btn-retry"
-                                                @click.stop="retryIp(domain,ip.ip)" title="重试此IP">
+                                                @click.stop="retryIp(domain,ip.ip)" :title="t('monitor.retryIpTitle')">
                                             <i class="bi bi-arrow-repeat"></i>
                                         </button>
                                         <button v-if="authUser.role==='admin'||authUser.role==='operator'"
                                                 class="btn tl-action-btn"
                                                 :class="ip.paused?'tl-btn-resume':'tl-btn-pause'"
                                                 @click.stop="pauseIp(domain,ip.ip,!ip.paused)"
-                                                :title="ip.paused?'恢复此IP监控':'暂停此IP监控'">
+                                                :title="ip.paused?t('monitor.resumeIpTitle'):t('monitor.pauseIpTitle')">
                                             <i class="bi" :class="ip.paused?'bi-play-fill':'bi-pause-fill'"></i>
+                                        </button>
+                                        <button v-if="authUser.role==='admin' && (ip.removed || ip.lock)"
+                                                class="btn tl-action-btn"
+                                                :class="ip.lock?'':'tl-btn-retry'"
+                                                @click.stop="lockIp(domain,ip.ip,!ip.lock)"
+                                                :title="ip.lock?t('monitor.unlockIpTitle'):t('monitor.lockIpTitle')">
+                                            <i class="bi" :class="ip.lock?'bi-lock-fill':'bi-unlock-fill'"></i>
                                         </button>
                                     </div>
                                 </div>
@@ -2386,7 +2393,7 @@
                     <div v-else>
                         <div v-if="rankFilterDomain" style="padding:4px 12px 0;font-size:.78rem;color:#60a5fa;display:flex;align-items:center;gap:6px;">
                             <i class="bi bi-funnel-fill"></i>{{ rankFilterDomain }}
-                            <span @click="rankFilterDomain=''" style="cursor:pointer;color:#94a3b8;" title="取消筛选">✕</span>
+                            <span @click="rankFilterDomain=''" style="cursor:pointer;color:#94a3b8;" :title="t('ranking.clearFilter')">✕</span>
                         </div>
                         <div class="rank-item" v-for="(item,i) in filteredRanking" :key="i">
                             <div class="d-flex align-items-center gap-2">
@@ -2395,7 +2402,7 @@
                                     <span class="domain-name me-1"
                                         :style="{cursor:'pointer',color:rankFilterDomain===item.domain?'#60a5fa':'var(--text)',textDecoration:rankFilterDomain===item.domain?'underline':'none'}"
                                         @click="rankFilterDomain = rankFilterDomain===item.domain ? '' : item.domain"
-                                        :title="rankFilterDomain===item.domain ? '再次点击取消筛选' : '点击筛选此域名'">{{ item.domain }}</span>
+                                        :title="rankFilterDomain===item.domain ? t('ranking.clickAgainToClear') : t('ranking.clickToFilter')">{{ item.domain }}</span>
                                     <span class="port-tag">:{{ item.port }}</span>
                                     <span class="proto-tag ms-1" :class="'proto-'+item.protocol">{{ item.protocol.toUpperCase() }}</span>
                                     <!-- v4/v6 版本标签 -->
@@ -3036,7 +3043,7 @@
                                         <input class="form-control form-control-sm pe-4" :type="u.showPw ? 'text' : 'password'" v-model="u.password" placeholder="(blank=keep)" autocomplete="new-password">
                                         <span @click="u.showPw = !u.showPw"
                                               style="position:absolute;right:7px;top:50%;transform:translateY(-50%);cursor:pointer;color:#64748b;font-size:.85rem;line-height:1;"
-                                              :title="u.showPw ? '隐藏密码' : '显示密码'">
+                                              :title="u.showPw ? t('users.hidePassword') : t('users.showPassword')">
                                             <i class="bi" :class="u.showPw ? 'bi-eye-slash' : 'bi-eye'"></i>
                                         </span>
                                     </div>
@@ -3054,7 +3061,7 @@
                                     <span v-else style="color:#94a3b8;"><i class="bi bi-eye"></i> {{ t('users.roleViewerDesc') }}</span>
                                 </td>
                                 <td>
-                                    <button class="btn btn-sm btn-outline-danger" @click="removeUserRow(idx)" :disabled="userRows.length<=1" title="删除此行">
+                                    <button class="btn btn-sm btn-outline-danger" @click="removeUserRow(idx)" :disabled="userRows.length<=1" :title="t('users.deleteRow')">
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 </td>
@@ -3692,8 +3699,11 @@ createApp({
                 if (k === 'domain') return dir * da.localeCompare(db);
                 if (k === 'uptime') {
                     // ===== 仅按可用率排序时，暂停域名放最后 =====
-                    if (a.paused !== b.paused) {
-                        return a.paused ? 1 : -1;
+                    // 精简模式：有 paused 字段 = true，无字段 = false
+                    const aPaused = !!a.paused;
+                    const bPaused = !!b.paused;
+                    if (aPaused !== bPaused) {
+                        return aPaused ? 1 : -1;
                     }
                     // ========================================
                     const ua = uv(uptimeFn(a)), ub = uv(uptimeFn(b));
@@ -3894,6 +3904,13 @@ createApp({
         const pauseIp = async (domain, ip, paused) => {
             try {
                 await axios.post('/api/tracker/pause', {action: paused?'pause':'resume', domain, ip});
+                await loadTrackers();
+            } catch(e) { showToast('操作失败', 'warn'); }
+        };
+        // 锁定/解锁：IP级
+        const lockIp = async (domain, ip, lock) => {
+            try {
+                await axios.post('/api/tracker/lock', {domain, ip, lock});
                 await loadTrackers();
             } catch(e) { showToast('操作失败', 'warn'); }
         };
@@ -4916,7 +4933,7 @@ createApp({
             showChpw, chpwLoading, chpwMsg, chpwForm, closeChpw, doChpw,
             userRows, userSaving, userSaveMsg, addUserRow, removeUserRow, saveUsers,
             tabIcon, go, loadRanking, toggleExpand, openAdd, closeAdd, doAdd,
-            delTracker, pauseDomain, pauseIp, pauseAll, allPaused, retryDomain, retryIp, clearLogs, saveCfg, changeLocale,
+            delTracker, pauseDomain, pauseIp, pauseAll, allPaused, retryDomain, retryIp, clearLogs, saveCfg, changeLocale, lockIp,
             toggleHttpProxy, toggleUdpProxy,
             uptime, uptimeCls, stCls, stIcon, stTxt, latCls, latW,
             fmtTime, fmtFullTime, fmtShortTime, fmtLogTime, flag, resetRefresh, clearRemovedIps, clearHistory, clearHistoryMsg, toast, showToast,

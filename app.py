@@ -976,8 +976,8 @@ class TrackerDB:
                         changed = True
                 else:
                     # IP 消失
-                    # 如果 removed 字段明确为 false，则跳过移除处理（IP被锁定）
-                    if ip_obj.get('removed') is False:
+                    # 如果有 lock 标记，则跳过移除处理（IP被锁定）
+                    if ip_obj.get('lock'):
                         # 确保被锁定的 IP 始终在活跃列表中，继续被探测
                         key = (domain, ip)
                         self._active_ips.add(key)
@@ -1167,17 +1167,20 @@ class TrackerDB:
                 for d, t in data.items():
                     all_ips    = t.get('ips', [])
                     # 启动时删除 IP：
-                    # - removed: true 且不是用户手动暂停的 → 删除
-                    # - removed: true 且是用户手动暂停的 → 保留
+                    # - removed: true 且不是自动暂停的 → 删除
+                    # - removed: true 且是自动暂停的 → 保留
                     # - 其他情况 → 保留
                     clean_ips = []
                     for ip in all_ips:
-                        is_removed = ip.get('removed', False)
-                        is_user_paused = ip.get('paused_by_user', False)
-                        if is_removed and not is_user_paused:
-                            # 自动暂停的过时IP，删除
+                        is_removed = ip.get('removed')
+                        is_auto_paused = ip.get('auto_paused')
+                        if is_removed and not is_auto_paused:
                             continue
-                        # 其他情况都保留
+                        # 旧版本兼容：删除 paused=false 和 removed=false 字段
+                        if ip.get('paused') == False:
+                            ip.pop('paused', None)
+                        if ip.get('removed') == False:
+                            ip.pop('removed', None)
                         clean_ips.append(ip)
                     removed_cnt = len(all_ips) - len(clean_ips)
                     if removed_cnt:
@@ -1196,34 +1199,39 @@ class TrackerDB:
                             except Exception:
                                 ip_obj['last_check_ts'] = 0
                     # 只保留非removed的IP，同时清理域名级别的历史摘要字段
-                    self.trackers[d] = {
+                    tracker_data = {
                         'domain':t.get('domain',d),'port':t.get('port',80),
                         'protocol':t.get('protocol','tcp'),'ips':clean_ips,
                         'added_time':t.get('added_time',datetime.now().isoformat()),
                         'dns_error': t.get('dns_error', False),
-                        'paused': t.get('paused', False),
-                        'paused_by_user': t.get('paused_by_user', False)
                         # 注意：history_24h, history_7d, history_30d 从 t 中排除，由 get_trackers() 实时计算
                     }
+                    # 精简模式：有 paused 字段=真，无=假；旧版本兼容删除 paused=false
+                    if t.get('paused') is True:
+                        tracker_data['paused'] = True
+                    elif t.get('paused') == False:
+                        pass  # 不添加 paused=false 字段
                     # 初始化活跃IP集合和IP快速查找表（只添加非paused的IP）
-                    domain_paused = t.get('paused', False)
+                    domain_paused = t.get('paused')
                     for ip_obj in clean_ips:
                         ip = ip_obj.get('ip')
                         if ip and not ip_obj.get('paused') and not domain_paused:
                             self._active_ips.add((d, ip))
                             self._ip_map[(d, ip)] = ip_obj
-                    # 重启时自动恢复非手动暂停的IP（auto_pause_persist关闭时）
-                    # 注意：只有当域名也未被手动暂停时才恢复IP
+                    self.trackers[d] = tracker_data
+                    # 重启时自动恢复自动暂停的IP（auto_pause_persist关闭时）
+                    # 注意：只有当域名也未被暂停时才恢复IP
                     if not CONFIG.get('auto_pause_persist', False):
-                        domain_paused_by_user = t.get('paused_by_user', False)
-                        if not domain_paused_by_user:
+                        domain_paused = t.get('paused')
+                        if not domain_paused:
                             for ip_obj in clean_ips:
                                 ip = ip_obj.get('ip')
-                                if ip and ip_obj.get('paused') and ip_obj.get('paused_by_user') is False:
-                                    ip_obj['paused'] = False
-                                    ip_obj.pop('paused_by_user', None)
-                                    self._active_ips.add((d, ip))
-                                    self._ip_map[(d, ip)] = ip_obj
+                                if ip and ip_obj.get('paused') and ip_obj.get('auto_paused'):
+                                    ip_obj.pop('paused', None)
+                                    ip_obj.pop('auto_paused', None)
+                                    if not ip_obj.get('lock'):
+                                        self._active_ips.add((d, ip))
+                                        self._ip_map[(d, ip)] = ip_obj
                                     modified_trackers.add(d)
                                     log_msg = f"[load] {d}({ip}) 自动暂停已恢复，开始检测"
                                     cprint(log_msg, 'info')
@@ -4127,7 +4135,7 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                         ip_obj2 = db._ip_map.get((domain, ip))
                         if ip_obj2:
                             ip_obj2['paused'] = True
-                            ip_obj2['paused_by_user'] = False  # 标记为自动暂停，非手动暂停
+                            ip_obj2['auto_paused'] = True  # 标记为自动暂停
                             db._active_ips.discard((domain, ip))
                             db._ip_map.pop((domain, ip), None)
                             # 只有当 auto_pause_persist 开启时才保存暂停状态到磁盘
@@ -5153,6 +5161,7 @@ def api_delete():
 @csrf_protect
 def api_pause():
     """暂停/恢复监控。支持：整个域名、域名下单个IP、全部域名。
+    精简模式：有字段=真（暂停），无字段=假（正常）
     body: { action: 'pause'|'resume', domain?: str, ip?: str, all?: bool }
     """
     data   = request.json or {}
@@ -5166,20 +5175,21 @@ def api_pause():
         if all_:
             # 全部域名暂停/恢复
             for d, td in db.trackers.items():
-                td['paused'] = paused
                 if paused:
-                    td['paused_by_user'] = True
+                    td['paused'] = True
                 else:
-                    td.pop('paused_by_user', None)
+                    td.pop('paused', None)
                 for ip_obj in td.get('ips', []):
-                    ip_obj['paused'] = paused
-                    # 域名级暂停/恢复不影响IP的paused_by_user标记
+                    if paused:
+                        ip_obj['paused'] = True
+                    else:
+                        ip_obj.pop('paused', None)
                     key = (d, ip_obj.get('ip'))
                     if paused:
                         db._active_ips.discard(key)
                         db._ip_map.pop(key, None)
                     else:
-                        if not ip_obj.get('removed'):
+                        if not ip_obj.get('removed') and not ip_obj.get('lock'):
                             db._active_ips.add(key)
                             db._ip_map[key] = ip_obj
                 db._dirty_trackers.add(d)  # 标记需要保存
@@ -5198,17 +5208,17 @@ def api_pause():
                         ip_obj = ip_obj2
                         break
             if ip_obj:
-                ip_obj['paused'] = paused
-                # 标记是否为用户手动暂停（用于重启时区分手动暂停和自动暂停）
+                # （用于重启时区分暂停和自动暂停）
                 if paused:
-                    ip_obj['paused_by_user'] = True
+                    ip_obj['paused'] = True
                 else:
-                    ip_obj.pop('paused_by_user', None)  # 恢复时删除标记
+                    ip_obj.pop('paused', None)
+                    ip_obj.pop('auto_paused', None)  # 恢复时删除标记
                 key = (domain, ip)
                 if paused:
                     db._active_ips.discard(key)
                 else:
-                    if not ip_obj.get('removed'):
+                    if not ip_obj.get('removed') and not ip_obj.get('lock'):
                         db._active_ips.add(key)
                         db._ip_map[key] = ip_obj
                 db._dirty_trackers.add(domain)  # 标记需要保存
@@ -5218,20 +5228,21 @@ def api_pause():
             td = db.trackers.get(domain)
             if not td:
                 return jsonify({'error': '域名不存在'}), 404
-            td['paused'] = paused
             if paused:
-                td['paused_by_user'] = True
+                td['paused'] = True
             else:
-                td.pop('paused_by_user', None)
+                td.pop('paused', None)
             for ip_obj in td.get('ips', []):
-                ip_obj['paused'] = paused
-                # 域名级暂停/恢复不影响IP的paused_by_user标记
+                if paused:
+                    ip_obj['paused'] = True
+                else:
+                    ip_obj.pop('paused', None)
                 key = (domain, ip_obj.get('ip'))
                 if paused:
                     db._active_ips.discard(key)
                     db._ip_map.pop(key, None)
                 else:
-                    if not ip_obj.get('removed'):
+                    if not ip_obj.get('removed') and not ip_obj.get('lock'):
                         db._active_ips.add(key)
                         db._ip_map[key] = ip_obj
             db._dirty_trackers.add(domain)  # 标记需要保存
@@ -5262,6 +5273,66 @@ def api_pause():
     print(f"[PAUSE] {console_str}")          # 控制台完整 IP
     db.add_log(web_str, 'info')              # Web 界面脱敏 IP
     return jsonify({'success': True, 'paused': paused, 'changed': changed})
+
+@app.route('/api/tracker/lock', methods=['POST'])
+@_require_role('admin')
+@csrf_protect
+def api_lock():
+    data = request.json or {}
+    domain = (data.get('domain', '') or '').strip()
+    ip = (data.get('ip', '') or '').strip()
+    lock = data.get('lock', True)
+    with db.lock:
+        td = db.trackers.get(domain)
+        if not td:
+            return jsonify({'error': '域名不存在'}), 404
+        ip_obj = None
+        for ip_obj2 in td.get('ips', []):
+            if ip_obj2.get('ip') == ip:
+                ip_obj = ip_obj2
+                break
+        if not ip_obj:
+            return jsonify({'error': 'IP不存在'}), 404
+        
+        if lock:
+            # 锁定：删除 removed 标记，添加 lock 标记，paused 状态保持不变
+            ip_obj.pop('removed', None)
+            ip_obj['lock'] = True
+            # 如果不是域名暂停，则添加到活跃IP
+            if not td.get('paused'):
+                key = (domain, ip)
+                db._active_ips.add(key)
+                db._ip_map[key] = ip_obj
+        else:
+            # 解锁：删除 lock 标记
+            ip_obj.pop('lock', None)
+            # 移除活跃IP（让DNS刷新来控制）
+            key = (domain, ip)
+            db._active_ips.discard(key)
+            db._ip_map.pop(key, None)
+        
+        db._dirty_trackers.add(domain)
+        db._save_async()
+    
+    label = '锁定' if lock else '解锁'
+    target = f"{domain}/{ip}"
+    raw_ip   = _client_ip()
+    op_user  = session.get('username', '?')
+    parts = raw_ip.split('.')
+    if len(parts) == 4:
+        masked_ip = f"{parts[0]}.*.*.{parts[3]}"
+    else:
+        segs = raw_ip.split(':')
+        if len(segs) >= 3:
+            masked_ip = f"{segs[0]}:{segs[1]}:****:{segs[-1]}"
+        else:
+            masked_ip = raw_ip
+    console_str = f"{raw_ip} [{op_user}] {label}: {target}"
+    web_str     = f"{masked_ip} [{op_user}] {label}: {target}"
+    g.access_note = f"{label} {target} by {raw_ip} [{op_user}]"
+    print(f"[LOCK] {console_str}")
+    db.add_log(web_str, 'info')
+    return jsonify({'success': True, 'lock': lock})
 
 @app.route('/api/tracker/check', methods=['POST'])
 @_require_role('admin', 'operator', 'viewer')
@@ -5927,7 +5998,7 @@ if __name__ == '__main__':
     if modified_trackers and total_removed > 0:
         cprint(f"[load] 共清理 {total_removed} 个已移除IP，保存 data.json", 'info')
         for d in modified_trackers:
-            db._dirty_trackers.add(d)
+            db._dirty_trackers.add(d)  # 标记需要保存
         db._save_async()
     db.add_log("网络监控服务启动", 'info')
 
