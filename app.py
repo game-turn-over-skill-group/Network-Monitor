@@ -646,6 +646,10 @@ class TrackerDB:
             if not td:
                 continue
             
+            # 跳过暂停的IP（包括域名级暂停和IP级暂停）
+            if ip_obj.get('paused') or td.get('paused'):
+                continue
+            
             proto = td.get('protocol', 'tcp')
             is_udp = (proto == 'udp')
             
@@ -1216,7 +1220,8 @@ class TrackerDB:
                     domain_paused = t.get('paused')
                     for ip_obj in clean_ips:
                         ip = ip_obj.get('ip')
-                        if ip and not ip_obj.get('paused') and not domain_paused:
+                        # 非暂停IP 或 被锁定的IP（锁定IP不受暂停影响）
+                        if ip and ((not ip_obj.get('paused') and not domain_paused) or ip_obj.get('lock')):
                             self._active_ips.add((d, ip))
                             self._ip_map[(d, ip)] = ip_obj
                     self.trackers[d] = tracker_data
@@ -5286,7 +5291,7 @@ def api_pause():
                         db._active_ips.discard(key)
                         db._ip_map.pop(key, None)
                     else:
-                        if not ip_obj.get('removed') and not ip_obj.get('lock'):
+                        if not ip_obj.get('removed'):
                             db._active_ips.add(key)
                             db._ip_map[key] = ip_obj
                 db._dirty_trackers.add(d)  # 标记需要保存
@@ -5315,7 +5320,7 @@ def api_pause():
                 if paused:
                     db._active_ips.discard(key)
                 else:
-                    if not ip_obj.get('removed') and not ip_obj.get('lock'):
+                    if not ip_obj.get('removed'):
                         db._active_ips.add(key)
                         db._ip_map[key] = ip_obj
                 db._dirty_trackers.add(domain)  # 标记需要保存
@@ -5339,7 +5344,7 @@ def api_pause():
                     db._active_ips.discard(key)
                     db._ip_map.pop(key, None)
                 else:
-                    if not ip_obj.get('removed') and not ip_obj.get('lock'):
+                    if not ip_obj.get('removed'):
                         db._active_ips.add(key)
                         db._ip_map[key] = ip_obj
             db._dirty_trackers.add(domain)  # 标记需要保存
