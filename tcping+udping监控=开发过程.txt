@@ -26362,6 +26362,31 @@ python history_npz_to_json.py --stats
 --------------------------------------
 
 
+//修复锁定IP没有重试按钮
+
+修复一下 被锁定的IP 超时没有重试按钮的问题
+
+----------------
+
+已修复！问题在于重试按钮的条件包含了 !ip.lock ，导致被锁定的IP不显示重试按钮。
+修复内容：
+将第 2254 行的条件：
+```
+v-if="ip.status==='offline' && authUser.logged_in && !ip.
+paused && !ip.lock"
+```
+修改为：
+```
+v-if="ip.status==='offline' && authUser.logged_in && !ip.
+paused"
+```
+修复原理：
+移除了 && !ip.lock 条件后，被锁定的IP（ ip.lock=true ）在离线状态时也会显示重试按钮。锁定状态只控制IP是否受DNS解析影响，不应该影响用户手动重试的能力。
+
+
+--------------------------------------
+
+
 
 
 

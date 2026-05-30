@@ -2251,7 +2251,7 @@
                                     </div>
                                     <!-- 操作按钮 -->
                                     <div class="tl-ip-actions">
-                                        <button v-if="ip.status==='offline' && authUser.logged_in && !ip.paused && !ip.lock"
+                                        <button v-if="ip.status==='offline' && authUser.logged_in && !ip.paused"
                                                 class="btn tl-action-btn tl-btn-retry"
                                                 @click.stop="retryIp(domain,ip.ip)" :title="t('monitor.retryIpTitle')">
                                             <i class="bi bi-arrow-repeat"></i>
