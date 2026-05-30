@@ -7,6 +7,7 @@ Windows部署: pip install Flask flask-cors dnspython requests waitress && pytho
 import queue
 import os
 import json
+import numpy as np
 import time
 import socket
 import struct
@@ -1278,6 +1279,7 @@ db = TrackerDB()
 # 重启后直接从 history.json 读取 domain->IP 归属，不依赖 data.json
 
 HISTORY_FILE = 'history.json'
+HISTORY_NUMPY_FILE = 'history.npz'
 HISTORY_WINDOWS = {
     '24h': 86400,
     '7d':  7 * 86400,
@@ -1288,32 +1290,55 @@ class HistoryDB:
     def __init__(self):
         self.lock         = threading.RLock()
         self._data        = {}
+        self._numpy_data  = {}
         self._last_gc     = 0
-        self._dirty_domains = set()  # 标记需要保存的域名
-        self._save_timer   = None    # 延迟保存定时器
-        self._pending_records = []   # 待写入的探测记录缓存
-        self._last_flush   = 0       # 上次刷新时间
+        self._dirty_domains = set()
+        self._save_timer   = None
+        self._pending_records = []
+        self._last_flush   = 0
+        self._numpy_loaded = False
 
     def _key_ip(self, ip): return f'ip:{ip}'
+
+    def _ensure_numpy(self, domain, ip_key):
+        if domain not in self._numpy_data:
+            self._numpy_data[domain] = {}
+        if ip_key not in self._numpy_data[domain]:
+            self._numpy_data[domain][ip_key] = {'ts': np.array([], dtype=np.int32), 'v': np.array([], dtype=np.int8)}
 
     def push_ip(self, domain, ip, result):
         """写入一条探测结果到对应域名下的IP key（先缓存，批量写入）"""
         v   = 1 if result in (True, 'online') else 0
         now = int(time.time())
+        ip_key = self._key_ip(ip)
         with self.lock:
             dom = self._data.setdefault(domain, {})
-            dom.setdefault(self._key_ip(ip), []).append([now, v])
-            self._dirty_domains.add(domain)  # 标记该域名有变化
-            # 缓存待写入的记录（仅追加模式）
-            self._pending_records.append((domain, self._key_ip(ip), now, v))
+            dom.setdefault(ip_key, []).append([now, v])
+            self._dirty_domains.add(domain)
+            self._pending_records.append((domain, ip_key, now, v))
+            if self._numpy_loaded:
+                self._ensure_numpy(domain, ip_key)
+                self._numpy_data[domain][ip_key]['ts'] = np.append(self._numpy_data[domain][ip_key]['ts'], now)
+                self._numpy_data[domain][ip_key]['v'] = np.append(self._numpy_data[domain][ip_key]['v'], v)
         if now - self._last_gc > 3600:
             self._gc()
 
     def get_ip_summary(self, domain, ip, window_secs):
         """返回指定域名下指定IP在窗口内的 {total, ok, fail}"""
         cutoff = int(time.time()) - window_secs
+        ip_key = self._key_ip(ip)
         with self.lock:
-            pts = self._data.get(domain, {}).get(self._key_ip(ip), [])
+            if self._numpy_loaded and domain in self._numpy_data and ip_key in self._numpy_data[domain]:
+                ts_arr = self._numpy_data[domain][ip_key]['ts']
+                v_arr = self._numpy_data[domain][ip_key]['v']
+                if len(ts_arr) == 0:
+                    return {'total': 0, 'ok': 0, 'fail': 0}
+                mask = ts_arr >= cutoff
+                window_v = v_arr[mask]
+                ok = int(window_v.sum())
+                total = len(window_v)
+                return {'total': total, 'ok': ok, 'fail': total - ok}
+            pts = self._data.get(domain, {}).get(ip_key, [])
             window = [v for ts, v in pts if ts >= cutoff]
         ok = sum(window)
         return {'total': len(window), 'ok': ok, 'fail': len(window) - ok}
@@ -1324,13 +1349,27 @@ class HistoryDB:
         return round(s['ok'] / s['total'] * 100, 1) if s['total'] > 0 else None
 
     def get_domain_summary(self, domain, window_secs, excluded_ips=None, included_ips=None):
-        """域名级汇总：该域名下所有历史IP（含已移除）的 ok/total 之和。
-        excluded_ips: set of ip strings to exclude（已暂停IP，实时排除）
-        included_ips: set of ip strings to include（只统计这些IP，None表示全部）"""
+        """域名级汇总：该域名下所有历史IP（含已移除）的 ok/total 之和。"""
         cutoff = int(time.time()) - window_secs
         excl_keys = {self._key_ip(ip) for ip in excluded_ips} if excluded_ips else set()
         incl_keys = {self._key_ip(ip) for ip in included_ips} if included_ips else None
         with self.lock:
+            if self._numpy_loaded and domain in self._numpy_data:
+                ip_map = self._numpy_data[domain]
+                total_ok = total_cnt = 0
+                for ik, data in ip_map.items():
+                    if ik in excl_keys:
+                        continue
+                    if incl_keys and ik not in incl_keys:
+                        continue
+                    ts_arr = data['ts']
+                    v_arr = data['v']
+                    if len(ts_arr) == 0:
+                        continue
+                    mask = ts_arr >= cutoff
+                    total_ok += int(v_arr[mask].sum())
+                    total_cnt += int(mask.sum())
+                return {'total': total_cnt, 'ok': total_ok, 'fail': total_cnt - total_ok}
             ip_map = self._data.get(domain, {})
             total_ok = total_cnt = 0
             for ik, pts in ip_map.items():
@@ -1347,15 +1386,24 @@ class HistoryDB:
     def get_ip_recent(self, domain, ip, window_secs):
         """返回窗口内的原始 [v, ...] 列表（用于连续失败计算）"""
         cutoff = int(time.time()) - window_secs
+        ip_key = self._key_ip(ip)
         with self.lock:
-            pts = self._data.get(domain, {}).get(self._key_ip(ip), [])
+            if self._numpy_loaded and domain in self._numpy_data and ip_key in self._numpy_data[domain]:
+                ts_arr = self._numpy_data[domain][ip_key]['ts']
+                v_arr = self._numpy_data[domain][ip_key]['v']
+                if len(ts_arr) == 0:
+                    return []
+                mask = ts_arr >= cutoff
+                return v_arr[mask].tolist()
+            pts = self._data.get(domain, {}).get(ip_key, [])
             return [v for ts, v in pts if ts >= cutoff]
 
     def remove_domain(self, domain):
         """手动删除域名时调用，清除该域名所有历史数据"""
         with self.lock:
             self._data.pop(domain, None)
-            self._dirty_domains.add(domain)  # 标记需要保存
+            self._numpy_data.pop(domain, None)
+            self._dirty_domains.add(domain)
 
     def _gc(self):
         """清理30天外的数据"""
@@ -1369,6 +1417,22 @@ class HistoryDB:
                         del ip_map[ik]
                 if not ip_map:
                     del self._data[domain]
+            if self._numpy_loaded:
+                for domain in list(self._numpy_data.keys()):
+                    ip_map = self._numpy_data[domain]
+                    for ik in list(ip_map.keys()):
+                        ts_arr = ip_map[ik]['ts']
+                        v_arr = ip_map[ik]['v']
+                        if len(ts_arr) == 0:
+                            del ip_map[ik]
+                            continue
+                        mask = ts_arr >= cutoff
+                        if mask.all():
+                            continue
+                        ip_map[ik]['ts'] = ts_arr[mask]
+                        ip_map[ik]['v'] = v_arr[mask]
+                    if not ip_map:
+                        del self._numpy_data[domain]
             self._last_gc = int(time.time())
 
     # 无效IP集合：CF安全DNS可能将tracker解析为这些地址，需自动过滤
@@ -1381,13 +1445,12 @@ class HistoryDB:
         return ip in HistoryDB._INVALID_IPS
 
     def save(self, force_full=False):
-        """运行时：只追加到 .append 文件，不做定时合并（合并在启动时进行）"""
+        """运行时：追加到 history.json.append，同时更新 NumPy 数组并保存 NumPy 文件"""
         try:
             with self.lock:
                 if not self._pending_records:
                     return
-                
-                # 批量写入追加文件（只追加，不合并）
+
                 with open(HISTORY_FILE + '.append', 'a', encoding='utf-8') as f:
                     for domain, ik, ts, v in self._pending_records:
                         record = json.dumps({
@@ -1399,12 +1462,61 @@ class HistoryDB:
                         f.write(record + '\n')
                     f.flush()
                     os.fsync(f.fileno())
-                
+
                 self._pending_records = []
                 self._dirty_domains.clear()
-                
+
         except Exception as e:
             cprint(f"[HistoryDB] 保存失败: {e}", 'error')
+
+    def _save_numpy(self):
+        """保存 NumPy 文件（二进制高效格式）"""
+        try:
+            if not self._numpy_loaded:
+                return
+            with self.lock:
+                np.savez_compressed(
+                    HISTORY_NUMPY_FILE,
+                    data=self._numpy_data
+                )
+        except Exception as e:
+            cprint(f"[HistoryDB] NumPy保存失败: {e}", 'error')
+
+    def _merge_append_file_to_numpy(self, append_file):
+        """将 append 文件合并到 NumPy 数组"""
+        try:
+            if not os.path.exists(append_file):
+                return 0
+            records = []
+            with open(append_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                        records.append(rec)
+                    except:
+                        continue
+            if not records:
+                return 0
+            for rec in records:
+                domain = rec.get('d')
+                ik = rec.get('i')
+                ts = rec.get('t')
+                v = rec.get('v')
+                if not domain or not ik:
+                    continue
+                self._ensure_numpy(domain, ik)
+                existing_ts = self._numpy_data[domain][ik]['ts']
+                if len(existing_ts) > 0 and ts in existing_ts:
+                    continue
+                self._numpy_data[domain][ik]['ts'] = np.append(self._numpy_data[domain][ik]['ts'], ts)
+                self._numpy_data[domain][ik]['v'] = np.append(self._numpy_data[domain][ik]['v'], v)
+            return len(records)
+        except Exception as e:
+            cprint(f"[HistoryDB] NumPy合并append失败: {e}", 'error')
+            return 0
 
     def _merge_append_file(self):
         """合并追加文件到主 history.json（定期执行，减少文件碎片）"""
@@ -1457,121 +1569,106 @@ class HistoryDB:
             cprint(f"[HistoryDB] 合并失败: {e}", 'error')
 
     def load(self):
-        """启动时：先合并追加文件到主文件（去重），再加载到内存"""
+        """启动时：加载 NumPy 文件，合并 history.json.append，生成 history.npz"""
         try:
             cutoff = int(time.time()) - 30 * 86400
-            
-            # 1. 先处理追加文件（如果存在）
             append_file = HISTORY_FILE + '.append'
-            if os.path.exists(append_file):
-                # 读取追加文件
-                append_records = []
-                with open(append_file, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if line:
-                            try:
-                                rec = json.loads(line)
-                                if rec.get('d') and rec.get('i') and rec.get('t') >= cutoff:
-                                    append_records.append(rec)
-                            except Exception as e:
-                                cprint(f"[HistoryDB] 解析追加文件记录失败: {e}", 'error')
-                                continue
-                
-                # 如果有需要合并的记录
-                if append_records:
-                    try:
-                        # 读取主文件（如果存在）
-                        main_data = {}
-                        if os.path.exists(HISTORY_FILE):
-                            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-                                main_data = json.load(f)
-                        
-                        # 合并去重（检查每个记录是否已存在）
-                        merged_count = 0
-                        duplicate_count = 0
-                        for rec in append_records:
-                            domain = rec['d']
-                            ik = rec['i']
-                            ts = rec['t']
-                            v = rec['v']
-                            
-                            # 检查是否已存在相同时间戳的记录（去重）
-                            exists = False
-                            if domain in main_data and isinstance(main_data[domain], dict):
-                                if ik in main_data[domain] and isinstance(main_data[domain][ik], list):
-                                    for existing_ts, existing_v in main_data[domain][ik]:
-                                        if existing_ts == ts:
-                                            exists = True
-                                            duplicate_count += 1
-                                            break
-                            
-                            if not exists:
-                                main_data.setdefault(domain, {}).setdefault(ik, []).append([ts, v])
-                                merged_count += 1
-                        
-                        # 写入主文件（原子操作）
-                        tmp_file = HISTORY_FILE + '.tmp'
-                        with open(tmp_file, 'w', encoding='utf-8') as f:
-                            f.write('{\n')
-                            domains = list(main_data.items())
-                            for d_idx, (domain, ip_map) in enumerate(domains):
-                                f.write(f'  {json.dumps(domain, ensure_ascii=False)}: {{\n')
-                                ip_items = list(ip_map.items())
-                                for i_idx, (ik, pts) in enumerate(ip_items):
-                                    pts_str = json.dumps(pts, separators=(',', ':'))
-                                    comma = ',' if i_idx < len(ip_items) - 1 else ''
-                                    f.write(f'    {json.dumps(ik)}: {pts_str}{comma}\n')
-                                domain_comma = ',' if d_idx < len(domains) - 1 else ''
-                                f.write(f'  }}{domain_comma}\n')
-                            f.write('}\n')
-                            f.flush()
-                            os.fsync(f.fileno())
-                        os.replace(tmp_file, HISTORY_FILE)
-                        
-                        cprint(f"[HistoryDB] 启动时合并完成: 新增 {merged_count} 条, 跳过重复 {duplicate_count} 条", 'info')
-                        
-                        # 只有合并成功才删除追加文件
+
+            if os.path.exists(HISTORY_NUMPY_FILE):
+                cprint(f"[HistoryDB] 发现 history.npz，开始加载...", 'info')
+                try:
+                    with self.lock:
+                        loaded = np.load(HISTORY_NUMPY_FILE, allow_pickle=True)
+                        self._numpy_data = loaded['data'].item()
+                        self._numpy_loaded = True
+                    cprint(f"[HistoryDB] NumPy文件加载成功", 'info')
+                    if os.path.exists(append_file):
+                        cprint(f"[HistoryDB] 发现append文件，开始合并到NumPy...", 'info')
+                        count = self._merge_append_file_to_numpy(append_file)
+                        cprint(f"[HistoryDB] NumPy合并append完成: {count} 条", 'info')
+                        self._save_numpy()
                         os.remove(append_file)
-                        cprint(f"[HistoryDB] 已清理追加文件", 'info')
-                    
-                    except Exception as e:
-                        # 合并失败，保留追加文件，下次启动继续合并
-                        cprint(f"[HistoryDB] 启动时合并失败: {e}", 'error')
-                        cprint(f"[HistoryDB] 追加文件已保留，将在下次启动时重新尝试合并", 'warning')
-            
-            # 2. 加载主文件到内存
-            loaded_domains = loaded_ips = skipped_ips = 0
-            if os.path.exists(HISTORY_FILE):
-                with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
-                    raw = json.load(f)
-                with self.lock:
-                    for domain, ip_map in raw.items():
-                        if not isinstance(ip_map, dict):
-                            continue
-                        cleaned_map = {}
-                        for ik, pts in ip_map.items():
-                            if not isinstance(pts, list):
-                                continue
-                            raw_ip = ik[3:] if ik.startswith('ip:') else ik
-                            if self._is_invalid_ip(raw_ip):
-                                skipped_ips += 1
-                                continue
-                            cleaned = [[int(ts), int(v)] for ts, v in pts if ts >= cutoff]
-                            if cleaned:
-                                cleaned_map[ik] = cleaned
-                                loaded_ips += 1
-                        if cleaned_map:
-                            self._data[domain] = cleaned_map
-                            loaded_domains += 1
-            
-            if skipped_ips:
-                cprint(f"[HistoryDB] 已自动过滤 {skipped_ips} 个无效IP记录（[::]、127.0.0.1等）", 'info')
-            cprint(f"[HistoryDB] 加载完成：{loaded_domains} 个域名，{loaded_ips} 个IP key", 'info')
-            self._dirty_domains.clear()
-            
+                        cprint(f"[HistoryDB] 已清理append文件", 'info')
+                except Exception as e:
+                    cprint(f"[HistoryDB] NumPy加载失败，回退到JSON模式: {e}", 'error')
+                    self._load_json_fallback(cutoff)
+            else:
+                cprint(f"[HistoryDB] 未发现 history.npz，使用JSON模式加载...", 'info')
+                self._load_json_fallback(cutoff)
+                cprint(f"[HistoryDB] JSON加载完成，转换为NumPy格式...", 'info')
+                self._convert_json_to_numpy()
+                self._save_numpy()
+                cprint(f"[HistoryDB] NumPy转换并保存完成", 'info')
+
+            with self.lock:
+                total_domains = len(self._numpy_data)
+                total_ips = sum(len(ip_map) for ip_map in self._numpy_data.values())
+            cprint(f"[HistoryDB] 初始化完成：{total_domains} 个域名，{total_ips} 个IP key", 'info')
+
         except Exception as e:
             cprint(f"[HistoryDB] 加载失败: {e}", 'error')
+
+    def _load_json_fallback(self, cutoff):
+        """回退到 JSON 格式加载（兼容无 NumPy 文件时）"""
+        loaded_domains = loaded_ips = skipped_ips = 0
+        if os.path.exists(HISTORY_FILE):
+            with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+                raw = json.load(f)
+            with self.lock:
+                for domain, ip_map in raw.items():
+                    if not isinstance(ip_map, dict):
+                        continue
+                    cleaned_map = {}
+                    for ik, pts in ip_map.items():
+                        if not isinstance(pts, list):
+                            continue
+                        raw_ip = ik[3:] if ik.startswith('ip:') else ik
+                        if self._is_invalid_ip(raw_ip):
+                            skipped_ips += 1
+                            continue
+                        cleaned = [[int(ts), int(v)] for ts, v in pts if ts >= cutoff]
+                        if cleaned:
+                            cleaned_map[ik] = cleaned
+                            loaded_ips += 1
+                    if cleaned_map:
+                        self._data[domain] = cleaned_map
+                        loaded_domains += 1
+        if skipped_ips:
+            cprint(f"[HistoryDB] 已自动过滤 {skipped_ips} 个无效IP记录", 'info')
+        cprint(f"[HistoryDB] JSON加载完成：{loaded_domains} 个域名，{loaded_ips} 个IP key", 'info')
+        self._dirty_domains.clear()
+
+    def _convert_json_to_numpy(self):
+        """将 JSON 格式数据转换为 NumPy 格式"""
+        with self.lock:
+            for domain, ip_map in self._data.items():
+                for ik, pts in ip_map.items():
+                    if not pts:
+                        continue
+                    self._ensure_numpy(domain, ik)
+                    ts_arr = np.array([p[0] for p in pts], dtype=np.int32)
+                    v_arr = np.array([p[1] for p in pts], dtype=np.int8)
+                    self._numpy_data[domain][ik]['ts'] = ts_arr
+                    self._numpy_data[domain][ik]['v'] = v_arr
+            self._numpy_loaded = True
+
+    def export_to_json(self, json_file):
+        """导出 NumPy 数据到 JSON 文件（用于备份或查看）"""
+        try:
+            with self.lock:
+                data = {}
+                for domain, ip_map in self._numpy_data.items():
+                    data[domain] = {}
+                    for ik, d in ip_map.items():
+                        ts_arr = d['ts']
+                        v_arr = d['v']
+                        pts = [[int(ts), int(v)] for ts, v in zip(ts_arr, v_arr)]
+                        data[domain][ik] = pts
+            with open(json_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, separators=(',', ':'))
+            cprint(f"[HistoryDB] 导出JSON完成: {json_file}", 'info')
+        except Exception as e:
+            cprint(f"[HistoryDB] 导出JSON失败: {e}", 'error')
 
 hdb = HistoryDB()
 
