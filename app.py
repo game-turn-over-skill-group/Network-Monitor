@@ -567,7 +567,7 @@ class TrackerDB:
             # 立刻 异步保存 data.json
             self._save_async()
 
-    def update_status(self, domain, ip, status, latency, check_time=None):
+    def update_status(self, domain, ip, status, latency, check_time=None, write_history=True):
         with self.lock:
             if domain in self.trackers:
                 ip_obj = self._ip_map.get((domain, ip))
@@ -586,7 +586,8 @@ class TrackerDB:
                         self._active_ips.add((domain, ip))
                     else:
                         self._active_ips.discard((domain, ip))
-                self._push_history(domain, ip, status)
+                if write_history:
+                    self._push_history(domain, ip, status)
                 self._recalc()
                 self._clear_uptime_cache(domain)
                 # 标记tracker脏，由定时保存线程在（自定义）比如：120秒后 统一更新 data.json
@@ -3748,14 +3749,13 @@ def _resolve_and_update(name, domain, port, protocol):
 
 # ==================== 网络探针 ====================
 # 双重网络健康判断：
-#   方案A（探针）：后台定期 TCP 连接 8.8.8.8:53，维护 _probe_ok 状态
-#   方案B（失败率）：monitor_loop 每轮统计，≥90% 失败视为本地网络异常
-# 两种方案任一触发，即认定本地网络异常，跳过本轮历史写入
-_probe_ok    = True   # 探针当前状态（True=可达，False=不可达）
-_probe_ok_v4 = True   # IPv4 探针状态
+#   方案A（探针）：后台定期探测，维护 _probe_ok_v4/_probe_ok_v6 状态
+#   方案B（失败率）：检查 check_interval 秒内的失败率
+# 两种方案任一触发，即认定本地网络异常，跳过本次历史写入
+_probe_ok_v4 = None   # IPv4 探针状态（None=未配置，True/False=有结果）
 _probe_ok_v6 = None   # IPv6 探针状态（None=未配置，True/False=有结果）
 _probe_lock  = threading.Lock()
-_net_bad     = False  # 网络故障标志，由 monitor_loop 每轮更新
+_net_bad     = False  # 网络故障标志（全局失败率超阈值）
 _net_bad_lock = threading.Lock()
 _probe_details = {}   # 每个探针IP的最后探测结果 {ip: {'ok': bool, 'latency': int_or_-1, 'version': 'ipv4'/'ipv6'}}
 
@@ -3907,10 +3907,10 @@ def _probe_loop():
     - 周期：从 CONFIG['probe_interval'] 读取（默认 1s）
     - 模式：从 CONFIG['probe_mode'] 读取（icmp 或 tcp）
     - 每组中任一可达即认为该栈正常
-    - _probe_ok = IPv4 可达（向后兼容，monitor_loop 用此判断是否丢弃本轮）
+    - _probe_ok_v4 = IPv4 可达（用于判断是否丢弃IPv4探测的历史写入）
     - _probe_ok_v6 = IPv6 可达 / None（未配置）
     """
-    global _probe_ok, _probe_ok_v4, _probe_ok_v6, _probe_details
+    global _probe_ok_v4, _probe_ok_v6, _probe_details
     _warned_v4 = False
     _warned_v6 = False
     while True:
@@ -3937,9 +3937,10 @@ def _probe_loop():
         details = {}
 
         # ── IPv4 探测（并行执行）───────────────────────────────────────────
-        v4_reachable = False
+        v4_reachable = None  # None=未配置
         v4_hit = ''
         if IPV4_TARGETS:
+            v4_reachable = False
             with ThreadPoolExecutor(max_workers=len(IPV4_TARGETS)) as executor:
                 futures = {executor.submit(_probe_one, host, port, PROBE_TIMEOUT, PROBE_MODE): (host, port, ver)
                           for host, port, ver in IPV4_TARGETS}
@@ -3955,10 +3956,11 @@ def _probe_loop():
                         v4_hit = f"{host}:{port}"
 
         # ── IPv6 探测（并行执行）─────────────────────────────────────────────
+        v6_reachable = None  # None=未配置
+        v6_hit = ''
+        v6_errors = []
         if IPV6_TARGETS:
             v6_reachable = False
-            v6_hit = ''
-            v6_errors = []
             with ThreadPoolExecutor(max_workers=len(IPV6_TARGETS)) as executor:
                 futures = {executor.submit(_probe_one, host, port, PROBE_TIMEOUT, PROBE_MODE): (host, port, ver)
                           for host, port, ver in IPV6_TARGETS}
@@ -3974,11 +3976,8 @@ def _probe_loop():
                         v6_hit = f"{host}:{port}"
                     elif not ok and err:
                         v6_errors.append(f"{host}: {err}")
-        else:
-            v6_reachable = None  # 未配置，不参与判断
 
         with _probe_lock:
-            _probe_ok    = v4_reachable
             _probe_ok_v4 = v4_reachable
             _probe_ok_v6 = v6_reachable
             _probe_details = details
@@ -4024,7 +4023,7 @@ def _update_health_status():
 
         # 重新计算失败率
         threshold = CONFIG.get('probe_fail_threshold', 30) / 100.0
-        window_sec = CONFIG.get('check_interval', 30)
+        max_age_sec = CONFIG.get('check_interval', 30)  # 只统计最近30秒内探测过的IP
 
         total = 0
         fail = 0
@@ -4037,7 +4036,6 @@ def _update_health_status():
                 # 二次确认：如果 IP 被暂停或移除（理论上不应出现在活跃集中），跳过
                 if ip_obj.get('removed') or ip_obj.get('paused'):
                     continue
-                total += 1
                 # 优先使用数值时间戳 last_check_ts，避免重复转换
                 last_ts = ip_obj.get('last_check_ts')
                 if last_ts is None:
@@ -4050,12 +4048,15 @@ def _update_health_status():
                             continue
                     else:
                         continue
-                if now - last_ts > window_sec:
+                # 只统计最近30秒内探测过的IP（防止才启动的时候上一次的故障被重复统计）
+                if now - last_ts > max_age_sec:
                     continue
+                total += 1
                 if ip_obj.get('status') == 'offline':
                     fail += 1
 
         net_bad = False
+        fail_rate = None
         if total >= 5:
             fail_rate = fail / total
             net_bad = (fail_rate >= threshold)
@@ -4071,8 +4072,10 @@ def _update_health_status():
         else:
             # 样本不足时，保持之前的 net_bad 状态（不清除）
             net_bad = _health_cache.get('net_bad', False)
+            fail_rate = _health_cache.get('fail_rate')
 
         _health_cache['net_bad'] = net_bad
+        _health_cache['fail_rate'] = fail_rate
         _health_cache['last_update'] = now
 
         # 同时更新全局 _net_bad（供其他地方使用）
@@ -4121,7 +4124,8 @@ def _get_probe_net_status(ip_str: str):
     with _probe_lock:
         probe_v4_ok = _probe_ok_v4
         probe_v6_ok = _probe_ok_v6
-    if ver == 'ipv4' and not probe_v4_ok:
+    # 只有当探针状态明确为 False 时才跳过（None 表示未配置，不跳过）
+    if ver == 'ipv4' and probe_v4_ok is False:
         return True, 'IPv4探针不可达'
     if ver == 'ipv6' and probe_v6_ok is False:
         return True, 'IPv6探针不可达'
@@ -4278,7 +4282,7 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
 
             # ── 写历史（探针正常才写）───────────────────────────
             if not skip_net2:
-                db.update_status(domain, ip, status, lat, check_time)
+                db.update_status(domain, ip, status, lat, check_time, write_history=True)
                 # 日志
                 lat_s = f"{lat}ms" if lat >= 0 else "N/A"
                 proto_s = protocol.upper()
@@ -4310,7 +4314,7 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                     _geo_executor.submit(_async_geo_update, domain, ip)
             else:
                 # 网络故障，只更新状态不写历史
-                db.update_status(domain, ip, status, lat, check_time)
+                db.update_status(domain, ip, status, lat, check_time, write_history=False)
                 cprint(f"[跳过历史] {domain}({ip}) 探测完成但探针不可达({net_reason2})，历史不计入", 'debug')
 
         except Exception as e:
@@ -5121,15 +5125,16 @@ def api_whoami():
 def api_stats():
     s = db.get_stats()
     with _probe_lock:
-        probe_ok    = _probe_ok
         net_bad     = _net_bad
         probe_v4_ok = _probe_ok_v4
         probe_v6_ok = _probe_ok_v6
-    s['net_probe_ok']    = probe_ok
-    s['net_probe_v4_ok'] = probe_v4_ok
-    s['net_probe_v6_ok'] = probe_v6_ok   # None = IPv6 未配置
-    s['net_healthy']     = probe_ok and not net_bad
+    s['net_probe_v4_ok'] = probe_v4_ok   # None=未配置, True/False=有结果
+    s['net_probe_v6_ok'] = probe_v6_ok   # None=未配置, True/False=有结果
+    s['net_healthy']     = not net_bad   # True=全局网络正常（失败率未超阈值）
     s['probe_details']   = _probe_details  # {ip: {ok, latency, version}}
+    # 从缓存获取失败率
+    with _health_cache_lock:
+        s['net_fail_rate'] = _health_cache.get('fail_rate')
     today = datetime.now().strftime('%Y-%m-%d')
     logs = db.get_logs(limit=5000)
     s['today_alerts'] = sum(

@@ -1600,11 +1600,13 @@
                         <!-- 底部状态 -->
                         <div style="border-top:1px solid var(--glass-border);padding:4px;">
                             <div style="display:flex;justify-content:space-between;align-items:center;height:100%;">
-                                <!-- 状态图标和文字 -->
+                                <!-- 状态图标和文字（显示故障率） -->
                                 <div style="flex:1;text-align:center;">
                                     <span style="display:inline-flex;align-items:center;gap:2px;" :style="{color: stats.net_healthy ? 'var(--ok)' : 'var(--err)' }">
                                         <span style="font-size:.75rem;">{{ stats.net_healthy ? '✔' : '✗' }}</span>
-                                        <span style="font-size:.64rem;font-weight:600;">{{ stats.net_healthy ? t('stats.netOk') : t('stats.netBad') }}</span>
+                                        <span style="font-size:.64rem;font-weight:600;">
+                                            {{ typeof stats.net_fail_rate === 'number' ? (stats.net_fail_rate * 100).toFixed(1) + '%' : (stats.net_healthy ? t('stats.netOk') : t('stats.netBad')) }}
+                                        </span>
                                     </span>
                                 </div>
                                 <!-- IPv4状态 -->
