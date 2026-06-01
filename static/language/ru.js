@@ -47,7 +47,7 @@ window.__i18n_ru = {
   monitor: {
     title: 'Список мониторинга',
     domain: 'Домен',
-    ip: 'IP-адрес',
+    ip: 'Домен / IP-адрес',
     country: 'Страна',
     isp: 'Провайдер',
     status: 'Статус',
