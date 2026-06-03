@@ -3763,7 +3763,7 @@ _probe_details = {}   # 每个探针IP的最后探测结果 {ip: {'ok': bool, 'l
 _health_cache = {
     'last_update': 0,
     'net_bad': False,
-    'fail_rate': 0.0
+    'fail_rate': 0.0  # 初始值是0.0（0%）
 }
 _health_cache_lock = threading.Lock()
 HEALTH_CACHE_TTL = 1   # 缓存有效期 1 秒，可调
@@ -4064,8 +4064,8 @@ def _update_health_status():
             # 可选：打印状态变化（避免刷屏）
             if net_bad != _health_cache.get('net_bad', False):
                 if net_bad:
-                    cprint(f"[实时健康] 网络故障触发：失败率 {fail_rate*100:.1f}% ≥ {threshold*100:.0f}%", 'error')
-                    db.add_log(f"[实时健康] 网络故障触发：失败率 {fail_rate*100:.1f}% ≥ {threshold*100:.0f}%", 'error')
+                    cprint(f"[实时健康] 网络故障触发：失败率 {fail_rate*100:.1f}% ≥ {threshold*100:.0f}%", 'info')
+                    db.add_log(f"[实时健康] 网络故障触发：失败率 {fail_rate*100:.1f}% ≥ {threshold*100:.0f}%", 'info')
                 else:
                     cprint(f"[实时健康] 网络恢复：失败率降至 {fail_rate*100:.1f}% < {threshold*100:.0f}%", 'info')
                     db.add_log(f"[实时健康] 网络恢复：失败率降至 {fail_rate*100:.1f}% < {threshold*100:.0f}%", 'info')
@@ -4115,7 +4115,7 @@ def _ip_ver(ip_str: str) -> str:
         return 'ipv4'
 
 def _get_probe_net_status(ip_str: str):
-    """返回 (skip: bool, reason: str)，True=应跳过本次探测（网络异常）"""
+    """返回 (skip_history: bool, reason: str)，True=应跳过写入历史（网络异常），但继续探测"""
     ver = _ip_ver(ip_str)
     # 1. 实时整体健康检查（基于失败率）
     if _update_health_status():
@@ -4177,16 +4177,13 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                 stop_event.wait(timeout=next_wait)
                 continue
 
-            # ── 探测前检查网络状态 ──────────────────────────────
+            # ── 探测前检查网络状态（记录状态，但不跳过探测）───────
             skip_net, net_reason = _get_probe_net_status(ip)
-            if skip_net:
-                if not _warned_net:
-                    cprint(f"[跳过探测] {domain}({ip}) 网络异常: {net_reason}", 'debug')
-                    _warned_net = True
-                next_wait = CONFIG.get('check_interval', 30)
-                stop_event.wait(timeout=next_wait)
-                continue
-            if _warned_net:
+            if skip_net and not _warned_net:
+                cprint(f"[网络异常] {domain}({ip}) {net_reason}，继续探测但跳过历史写入", 'debug')
+                _warned_net = True
+            elif not skip_net and _warned_net:
+                cprint(f"[网络恢复] {domain}({ip}) 网络已恢复正常", 'debug')
                 _warned_net = False
 
             # ── 实际探测（不再做立即重试）────────────────────────
