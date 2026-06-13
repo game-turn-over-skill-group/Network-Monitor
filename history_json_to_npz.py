@@ -17,6 +17,9 @@ import json
 import time
 import numpy as np
 
+# 切换到脚本所在目录，确保双击运行时能找到正确的文件
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 HISTORY_JSON = 'history.json'
 HISTORY_NUMPY = 'history.npz'
 
@@ -150,10 +153,13 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         if sys.argv[1] == '--stats':
             print_stats()
+            input("\n按回车键退出...")
             sys.exit(0)
         elif sys.argv[1] in ('--help', '-h'):
             print(__doc__)
+            input("\n按回车键退出...")
             sys.exit(0)
 
     success = convert()
+    input("\n按回车键退出...")
     sys.exit(0 if success else 1)
