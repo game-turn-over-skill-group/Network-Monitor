@@ -108,7 +108,7 @@ DEFAULT_CONFIG = {
                                        # 本地内网/http测试时设为 False 即可，不影响功能
     # ── 网络探针与故障检测 ──
     'probe_fail_threshold': 30,        # 本轮失败率达到多少%触发网络异常（默认30%）
-    'probe_timeout': 5,                # 探针超时（秒），默认5s
+    'probe_timeout': 5.0,              # 探针超时（秒），支持小数如 0.5s
     'probe_interval': 1,               # 探测周期（秒），默认1秒
     'probe_mode': 'icmp',              # 探测模式：icmp（ICMP ping）| tcp（TCP DNS探测）
     'probe_ipv4_targets': [            # IPv4 探针目标列表（任一可达即认为 IPv4 正常）
@@ -3606,8 +3606,13 @@ def _tcp_probe_recv_exact(sock, n, timeout=1.0):
             return None
     return data
 
-def _tcp_probe_once(sock):
-    """发送 DNS 查询并接收响应，返回 RTT(毫秒) 或 None"""
+def _tcp_probe_once(sock, timeout=1.0):
+    """发送 DNS 查询并接收响应，返回 RTT(毫秒) 或 None
+    
+    参数:
+        sock: TCP socket（非阻塞模式）
+        timeout: 接收响应超时时间（秒），默认1.0秒
+    """
     try:
         # TCP DNS：2字节长度 + 报文
         msg = struct.pack('!H', len(_PROBE_DNS_QUERY)) + _PROBE_DNS_QUERY
@@ -3615,14 +3620,14 @@ def _tcp_probe_once(sock):
         send_time = time.time()
 
         # 先读 2 字节长度
-        len_data = _tcp_probe_recv_exact(sock, 2)
+        len_data = _tcp_probe_recv_exact(sock, 2, timeout)
         if len_data is None:
             return None
         pkt_len = struct.unpack('!H', len_data)[0]
         if pkt_len < 12:  # DNS 头部至少 12 字节
             return None
         # 读取剩余报文
-        pkt = _tcp_probe_recv_exact(sock, pkt_len)
+        pkt = _tcp_probe_recv_exact(sock, pkt_len, timeout)
         if pkt is None:
             return None
         rtt = (time.time() - send_time) * 1000
@@ -3659,7 +3664,8 @@ def tcp_probe(host, port=53, timeout=5, probe_timeout=1.0):
     if sock is None:
         return False, -1, "连接失败", None
     
-    rtt = _tcp_probe_once(sock)
+    # 使用 probe_timeout 作为接收响应超时
+    rtt = _tcp_probe_once(sock, probe_timeout)
     if rtt is not None:
         return True, rtt, None, sock
     else:
@@ -3831,7 +3837,7 @@ def _probe_one_tcp(host, port=53, timeout=5):
     
     if sock:
         # 使用已有连接
-        rtt = _tcp_probe_once(sock)
+        rtt = _tcp_probe_once(sock, timeout)  # 传递超时参数
         if rtt is not None:
             return True, rtt, None
         # 连接失败，关闭并重新建立
@@ -3849,7 +3855,8 @@ def _probe_one_tcp(host, port=53, timeout=5):
     if sock is None:
         return False, -1, "连接失败"
     
-    rtt = _tcp_probe_once(sock)
+    # 使用传入的超时参数（探针接收响应超时）
+    rtt = _tcp_probe_once(sock, timeout)
     if rtt is not None:
         with _probe_tcp_lock:
             _probe_tcp_sockets[cache_key] = sock
@@ -3916,7 +3923,7 @@ def _probe_loop():
     while True:
         # 从配置读取参数
         PROBE_INTERVAL = float(CONFIG.get('probe_interval', 1))
-        PROBE_TIMEOUT  = int(CONFIG.get('probe_timeout', 5))
+        PROBE_TIMEOUT  = float(CONFIG.get('probe_timeout', 5.0))  # 支持小数超时
         PROBE_MODE     = CONFIG.get('probe_mode', 'icmp')
 
         # 每轮从 CONFIG 动态读取目标列表，支持运行时热更新
@@ -4115,21 +4122,30 @@ def _ip_ver(ip_str: str) -> str:
         return 'ipv4'
 
 def _get_probe_net_status(ip_str: str):
-    """返回 (skip_history: bool, reason: str)，True=应跳过写入历史（网络异常），但继续探测"""
+    """返回 (skip_probe: bool, skip_history: bool, reason: str)
+    - skip_probe: True = 完全跳过探测（不发包），False = 继续探测
+    - skip_history: True = 跳过写入历史，False = 正常写入
+    """
     ver = _ip_ver(ip_str)
-    # 1. 实时整体健康检查（基于失败率）
-    if _update_health_status():
-        return True, '全局网络故障（失败率超阈值）'
-    # 2. 原探针检查
+    
+    # 1. 探针状态检查 - 区分 IPv4/IPv6，探针异常或未就绪时完全跳过探测
     with _probe_lock:
         probe_v4_ok = _probe_ok_v4
         probe_v6_ok = _probe_ok_v6
-    # 只有当探针状态明确为 False 时才跳过（None 表示未配置，不跳过）
-    if ver == 'ipv4' and probe_v4_ok is False:
-        return True, 'IPv4探针不可达'
-    if ver == 'ipv6' and probe_v6_ok is False:
-        return True, 'IPv6探针不可达'
-    return False, ''
+    
+    # IPv4 探针未就绪或异常 → 跳过 IPv4 IP 的探测和写入
+    if ver == 'ipv4' and probe_v4_ok is not True:  # None 或 False 都跳过
+        return True, True, 'IPv4探针不可达'
+    # IPv6 探针未就绪或异常 → 跳过 IPv6 IP 的探测和写入
+    if ver == 'ipv6' and probe_v6_ok is not True:  # None 或 False 都跳过
+        return True, True, 'IPv6探针不可达'
+    
+    # 2. 实时整体健康检查（基于失败率）- 只跳过写入，不跳过探测
+    if _update_health_status():
+        return False, True, '全局网络故障（失败率超阈值）'
+    
+    # 正常情况
+    return False, False, ''
 
 def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                        initial_delay: float = 0.0):
@@ -4177,12 +4193,20 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                 stop_event.wait(timeout=next_wait)
                 continue
 
-            # ── 探测前检查网络状态（记录状态，但不跳过探测）───────
-            skip_net, net_reason = _get_probe_net_status(ip)
-            if skip_net and not _warned_net:
-                cprint(f"[网络异常] {domain}({ip}) {net_reason}，继续探测但跳过历史写入", 'debug')
-                _warned_net = True
-            elif not skip_net and _warned_net:
+            # ── 探测前检查网络状态（探针异常时跳过探测，失败率超阈值时跳过写入）───────
+            skip_probe, skip_history, net_reason = _get_probe_net_status(ip)
+            
+            # 探针异常 → 完全跳过探测（不发包）
+            if skip_probe:
+                if not _warned_net:
+                    cprint(f"[网络异常] {domain}({ip}) {net_reason}，跳过本次探测", 'debug')
+                    _warned_net = True
+                # 持续异常：跳过探测，等待后继续
+                next_wait = CONFIG.get('check_interval', 30)
+                stop_event.wait(timeout=next_wait)
+                continue
+            elif _warned_net:
+                # 恢复正常
                 cprint(f"[网络恢复] {domain}({ip}) 网络已恢复正常", 'debug')
                 _warned_net = False
 
@@ -4208,7 +4232,7 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
             status = 'online' if ok else 'offline'
 
             # ── 再次检查探针（探测期间可能网络已故障） ──────────
-            skip_net2, net_reason2 = _get_probe_net_status(ip)
+            skip_probe2, skip_history2, net_reason2 = _get_probe_net_status(ip)
 
             # ── 连续失败计数 & 自动暂停 & 动态轮询等待 ──────────
             key = (domain, ip)
@@ -4231,8 +4255,8 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                     _consec_fail_count[key] = cur
                 cprint(f"[失败计数] {domain}({ip}) 当前连续失败: {cur}", 'debug')
 
-                # 自动暂停检查（仅在未跳过网络探针时）
-                if auto_pause_enabled and cur >= auto_pause_threshold and not skip_net2:
+                # 自动暂停检查（仅在未跳过写入时）
+                if auto_pause_enabled and cur >= auto_pause_threshold and not skip_history2:
                     auto_pause_persist = CONFIG.get('auto_pause_persist', False)
                     with db.lock:
                         ip_obj2 = db._ip_map.get((domain, ip))
@@ -4267,7 +4291,7 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                         next_wait = POLLING_SEQUENCE[idx]
                     else:
                         # 固定间隔模式
-                        next_wait = int(CONFIG.get('retry_interval', 5))
+                        next_wait = float(CONFIG.get('retry_interval', 5.0))  # 支持小数
                     cprint(f"[下次等待] {domain}({ip}) 失败次数 {cur}，等待 {next_wait} 秒", 'debug')
 
             # 防御：确保等待时间至少为 1 秒，避免疯狂循环
@@ -4277,8 +4301,8 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
 
             check_time = datetime.now().isoformat()
 
-            # ── 写历史（探针正常才写）───────────────────────────
-            if not skip_net2:
+            # ── 写历史（探针正常且失败率未超阈值才写）───────────────────────────
+            if not skip_history2:
                 db.update_status(domain, ip, status, lat, check_time, write_history=True)
                 # 日志
                 lat_s = f"{lat}ms" if lat >= 0 else "N/A"
