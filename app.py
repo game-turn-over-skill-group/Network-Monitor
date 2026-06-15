@@ -1268,6 +1268,79 @@ class TrackerDB:
         history.json 自包含 domain->IP 归属，已移除IP的历史保留用于域名统计。"""
         hdb._gc()
         cprint("[hdb] 启动GC完成", 'debug')
+        # 从 hdb 更新 last_check_ts（hdb 包含最新的探测记录）
+        self._sync_last_check_from_hdb()
+
+    def _sync_last_check_from_hdb(self):
+        """从 history DB 同步每个IP的最新探测时间戳到 data.json 的 last_check_ts"""
+        updated = 0
+        try:
+            # 先检查 hdb 是否已加载
+            if not hdb._numpy_loaded:
+                msg = f"[sync] hdb 尚未加载完成，跳过同步"
+                cprint(msg, 'debug')
+                db.add_log(msg, 'debug')
+                return
+            
+            msg = f"[sync] 开始同步 last_check_ts，trackers 数量: {len(self.trackers)}"
+            cprint(msg, 'debug')
+            db.add_log(msg, 'debug')
+            
+            # 使用独立的锁访问 hdb
+            with hdb.lock:
+                # 先收集需要更新的数据，避免在迭代时修改
+                to_update = []
+                for domain, tracker in self.trackers.items():
+                    ips = tracker.get('ips', [])
+                    for ip_obj in ips:
+                        ip = ip_obj.get('ip')
+                        if not ip:
+                            continue
+                        ip_key = hdb._key_ip(ip)
+                        # 检查 hdb 中是否有该数据
+                        if domain in hdb._numpy_data:
+                            domain_data = hdb._numpy_data[domain]
+                            if ip_key in domain_data:
+                                ts_arr = domain_data[ip_key].get('ts')
+                                if ts_arr is not None and len(ts_arr) > 0:
+                                    latest_ts = int(ts_arr[-1])
+                                    current_ts = int(ip_obj.get('last_check_ts', 0))
+                                    if latest_ts > current_ts:
+                                        to_update.append((domain, ip, latest_ts))
+            
+            # 在独立的块中更新数据
+            if to_update:
+                with self.lock:
+                    for domain, ip, latest_ts in to_update:
+                        # 更新 tracker 中的 IP 对象
+                        tracker = self.trackers.get(domain)
+                        if tracker:
+                            for ip_obj in tracker.get('ips', []):
+                                if ip_obj.get('ip') == ip:
+                                    ip_obj['last_check_ts'] = latest_ts
+                                    # 更新 _ip_map
+                                    if (domain, ip) in self._ip_map:
+                                        self._ip_map[(domain, ip)]['last_check_ts'] = latest_ts
+                                    updated += 1
+                                    break
+            
+            if updated > 0:
+                msg = f"[sync] 从 hdb 同步 {updated} 个 IP 的 last_check_ts"
+                cprint(msg, 'debug')
+                db.add_log(msg, 'debug')
+            else:
+                msg = f"[sync] 没有需要同步的 IP last_check_ts"
+                cprint(msg, 'debug')
+                db.add_log(msg, 'debug')
+                
+        except Exception as e:
+            import traceback
+            msg = f"[sync] 同步 last_check_ts 失败: {e}"
+            cprint(msg, 'error')
+            db.add_log(msg, 'error')
+            msg = f"[sync] 详细错误: {traceback.format_exc()}"
+            cprint(msg, 'error')
+            db.add_log(msg, 'error')
 
 db = TrackerDB()
 
@@ -4068,7 +4141,7 @@ def _update_health_status():
             fail_rate = fail / total
             net_bad = (fail_rate >= threshold)
             _health_cache['fail_rate'] = fail_rate
-            # 可选：打印状态变化（避免刷屏）
+            # 状态变化时打印日志
             if net_bad != _health_cache.get('net_bad', False):
                 if net_bad:
                     cprint(f"[实时健康] 网络故障触发：失败率 {fail_rate*100:.1f}% ≥ {threshold*100:.0f}%", 'info')
@@ -4192,6 +4265,31 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                 next_wait = CONFIG.get('check_interval', 30)
                 stop_event.wait(timeout=next_wait)
                 continue
+
+            # ── 检查上次探测时间，避免重启后立即重复探测 ──────────────────
+            check_interval = CONFIG.get('check_interval', 30)
+            last_ts = None
+            last_status = None
+            try:
+                # 使用非阻塞方式获取上次探测时间和状态
+                if (domain, ip) in db._ip_map:
+                    ip_info = db._ip_map[(domain, ip)]
+                    last_ts = ip_info.get('last_check_ts')
+                    last_status = ip_info.get('status')
+            except Exception:
+                pass
+            
+            if last_ts:
+                elapsed = time.time() - last_ts
+                # 如果上次状态是正常的（online），才进行节流
+                # 如果上次状态是异常的（offline），应该立即探测判断是否恢复
+                if elapsed < check_interval and last_status == 'online':
+                    # 距离上次正常探测太近，等待剩余时间
+                    wait_time = check_interval - elapsed
+                    cprint(f"[探测节流] {domain}({ip}) 上次正常探测仅 {elapsed:.1f}s，等待 {wait_time:.1f}s", 'debug')
+                    db.add_log(f"[探测节流] {domain}({ip}) 上次正常探测仅 {elapsed:.1f}s，等待 {wait_time:.1f}s", 'debug')  # 临时用于web查看，可备注
+                    stop_event.wait(timeout=wait_time)
+                    continue
 
             # ── 探测前检查网络状态（探针异常时跳过探测，失败率超阈值时跳过写入）───────
             skip_probe, skip_history, net_reason = _get_probe_net_status(ip)
