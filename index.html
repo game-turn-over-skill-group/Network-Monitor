@@ -3067,6 +3067,22 @@
                             </div>
                             <div class="form-text mt-3">{{ t('config.autoPausePersistDesc') }}</div>
                         </div>
+                        <!-- 探测节流开关 -->
+                        <div class="col-md-4">
+                            <label class="form-label">
+                                <i class="bi bi-gauge-high me-1"></i>
+                                <span style="font-weight:600;">⏱</span>
+                                <span class="ms-1">{{ t('config.probeThrottleLabel') }}</span>
+                            </label>
+                            <div class="form-check form-switch mt-0" style="min-height: 38px; display: flex; align-items: center;">
+                                <input class="form-check-input" type="checkbox" v-model="cfg.probe_throttle_enabled"
+                                       @change="saveCfg" id="probeThrottleSwitch">
+                                <label class="form-check-label ms-2" for="probeThrottleSwitch" style="cursor:pointer;">
+                                    {{ cfg.probe_throttle_enabled ? t('config.probeThrottleEnabled') : t('config.probeThrottleDisabled') }}
+                                </label>
+                            </div>
+                            <div class="form-text mt-3">{{ t('config.probeThrottleDesc') }}</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3395,6 +3411,7 @@ createApp({
             http_proxy_enabled: false,
             udp_proxy_enabled: false,
             probe_fail_threshold: 50,
+            probe_throttle_enabled: false,
             probe_timeout: 5,
             probe_interval: 1,
             probe_mode: 'icmp',
@@ -4104,6 +4121,7 @@ createApp({
                     http_proxy_enabled: cfg.value.http_proxy_enabled,
                     udp_proxy_enabled: cfg.value.udp_proxy_enabled,
                     probe_fail_threshold: cfg.value.probe_fail_threshold ?? 50,
+                    probe_throttle_enabled: cfg.value.probe_throttle_enabled ?? false,
                     probe_timeout: cfg.value.probe_timeout || 5,
                     probe_interval: cfg.value.probe_interval || 1,
                     probe_mode: cfg.value.probe_mode || 'icmp',

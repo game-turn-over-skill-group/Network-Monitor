@@ -107,6 +107,7 @@ DEFAULT_CONFIG = {
                                        # 注意：设为 True 前必须确认请求确实来自CF（否则可伪造IP绕过限流）
                                        # 本地内网/http测试时设为 False 即可，不影响功能
     # ── 网络探针与故障检测 ──
+    'probe_throttle_enabled': False,   # 探测节流开关：重启后避免30秒内重复探测（默认：False）
     'probe_fail_threshold': 30,        # 本轮失败率达到多少%触发网络异常（默认30%）
     'probe_timeout': 5.0,              # 探针超时（秒），支持小数如 0.5s
     'probe_interval': 1,               # 探测周期（秒），默认1秒
@@ -3779,31 +3780,37 @@ def _is_proxy_unavail(err: str) -> bool:
 
 def check_ip(domain, ip_info, retry=True, update_db=True):
     ip   = ip_info['ip']
-    with db.lock:
-        td       = db.trackers.get(domain, {})
-        port     = td.get('port', 80)
-        protocol = td.get('protocol', 'tcp')
-    fn = udp_ping if protocol == 'udp' else tcp_ping
-    ok, lat, err = fn(ip, port)
-    # 代理不可用 → 跳过重试和状态更新，保留上次状态不变
-    if not ok and _is_proxy_unavail(err):
-        return 'skipped', lat, err
-    if not ok and retry:
-        try:
-            wait = get_retry_wait(domain)
-            cprint(f"首次失败 {domain}:{port} ({ip}) 等待{wait}s重试 | {err}", 'debug')
-            time.sleep(wait)
-            ok, lat, err = fn(ip, port)
-            # 重试后再次判断
-            if not ok and _is_proxy_unavail(err):
-                return 'skipped', lat, err
-        except ValueError:
-            # 重试已禁用，直接返回失败状态
-            pass
-    status = 'online' if ok else 'offline'
-    if update_db:
-        db.update_status(domain, ip, status, lat)
-    return status, lat, err
+    # 设置手动探测标记，5秒内跳过节流检查
+    _manual_check_pending[(domain, ip)] = time.time()
+    try:
+        with db.lock:
+            td       = db.trackers.get(domain, {})
+            port     = td.get('port', 80)
+            protocol = td.get('protocol', 'tcp')
+        fn = udp_ping if protocol == 'udp' else tcp_ping
+        ok, lat, err = fn(ip, port)
+        # 代理不可用 → 跳过重试和状态更新，保留上次状态不变
+        if not ok and _is_proxy_unavail(err):
+            return 'skipped', lat, err
+        if not ok and retry:
+            try:
+                wait = get_retry_wait(domain)
+                cprint(f"首次失败 {domain}:{port} ({ip}) 等待{wait}s重试 | {err}", 'debug')
+                time.sleep(wait)
+                ok, lat, err = fn(ip, port)
+                # 重试后再次判断
+                if not ok and _is_proxy_unavail(err):
+                    return 'skipped', lat, err
+            except ValueError:
+                # 重试已禁用，直接返回失败状态
+                pass
+        status = 'online' if ok else 'offline'
+        if update_db:
+            db.update_status(domain, ip, status, lat)
+        return status, lat, err
+    finally:
+        # 清理手动探测标记（可选，节流逻辑会自动处理过期标记）
+        _manual_check_pending.pop((domain, ip), None)
 
 def _resolve_and_update(name, domain, port, protocol):
     """每轮检测前重新解析 DNS，更新 IP 列表（合并新IP，标记消失IP，DNS失败保留旧缓存）
@@ -4185,6 +4192,7 @@ _probe_semaphore: threading.Semaphore = None
 _probe_active_count: int = 0
 _probe_active_lock: threading.Lock = threading.Lock()
 _stats_thread_info: dict = {'active_probes': 0, 'max_probes': 120}
+_manual_check_pending: dict = {}  # 手动探测标记：{(domain, ip): timestamp}，5秒内跳过节流
 
 def _ip_ver(ip_str: str) -> str:
     """返回 IP 地址族字符串：'ipv6' 或 'ipv4'。解析失败默认视为 ipv4。"""
@@ -4267,29 +4275,46 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                 continue
 
             # ── 检查上次探测时间，避免重启后立即重复探测 ──────────────────
-            check_interval = CONFIG.get('check_interval', 30)
-            last_ts = None
-            last_status = None
-            try:
-                # 使用非阻塞方式获取上次探测时间和状态
-                if (domain, ip) in db._ip_map:
-                    ip_info = db._ip_map[(domain, ip)]
-                    last_ts = ip_info.get('last_check_ts')
-                    last_status = ip_info.get('status')
-            except Exception:
-                pass
-            
-            if last_ts:
-                elapsed = time.time() - last_ts
-                # 如果上次状态是正常的（online），才进行节流
-                # 如果上次状态是异常的（offline），应该立即探测判断是否恢复
-                if elapsed < check_interval and last_status == 'online':
-                    # 距离上次正常探测太近，等待剩余时间
-                    wait_time = check_interval - elapsed
-                    cprint(f"[探测节流] {domain}({ip}) 上次正常探测仅 {elapsed:.1f}s，等待 {wait_time:.1f}s", 'debug')
-                    db.add_log(f"[探测节流] {domain}({ip}) 上次正常探测仅 {elapsed:.1f}s，等待 {wait_time:.1f}s", 'debug')  # 临时用于web查看，可备注
-                    stop_event.wait(timeout=wait_time)
-                    continue
+            # 只有开启探测节流时才执行
+            if CONFIG.get('probe_throttle_enabled', False):
+                # 清理过期的手动探测标记（>5秒）
+                now = time.time()
+                expired_keys = [k for k, ts in _manual_check_pending.items() if now - ts > 5]
+                for k in expired_keys:
+                    _manual_check_pending.pop(k, None)
+                
+                # 检查是否是手动探测（5秒内跳过节流）
+                manual_key = (domain, ip)
+                if manual_key in _manual_check_pending:
+                    # 手动探测刚完成，跳过节流
+                    _manual_check_pending.pop(manual_key, None)
+                else:
+                    check_interval = CONFIG.get('check_interval', 30)
+                    last_ts = None
+                    last_status = None
+                    try:
+                        # 使用非阻塞方式获取上次探测时间和状态
+                        if (domain, ip) in db._ip_map:
+                            ip_info = db._ip_map[(domain, ip)]
+                            last_ts = ip_info.get('last_check_ts')
+                            last_status = ip_info.get('status')
+                    except Exception:
+                        pass
+                    
+                    if last_ts:
+                        elapsed = time.time() - last_ts
+                        # 如果上次状态是正常的（online），才进行节流
+                        # 如果上次状态是异常的（offline），应该立即探测判断是否恢复
+                        # 只有当 elapsed < check_interval 时才需要等待
+                        if elapsed < check_interval and last_status == 'online':
+                            # 距离上次正常探测太近，等待剩余时间
+                            wait_time = check_interval - elapsed
+                            # 只有当等待时间 > 0.1 秒时才等待，避免微小等待
+                            if wait_time > 0.1:
+                                cprint(f"[探测节流] {domain}({ip}) 上次正常探测仅 {elapsed:.1f}s，等待 {wait_time:.1f}s", 'debug')
+                                db.add_log(f"[探测节流] {domain}({ip}) 上次正常探测仅 {elapsed:.1f}s，等待 {wait_time:.1f}s", 'debug')
+                                stop_event.wait(timeout=wait_time)
+                                continue
 
             # ── 探测前检查网络状态（探针异常时跳过探测，失败率超阈值时跳过写入）───────
             skip_probe, skip_history, net_reason = _get_probe_net_status(ip)
