@@ -621,7 +621,8 @@ class TrackerDB:
         tcp_total = tcp_alive = tcp_offline = tcp_unknown = 0
         udp_total = udp_alive = udp_offline = udp_unknown = 0
         # 延迟统计（只统计在线且latency>0的IP）
-        lats_all = []; lats_v4 = []; lats_v6 = []; lats_tcp = []; lats_udp = []
+        lats_all = []; lats_v4_tcp = []; lats_v4_udp = []; lats_v6_tcp = []; lats_v6_udp = []
+        lats_tcp = []; lats_udp = []
         
         # 先统计已暂停的数量（需要遍历全部IP）
         for d in self.trackers.values():
@@ -673,10 +674,18 @@ class TrackerDB:
                 lat = ip_obj.get('latency', -1)
                 if lat is not None and lat > 0:
                     lats_all.append(lat)
-                    if is6: lats_v6.append(lat)
-                    else:   lats_v4.append(lat)
-                    if is_udp: lats_udp.append(lat)
-                    else:      lats_tcp.append(lat)
+                    if is_udp:
+                        lats_udp.append(lat)
+                        if is6:
+                            lats_v6_udp.append(lat)
+                        else:
+                            lats_v4_udp.append(lat)
+                    else:
+                        lats_tcp.append(lat)
+                        if is6:
+                            lats_v6_tcp.append(lat)
+                        else:
+                            lats_v4_tcp.append(lat)
             elif offline_ip:
                 offline += 1           # 累计离线IP
                 if is6:
@@ -715,11 +724,13 @@ class TrackerDB:
             'tcp_total': tcp_total, 'tcp_alive': tcp_alive, 'tcp_offline': tcp_offline, 'tcp_unknown': tcp_unknown,
             'udp_total': udp_total, 'udp_alive': udp_alive, 'udp_offline': udp_offline, 'udp_unknown': udp_unknown,
             'paused_count': paused_count,
-            'avg_latency':     _avg(lats_all),
-            'avg_latency_v4':  _avg(lats_v4),
-            'avg_latency_v6':  _avg(lats_v6),
-            'avg_latency_tcp': _avg(lats_tcp),
-            'avg_latency_udp': _avg(lats_udp),
+            'avg_latency':       _avg(lats_all),
+            'avg_latency_v4_tcp': _avg(lats_v4_tcp),
+            'avg_latency_v4_udp': _avg(lats_v4_udp),
+            'avg_latency_v6_tcp': _avg(lats_v6_tcp),
+            'avg_latency_v6_udp': _avg(lats_v6_udp),
+            'avg_latency_tcp':   _avg(lats_tcp),
+            'avg_latency_udp':   _avg(lats_udp),
         }
 
     def get_trackers(self):
@@ -1269,8 +1280,8 @@ class TrackerDB:
         history.json 自包含 domain->IP 归属，已移除IP的历史保留用于域名统计。"""
         hdb._gc()
         cprint("[hdb] 启动GC完成", 'debug')
-        # 从 hdb 更新 last_check_ts（hdb 包含最新的探测记录）
-        self._sync_last_check_from_hdb()
+        # （无需同步=受限于存盘间隔）：从 hdb 更新 last_check_ts（hdb 包含最新的探测记录）
+        # self._sync_last_check_from_hdb()
 
     def _sync_last_check_from_hdb(self):
         """从 history DB 同步每个IP的最新探测时间戳到 data.json 的 last_check_ts"""
