@@ -620,6 +620,11 @@ class TrackerDB:
         paused_count = 0   # 已暂停的监控数量（域名级或IP级）
         tcp_total = tcp_alive = tcp_offline = tcp_unknown = 0
         udp_total = udp_alive = udp_offline = udp_unknown = 0
+        # 新增：按协议和IP版本统计
+        tcp_v4_total = tcp_v4_alive = tcp_v4_offline = tcp_v4_unknown = 0
+        tcp_v6_total = tcp_v6_alive = tcp_v6_offline = tcp_v6_unknown = 0
+        udp_v4_total = udp_v4_alive = udp_v4_offline = udp_v4_unknown = 0
+        udp_v6_total = udp_v6_alive = udp_v6_offline = udp_v6_unknown = 0
         # 延迟统计（只统计在线且latency>0的IP）
         lats_all = []; lats_v4_tcp = []; lats_v4_udp = []; lats_v6_tcp = []; lats_v6_udp = []
         lats_tcp = []; lats_udp = []
@@ -698,6 +703,8 @@ class TrackerDB:
                     unknown_v6 += 1
                 else:
                     unknown_v4 += 1
+            
+            # 新增：按协议和IP版本统计
             if is_udp:
                 udp_total += 1
                 if online:
@@ -706,6 +713,25 @@ class TrackerDB:
                     udp_offline += 1
                 else:
                     udp_unknown += 1
+                
+                # UDPv4统计
+                if not is6:
+                    udp_v4_total += 1
+                    if online:
+                        udp_v4_alive += 1
+                    elif offline_ip:
+                        udp_v4_offline += 1
+                    else:
+                        udp_v4_unknown += 1
+                # UDPv6统计
+                else:
+                    udp_v6_total += 1
+                    if online:
+                        udp_v6_alive += 1
+                    elif offline_ip:
+                        udp_v6_offline += 1
+                    else:
+                        udp_v6_unknown += 1
             else:
                 tcp_total += 1
                 if online:
@@ -714,6 +740,32 @@ class TrackerDB:
                     tcp_offline += 1
                 else:
                     tcp_unknown += 1
+                
+                # TCPv4统计
+                if not is6:
+                    tcp_v4_total += 1
+                    if online:
+                        tcp_v4_alive += 1
+                    elif offline_ip:
+                        tcp_v4_offline += 1
+                    else:
+                        tcp_v4_unknown += 1
+                # TCPv6统计
+                else:
+                    tcp_v6_total += 1
+                    if online:
+                        tcp_v6_alive += 1
+                    elif offline_ip:
+                        tcp_v6_offline += 1
+                    else:
+                        tcp_v6_unknown += 1
+                        
+        # ALL统计（求和）
+        all_total = tcp_v4_total + tcp_v6_total + udp_v4_total + udp_v6_total
+        all_alive = tcp_v4_alive + tcp_v6_alive + udp_v4_alive + udp_v6_alive
+        all_offline = tcp_v4_offline + tcp_v6_offline + udp_v4_offline + udp_v6_offline
+        all_unknown = tcp_v4_unknown + tcp_v6_unknown + udp_v4_unknown + udp_v6_unknown
+        
         def _avg(lst): return round(sum(lst)/len(lst)) if lst else -1
         self.stats = {
             'total': total, 'alive': alive, 'offline': offline, 'unknown': unknown,
@@ -731,6 +783,17 @@ class TrackerDB:
             'avg_latency_v6_udp': _avg(lats_v6_udp),
             'avg_latency_tcp':   _avg(lats_tcp),
             'avg_latency_udp':   _avg(lats_udp),
+            # 新增字段
+            'tcp_v4_total': tcp_v4_total, 'tcp_v4_alive': tcp_v4_alive, 'tcp_v4_offline': tcp_v4_offline, 'tcp_v4_unknown': tcp_v4_unknown,
+            'tcp_v6_total': tcp_v6_total, 'tcp_v6_alive': tcp_v6_alive, 'tcp_v6_offline': tcp_v6_offline, 'tcp_v6_unknown': tcp_v6_unknown,
+            'udp_v4_total': udp_v4_total, 'udp_v4_alive': udp_v4_alive, 'udp_v4_offline': udp_v4_offline, 'udp_v4_unknown': udp_v4_unknown,
+            'udp_v6_total': udp_v6_total, 'udp_v6_alive': udp_v6_alive, 'udp_v6_offline': udp_v6_offline, 'udp_v6_unknown': udp_v6_unknown,
+            'all_total': all_total, 'all_alive': all_alive, 'all_offline': all_offline, 'all_unknown': all_unknown,
+            'tcp_v4_latency': _avg(lats_v4_tcp),
+            'tcp_v6_latency': _avg(lats_v6_tcp),
+            'udp_v4_latency': _avg(lats_v4_udp),
+            'udp_v6_latency': _avg(lats_v6_udp),
+            'all_latency': _avg(lats_all),
         }
 
     def get_trackers(self):
