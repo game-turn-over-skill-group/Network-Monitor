@@ -557,7 +557,7 @@
         /* 域名头行 */
         .tl-domain-row {
             display: grid;
-            grid-template-columns: minmax(240px,320px) 145px 115px 135px 100px 130px 120px 85px;
+            grid-template-columns: minmax(270px,350px) 145px 115px 135px 100px 130px 120px 85px;
             gap: 8px; align-items: center;
             padding: 6px 14px 6px 38px; cursor: pointer; border-bottom: 1px solid var(--border-subtle);
             background: var(--glass); transition: background .15s;
@@ -567,7 +567,7 @@
         .tl-domain-row.dns-error { border-left: 3px solid var(--err); }
         .tl-domain-left { display:flex; align-items:center; gap:4px; min-width:0; overflow:hidden; }
         .tl-expand-icon { color: #64748b; font-size: .7rem; flex-shrink:0; }
-        .tl-domain-name { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:260px; }
+        .tl-domain-name { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:290px; }
         .tl-domain-meta { display:contents; }
         .tl-meta-ip     { font-size:.82rem; white-space:nowrap; }
         .tl-meta-spacer { display:block; }
@@ -578,7 +578,7 @@
         /* IP 行 */
         .tl-ip-row {
             display: grid;
-            grid-template-columns: minmax(240px,320px) 145px 115px 135px 100px 130px 120px 85px;
+            grid-template-columns: minmax(270px,350px) 145px 115px 135px 100px 130px 120px 85px;
             align-items: center; gap: 8px;
             padding: 5px 14px 5px 38px;
             border-bottom: 1px solid rgba(30,50,100,.18);
@@ -589,7 +589,7 @@
         .tl-ip-row.paused  { opacity: .55; }
         .tl-ip-row.removed { opacity: .38; filter: grayscale(.5); }
         .tl-ip-row:hover { background: rgba(40,60,120,.22); }
-        .tl-ip-addr    { overflow:hidden; white-space:nowrap; display:flex; align-items:center; }
+        .tl-ip-addr    { overflow:hidden; white-space:nowrap; display:flex; align-items:center; padding-left:10px; }
         .tl-ip-status  { display:flex; align-items:center; flex-wrap:wrap; gap:2px; }
         .tl-ip-latency { display:flex; align-items:center; justify-content:center; }
         .tl-ip-geo     { overflow:hidden; display:flex; flex-direction:column; justify-content:center; align-items:flex-start; padding-left:12px; gap:2px; }
@@ -598,7 +598,7 @@
         /* IP 列标题行 */
         .tl-col-header {
             display: grid;
-            grid-template-columns: minmax(240px,320px) 145px 115px 135px 100px 130px 120px 85px;
+            grid-template-columns: minmax(270px,350px) 145px 115px 135px 100px 130px 120px 85px;
             gap: 8px;
             padding: 4px 14px 4px 38px;
             font-size: .68rem;
@@ -1394,7 +1394,7 @@
         </div>
     </div>
 
-    <div class="container-fluid p-3 p-md-4" id="main-container" :style="{maxWidth: layoutWidth+'px', margin:'0 auto'}">
+    <div class="container-fluid p-2 p-md-3" id="main-container" :style="{maxWidth: layoutWidth+'px', margin:'0 auto'}">
 
         <!-- 仪表盘 -->
         <div v-if="currentTab==='dashboard'">
@@ -1613,11 +1613,11 @@
                             <div v-if="!dashRankList.length" class="empty-st" style="padding:20px 0;"><p>暂无数据</p></div>
                             <table v-else class="table table-sm mb-0 qs-table">
                                 <thead><tr>
-                                    <th style="width:24px;">#</th>
-                                    <th>{{ t('monitor.domain') }}</th>
-                                    <th style="text-align:right;"><span style="font-size:.7rem;opacity:.6;">{{ '[' + (cfg.dashboard_stat_period||'24h') + ']' }}</span> {{ t('monitor.uptimeLbl') }}</th>
-                                    <th style="text-align:right;">{{ t('stats.offline') }}</th>
-                                    <th style="text-align:right;">{{ t('monitor.latency') }}</th>
+                                    <th style="width:24px;text-align:center;">#</th>
+                                    <th style="width:120px;">{{ t('monitor.domain') }}</th>
+                                    <th style="text-align:right;width:85px;"><span style="font-size:.7rem;opacity:.6;">{{ '[' + (cfg.dashboard_stat_period||'24h') + ']' }}</span> {{ t('monitor.uptimeLbl') }}</th>
+                                    <th style="text-align:center;width:42px;">{{ t('stats.offline') }}</th>
+                                    <th style="text-align:center;width:55px;">{{ t('monitor.latency') }}</th>
                                 </tr></thead>
                                 <tbody>
                                     <tr v-for="(item,idx) in dashRankList" :key="item.domain"
@@ -1625,17 +1625,17 @@
                                         style="cursor:pointer;"
                                         :class="{'table-active': qsFilterDomain===item.domain}"
                                         :title="qsFilterDomain===item.domain ? t('ranking.clickAgainToClear') : item.domain">
-                                        <td style="color:#64748b;font-size:.75rem;">{{ idx+1 }}</td>
+                                        <td style="color:#64748b;font-size:.75rem;text-align:center;">{{ idx+1 }}</td>
                                         <td style="max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="item.domain">{{ item.domain }}</td>
                                         <td style="text-align:right;">
                                             <span :class="item.cls" style="padding:1px 5px;border-radius:4px;font-size:.78rem;">
                                                 {{ item.uptime===null ? '?' : item.uptime.toFixed(1)+'%' }}
                                             </span>
                                         </td>
-                                        <td style="text-align:right;font-size:.78rem;">
+                                        <td style="text-align:center;font-size:.78rem;">
                                             <span :style="{color: item.fail_count>0 ? 'var(--err)' : '#64748b'}">{{ item.fail_count }}</span>
                                         </td>
-                                        <td style="text-align:right;color:#94a3b8;font-size:.78rem;">
+                                        <td style="text-align:center;color:#94a3b8;font-size:.78rem;">
                                             {{ item.avg_latency > 0 ? item.avg_latency+'ms' : '-' }}
                                         </td>
                                     </tr>
@@ -1768,7 +1768,7 @@
                                     {{ t('monitor.domain') }} <span style="font-size:.7rem;color:#64748b;">{{ qsSortIcon('domain') }}</span>
                                 </th>
                                 <!-- IP：可排序 -->
-                                <th @click="cycleQsSort('ip')" :title="qsSortKey==='ip' ? ('IP '+(qsSortDir===1?t('dash.sortAsc'):t('dash.sortDesc'))) : ('IP: '+t('dash.sortAsc')+' / '+t('dash.sortDesc'))" style="max-width:180px;width:15%;cursor:pointer;user-select:none;">
+                                <th @click="cycleQsSort('ip')" :title="qsSortKey==='ip' ? ('IP '+(qsSortDir===1?t('dash.sortAsc'):t('dash.sortDesc'))) : ('IP: '+t('dash.sortAsc')+' / '+t('dash.sortDesc'))" style="max-width:260px;width:18%;cursor:pointer;user-select:none;">
                                     {{ t('monitor.ip') }} <span style="font-size:.7rem;color:#64748b;">{{ qsSortIcon('ip') }}</span>
                                 </th>
                                 <!-- 端口：可排序 -->
@@ -1790,9 +1790,9 @@
                                 <!-- 国家 -->
                                 <th style="width:100px;">{{ t('monitor.country') }}</th>
                                 <!-- 运营商 -->
-                                <th style="width:100px;">{{ t('monitor.isp') }}</th>
+                                <th style="width:110px;text-align:left;padding-left:10px;">{{ t('monitor.isp') }}</th>
                                 <!-- 最后检查：可排序 -->
-                                <th @click="cycleQsSort('last_check')" :title="qsSortKey==='last_check' ? (t('monitor.lastCheck')+' '+(qsSortDir===1?t('dash.sortOldNew'):t('dash.sortNewOld'))) : (t('monitor.lastCheck')+': '+t('dash.sortOldNew')+' / '+t('dash.sortNewOld'))" style="width:145px;cursor:pointer;user-select:none;">
+                                <th @click="cycleQsSort('last_check')" :title="qsSortKey==='last_check' ? (t('monitor.lastCheck')+' '+(qsSortDir===1?t('dash.sortOldNew'):t('dash.sortNewOld'))) : (t('monitor.lastCheck')+': '+t('dash.sortOldNew')+' / '+t('dash.sortNewOld'))" style="width:145px;cursor:pointer;user-select:none;text-align:left;">
                                     {{ t('monitor.lastCheck') }} <span style="font-size:.7rem;color:#64748b;">{{ qsSortIcon('last_check') }}</span>
                                 </th>
                                 <!-- 状态：可排序 -->
@@ -1800,11 +1800,11 @@
                                     {{ t('monitor.status') }} <span style="font-size:.7rem;color:#64748b;">{{ qsSortIcon('status') }}</span>
                                 </th>
                                 <!-- 延迟：可排序 -->
-                                <th @click="cycleQsSort('latency')" :title="qsSortKey==='latency' ? (t('monitor.latency')+' '+(qsSortDir===1?t('dash.sortAsc'):t('dash.sortDesc'))) : (t('monitor.latency')+': '+t('dash.sortAsc')+' / '+t('dash.sortDesc'))" style="width:72px;cursor:pointer;user-select:none;text-align:right;">
+                                <th @click="cycleQsSort('latency')" :title="qsSortKey==='latency' ? (t('monitor.latency')+' '+(qsSortDir===1?t('dash.sortAsc'):t('dash.sortDesc'))) : (t('monitor.latency')+': '+t('dash.sortAsc')+' / '+t('dash.sortDesc'))" style="width:65px;cursor:pointer;user-select:none;text-align:center;">
                                     {{ t('monitor.latency') }} <span style="font-size:.7rem;color:#64748b;">{{ qsSortIcon('latency') }}</span>
                                 </th>
                                 <!-- 可用率：可排序 -->
-                                <th @click="cycleQsSort('uptime')" :title="qsSortKey==='uptime' ? (t('monitor.uptimeLbl')+' '+(qsSortDir===1?t('dash.sortAsc'):t('dash.sortDesc'))) : (t('monitor.uptimeLbl')+': '+t('dash.sortAsc')+' / '+t('dash.sortDesc'))" style="width:72px;cursor:pointer;user-select:none;text-align:right;">
+                                <th @click="cycleQsSort('uptime')" :title="qsSortKey==='uptime' ? (t('monitor.uptimeLbl')+' '+(qsSortDir===1?t('dash.sortAsc'):t('dash.sortDesc'))) : (t('monitor.uptimeLbl')+': '+t('dash.sortAsc')+' / '+t('dash.sortDesc'))" style="width:70px;cursor:pointer;user-select:none;text-align:center;">
                                     <span style="font-size:.65rem;opacity:.6;">{{ '[' + (cfg.dashboard_stat_period||'24h') + ']' }}</span> {{ t('monitor.uptimeLbl') }} <span style="font-size:.7rem;color:#64748b;">{{ qsSortIcon('uptime') }}</span>
                                 </th>
                                 <th style="width:36px;"></th>
@@ -1818,7 +1818,7 @@
                                         <span style="font-size:.82rem;" class="domain-name">{{ row.domain }}</span>
                                     </td>
                                     <!-- IP列 -->
-                                    <td class="font-monospace" style="font-size:.79rem;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="row.ip"
+                                    <td class="font-monospace" style="font-size:.79rem;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" :title="row.ip"
                                         :class="row.version==='ipv6' ? 'ipv6-addr' : 'ipv4-addr'"
                                         :style="{color: row.version==='ipv6'?'#38bdf8':'var(--ok)'}">{{ row.ip }}</td>
                                     <!-- 端口列 -->
@@ -1868,12 +1868,12 @@
                                         </template>
                                     </td>
                                     <!-- 延迟 -->
-                                    <td style="text-align:right;white-space:nowrap;">
+                                    <td style="text-align:center;white-space:nowrap;">
                                         <span v-if="row.latency>=0" :class="{'warn':row.latency>500,'err':row.latency>1500}" style="font-size:.78rem;">{{ row.latency }}ms</span>
                                         <span v-else class="text-secondary">-</span>
                                     </td>
                                     <!-- IP级可用率（badge-up框式，稍暗）-->
-                                    <td style="text-align:right;white-space:nowrap;">
+                                    <td style="text-align:center;white-space:nowrap;">
                                         <span v-if="row.ip_uptime !== null && row.ip_uptime !== undefined"
                                               class="badge-up" :class="row.paused ? 'up-yellow' : (row.rawStatus === 'offline' ? 'up-red' : (row.ip_uptime>=80 ? 'up-green' : (row.ip_uptime>=50 ? 'up-yellow' : 'up-red')))"
                                               style="font-size:.78rem;opacity:.85;">{{ row.ip_uptime.toFixed(1) }}%</span>
@@ -2029,7 +2029,7 @@
                     <div v-else class="tracker-list-wrap">
                         <!-- 列标题行 -->
                         <div class="tl-col-header">
-                            <span>{{ t('monitor.ip') }}</span>
+                            <span>{{ t('monitor.ipdomain') }}</span>
                             <span><span style="font-size:.72rem;opacity:.6;font-weight:400;margin-left:3px;">[{{ cfg.tracker_stat_period||'24h' }}]</span> {{ t('monitor.status') }} / {{ t('monitor.uptimeLbl') }}</span>
                             <span style="text-align:center;">{{ t('monitor.latency') }}</span>
                             <span style="text-align:center;">{{ t('monitor.country') }}</span>

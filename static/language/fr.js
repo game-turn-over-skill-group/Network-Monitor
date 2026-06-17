@@ -62,7 +62,8 @@ window.__i18n_fr = {
   monitor: {
     title: 'Liste de surveillance',
     domain: 'Domaine',
-    ip: 'Domaine / Adresse IP',
+    ip: 'Adresse IP',
+    ipdomain: 'Domaine / Adresse IP',
     country: 'Pays',
     isp: 'Fournisseur d\'accès internet',
     status: 'Statut',

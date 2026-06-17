@@ -62,7 +62,8 @@ window.__i18n_zh = {
   monitor: {
     title: '监控列表',
     domain: '域名',
-    ip: '域名 / IP 地址',
+    ip: 'IP 地址',
+    ipdomain: '域名 / IP 地址',
     country: '国家',
     isp: '运营商',
     status: '状态',

@@ -62,7 +62,8 @@ window.__i18n_en = {
   monitor: {
     title: 'Monitor List',
     domain: 'Domain',
-    ip: 'Domain / IP Address',
+    ip: 'IP Address',
+    ipdomain: 'Domain / IP Address',
     country: 'Country',
     isp: 'ISP',
     status: 'Status',

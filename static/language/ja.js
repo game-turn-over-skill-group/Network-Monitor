@@ -62,7 +62,8 @@ window.__i18n_ja = {
   monitor: {
     title: 'モニタリングリスト',
     domain: 'ドメイン',
-    ip: 'ドメイン / IP アドレス',
+    ip: 'IP アドレス',
+    ipdomain: 'ドメイン / IP アドレス',
     country: '国',
     isp: 'ISP',
     status: 'ステータス',

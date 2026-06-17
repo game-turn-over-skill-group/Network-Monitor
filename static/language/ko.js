@@ -62,7 +62,8 @@ window.__i18n_ko = {
   monitor: {
     title: '모니터링 목록',
     domain: '도메인',
-    ip: '도메인 / IP 주소',
+    ip: 'IP 주소',
+    ipdomain: '도메인 / IP 주소',
     country: '국가',
     isp: 'ISP',
     status: '상태',
