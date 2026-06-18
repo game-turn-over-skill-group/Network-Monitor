@@ -1405,109 +1405,60 @@
                 <div class="col-xl-5 col-lg-12 col-md-12 col-12">
                     <div class="stat-card-new card" style="justify-content:flex-start;">
                         <!-- 标题+表头合并栏 -->
-                        <div style="display:flex;width:100%;border-bottom:1px solid var(--glass-border);height:30px;">
+                        <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr 1fr;gap:0;">
                             <!-- 标题：数据统计 -->
-                            <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;">
-                                {{ t('stats.dataStats') }}
-                            </div>
+                            <div style="display:flex;justify-content:center;font-size:.72rem;color:var(--muted);font-weight:600;border-right:1px solid var(--glass-border);height:30px;">{{ t('stats.dataStats') }}</div>
                             <!-- 表头 -->
-                            <div style="flex:4;display:flex;">
-                                <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:500;">{{ t('stats.onlineIPs') }}</div>
-                                <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:500;">{{ t('stats.offlineIPs') }}</div>
-                                <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:500;">{{ t('stats.unknownIPs') }}</div>
-                                <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:500;">{{ t('stats.allIPs') }}</div>
-                                <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:500;">{{ t('stats.avgLatencyCol') }}</div>
-                            </div>
+                            <div style="display:flex;justify-content:center;font-size:.72rem;color:var(--muted);font-weight:500;min-height:24px;border-right:1px solid var(--glass-border);">{{ t('stats.onlineIPs') }}</div>
+                            <div style="display:flex;justify-content:center;font-size:.72rem;color:var(--muted);font-weight:500;min-height:24px;border-right:1px solid var(--glass-border);">{{ t('stats.offlineIPs') }}</div>
+                            <div style="display:flex;justify-content:center;font-size:.72rem;color:var(--muted);font-weight:500;min-height:24px;border-right:1px solid var(--glass-border);">{{ t('stats.unknownIPs') }}</div>
+                            <div style="display:flex;justify-content:center;font-size:.72rem;color:var(--muted);font-weight:500;min-height:24px;border-right:1px solid var(--glass-border);">{{ t('stats.allIPs') }}</div>
+                            <div style="display:flex;justify-content:center;font-size:.72rem;color:var(--muted);font-weight:500;min-height:24px;">{{ t('stats.avgLatencyCol') }}</div>
                         </div>
                         <!-- 数据行容器 -->
-                        <div style="flex:1;display:flex;flex-direction:column;justify-content:center;padding:4px 0;">
+                        <div style="flex:1;display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr 1fr;gap:0;border-top:1px solid var(--glass-border);">
                             <!-- TCPv4 -->
-                            <div style="display:flex;width:100%;">
-                                <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:500;line-height:22px;">{{ t('stats.tcpv4') }}</div>
-                                <div style="flex:4;display:flex;">
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :style="{ color: (stats.tcp_v4_alive||0) === 0 ? 'var(--err)' : (stats.tcp_v4_alive||0) === (stats.tcp_v4_total||0) ? 'var(--ok)' : '' }">{{ stats.tcp_v4_alive||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :class="(stats.tcp_v4_offline||0)>0?'err':''">{{ stats.tcp_v4_offline||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :style="{ color: stats.tcp_v4_unknown ? 'var(--warn)' : '' }">{{ stats.tcp_v4_unknown||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;color:var(--ok);">{{ stats.tcp_v4_total||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;"
-                                        :class="stats.tcp_v4_latency>1000?'err':stats.tcp_v4_latency>500?'warn':''">
-                                        {{ stats.tcp_v4_latency>0 ? stats.tcp_v4_latency+'ms' : '<span style="color:var(--warn);">-</span>' }}
-                                    </div>
-                                </div>
-                            </div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.72rem;color:var(--muted);font-weight:500;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);">{{ t('stats.tcpv4') }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);" :style="{ color: (stats.tcp_v4_alive||0) === 0 ? 'var(--err)' : (stats.tcp_v4_alive||0) === (stats.tcp_v4_total||0) ? 'var(--ok)' : '' }">{{ stats.tcp_v4_alive||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);" :class="(stats.tcp_v4_offline||0)>0?'err':''">{{ stats.tcp_v4_offline||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);" :style="{ color: stats.tcp_v4_unknown ? 'var(--warn)' : '' }">{{ stats.tcp_v4_unknown||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);color:var(--ok);">{{ stats.tcp_v4_total||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-bottom:1px solid var(--glass-border);" :class="stats.tcp_v4_latency>1000?'err':stats.tcp_v4_latency>500?'warn':''">{{ stats.tcp_v4_latency>0 ? stats.tcp_v4_latency+'ms' : '<span style="color:var(--warn);">-</span>' }}</div>
                             <!-- TCPv6 -->
-                            <div style="display:flex;width:100%;">
-                                <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:500;line-height:22px;">{{ t('stats.tcpv6') }}</div>
-                                <div style="flex:4;display:flex;">
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :style="{ color: (stats.tcp_v6_alive||0) === 0 ? 'var(--err)' : (stats.tcp_v6_alive||0) === (stats.tcp_v6_total||0) ? 'var(--ok)' : '' }">{{ stats.tcp_v6_alive||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :class="(stats.tcp_v6_offline||0)>0?'err':''">{{ stats.tcp_v6_offline||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :style="{ color: stats.tcp_v6_unknown ? 'var(--warn)' : '' }">{{ stats.tcp_v6_unknown||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;color:var(--ok);">{{ stats.tcp_v6_total||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;"
-                                        :class="stats.tcp_v6_latency>1000?'err':stats.tcp_v6_latency>500?'warn':''">
-                                        {{ stats.tcp_v6_latency>0 ? stats.tcp_v6_latency+'ms' : '<span style="color:var(--warn);">-</span>' }}
-                                    </div>
-                                </div>
-                            </div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.72rem;color:var(--muted);font-weight:500;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);">{{ t('stats.tcpv6') }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);" :style="{ color: (stats.tcp_v6_alive||0) === 0 ? 'var(--err)' : (stats.tcp_v6_alive||0) === (stats.tcp_v6_total||0) ? 'var(--ok)' : '' }">{{ stats.tcp_v6_alive||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);" :class="(stats.tcp_v6_offline||0)>0?'err':''">{{ stats.tcp_v6_offline||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);" :style="{ color: stats.tcp_v6_unknown ? 'var(--warn)' : '' }">{{ stats.tcp_v6_unknown||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);color:var(--ok);">{{ stats.tcp_v6_total||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-bottom:1px solid var(--glass-border);" :class="stats.tcp_v6_latency>1000?'err':stats.tcp_v6_latency>500?'warn':''">{{ stats.tcp_v6_latency>0 ? stats.tcp_v6_latency+'ms' : '<span style="color:var(--warn);">-</span>' }}</div>
                             <!-- UDPv4 -->
-                            <div style="display:flex;width:100%;">
-                                <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:500;line-height:22px;">{{ t('stats.udpv4') }}</div>
-                                <div style="flex:4;display:flex;">
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :style="{ color: (stats.udp_v4_alive||0) === 0 ? 'var(--err)' : (stats.udp_v4_alive||0) === (stats.udp_v4_total||0) ? 'var(--ok)' : '' }">{{ stats.udp_v4_alive||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :class="(stats.udp_v4_offline||0)>0?'err':''">{{ stats.udp_v4_offline||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :style="{ color: stats.udp_v4_unknown ? 'var(--warn)' : '' }">{{ stats.udp_v4_unknown||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;color:var(--ok);">{{ stats.udp_v4_total||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;"
-                                        :class="stats.udp_v4_latency>1000?'err':stats.udp_v4_latency>500?'warn':''">
-                                        {{ stats.udp_v4_latency>0 ? stats.udp_v4_latency+'ms' : '<span style="color:var(--warn);">-</span>' }}
-                                    </div>
-                                </div>
-                            </div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.72rem;color:var(--muted);font-weight:500;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);">{{ t('stats.udpv4') }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);" :style="{ color: (stats.udp_v4_alive||0) === 0 ? 'var(--err)' : (stats.udp_v4_alive||0) === (stats.udp_v4_total||0) ? 'var(--ok)' : '' }">{{ stats.udp_v4_alive||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);" :class="(stats.udp_v4_offline||0)>0?'err':''">{{ stats.udp_v4_offline||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);" :style="{ color: stats.udp_v4_unknown ? 'var(--warn)' : '' }">{{ stats.udp_v4_unknown||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);color:var(--ok);">{{ stats.udp_v4_total||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-bottom:1px solid var(--glass-border);" :class="stats.udp_v4_latency>1000?'err':stats.udp_v4_latency>500?'warn':''">{{ stats.udp_v4_latency>0 ? stats.udp_v4_latency+'ms' : '<span style="color:var(--warn);">-</span>' }}</div>
                             <!-- UDPv6 -->
-                            <div style="display:flex;width:100%;">
-                                <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:500;line-height:22px;">{{ t('stats.udpv6') }}</div>
-                                <div style="flex:4;display:flex;">
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :style="{ color: (stats.udp_v6_alive||0) === 0 ? 'var(--err)' : (stats.udp_v6_alive||0) === (stats.udp_v6_total||0) ? 'var(--ok)' : '' }">{{ stats.udp_v6_alive||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :class="(stats.udp_v6_offline||0)>0?'err':''">{{ stats.udp_v6_offline||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :style="{ color: stats.udp_v6_unknown ? 'var(--warn)' : '' }">{{ stats.udp_v6_unknown||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;color:var(--ok);">{{ stats.udp_v6_total||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;"
-                                        :class="stats.udp_v6_latency>1000?'err':stats.udp_v6_latency>500?'warn':''">
-                                        {{ stats.udp_v6_latency>0 ? stats.udp_v6_latency+'ms' : '<span style="color:var(--warn);">-</span>' }}
-                                    </div>
-                                </div>
-                            </div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.72rem;color:var(--muted);font-weight:500;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);">{{ t('stats.udpv6') }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);" :style="{ color: (stats.udp_v6_alive||0) === 0 ? 'var(--err)' : (stats.udp_v6_alive||0) === (stats.udp_v6_total||0) ? 'var(--ok)' : '' }">{{ stats.udp_v6_alive||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);" :class="(stats.udp_v6_offline||0)>0?'err':''">{{ stats.udp_v6_offline||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);" :style="{ color: stats.udp_v6_unknown ? 'var(--warn)' : '' }">{{ stats.udp_v6_unknown||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);color:var(--ok);">{{ stats.udp_v6_total||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-bottom:1px solid var(--glass-border);" :class="stats.udp_v6_latency>1000?'err':stats.udp_v6_latency>500?'warn':''">{{ stats.udp_v6_latency>0 ? stats.udp_v6_latency+'ms' : '<span style="color:var(--warn);">-</span>' }}</div>
                             <!-- ALL -->
-                            <div style="display:flex;width:100%;">
-                                <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:600;line-height:22px;">{{ t('stats.all') }}</div>
-                                <div style="flex:4;display:flex;">
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :style="{ color: (stats.all_alive||0) === 0 ? 'var(--err)' : (stats.all_alive||0) === (stats.all_total||0) ? 'var(--ok)' : '' }">{{ stats.all_alive||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :class="(stats.all_offline||0)>0?'err':''">{{ stats.all_offline||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :style="{ color: stats.all_unknown ? 'var(--warn)' : '' }">{{ stats.all_unknown||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;color:var(--ok);">{{ stats.all_total||0 }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;"
-                                        :class="stats.all_latency>1000?'err':stats.all_latency>500?'warn':''">
-                                        {{ stats.all_latency>0 ? stats.all_latency+'ms' : '<span style="color:var(--warn);">-</span>' }}
-                                    </div>
-                                </div>
-                            </div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.72rem;color:var(--muted);font-weight:600;min-height:36px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);">{{ t('stats.all') }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:36px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);" :style="{ color: (stats.all_alive||0) === 0 ? 'var(--err)' : (stats.all_alive||0) === (stats.all_total||0) ? 'var(--ok)' : '' }">{{ stats.all_alive||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:36px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);" :class="(stats.all_offline||0)>0?'err':''">{{ stats.all_offline||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:36px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);" :style="{ color: stats.all_unknown ? 'var(--warn)' : '' }">{{ stats.all_unknown||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:36px;border-right:1px solid var(--glass-border);border-bottom:1px solid var(--glass-border);color:var(--ok);">{{ stats.all_total||0 }}</div>
+                            <div style="display:flex;align-items:center;justify-content:center;font-size:.76rem;font-weight:600;min-height:36px;border-bottom:1px solid var(--glass-border);" :class="stats.all_latency>1000?'err':stats.all_latency>500?'warn':''">{{ stats.all_latency>0 ? stats.all_latency+'ms' : '<span style="color:var(--warn);">-</span>' }}</div>
                             <!-- 百分比行 -->
-                            <div style="display:flex;width:100%;">
-                                <div style="flex:1;text-align:center;font-size:.72rem;color:var(--muted);font-weight:500;line-height:22px;">??%</div>
-                                <div style="flex:4;display:flex;">
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :style="{ color: stats.all_total>0 && stats.all_alive>0 ? ((stats.all_alive||0)/stats.all_total >= 0.8 ? 'var(--ok)' : ((stats.all_alive||0)/stats.all_total >= 0.5 ? 'var(--warn)' : 'var(--err)')) : '' }">
-                                        {{ stats.all_total>0 && stats.all_alive>0 ? ((stats.all_alive||0)/stats.all_total*100).toFixed(1)+'%' : '-' }}
-                                    </div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :style="{ color: stats.all_total>0 && stats.all_offline>0 ? (((stats.all_offline||0)/stats.all_total)*100 >= 50 ? 'var(--err)' : ((stats.all_offline||0)/stats.all_total)*100 >= 20 ? 'var(--warn)' : '') : '' }">
-                                        {{ stats.all_total>0 && stats.all_offline>0 ? ((stats.all_offline||0)/stats.all_total*100).toFixed(1)+'%' : '-' }}
-                                    </div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;" :style="{ color: stats.all_unknown ? 'var(--warn)' : '' }">
-                                        {{ stats.all_total>0 && stats.all_unknown>0 ? ((stats.all_unknown||0)/stats.all_total*100).toFixed(1)+'%' : '-' }}
-                                    </div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;color:var(--ok);">{{ stats.all_total>0 ? '100%' : '-' }}</div>
-                                    <div style="flex:1;text-align:center;font-size:.76rem;font-weight:600;line-height:22px;">-</div>
-                                </div>
-                            </div>
+                            <div style="display:flex;align-items:flex-end;justify-content:center;font-size:.76rem;color:var(--muted);font-weight:500;min-height:24px;border-right:1px solid var(--glass-border);">??%</div>
+                            <div style="display:flex;align-items:flex-end;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);" :style="{ color: stats.all_total>0 && stats.all_alive>0 ? ((stats.all_alive||0)/stats.all_total >= 0.8 ? 'var(--ok)' : ((stats.all_alive||0)/stats.all_total >= 0.5 ? 'var(--warn)' : 'var(--err)')) : '' }">{{ stats.all_total>0 && stats.all_alive>0 ? ((stats.all_alive||0)/stats.all_total*100).toFixed(1)+'%' : '-' }}</div>
+                            <div style="display:flex;align-items:flex-end;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);" :style="{ color: stats.all_total>0 && stats.all_offline>0 ? (((stats.all_offline||0)/stats.all_total)*100 >= 50 ? 'var(--err)' : ((stats.all_offline||0)/stats.all_total)*100 >= 20 ? 'var(--warn)' : '') : '' }">{{ stats.all_total>0 && stats.all_offline>0 ? ((stats.all_offline||0)/stats.all_total*100).toFixed(1)+'%' : '-' }}</div>
+                            <div style="display:flex;align-items:flex-end;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);" :style="{ color: stats.all_unknown ? 'var(--warn)' : '' }">{{ stats.all_total>0 && stats.all_unknown>0 ? ((stats.all_unknown||0)/stats.all_total*100).toFixed(1)+'%' : '-' }}</div>
+                            <div style="display:flex;align-items:flex-end;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;border-right:1px solid var(--glass-border);color:var(--ok);">{{ stats.all_total>0 ? '100%' : '-' }}</div>
+                            <div style="display:flex;align-items:flex-end;justify-content:center;font-size:.76rem;font-weight:600;min-height:24px;">-</div>
                         </div>
                     </div>
                 </div>
