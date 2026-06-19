@@ -688,6 +688,7 @@
         .tl-btn-resume:hover { background: rgba(251,191,36,.15); }
         .tl-btn-del    { border-color: rgba(248,113,113,.35); color: #f87171; }
         .tl-btn-del:hover    { background: rgba(248,113,113,.12); }
+        /* 搜索栏 背景条 无遮挡 */
         .tl-sticky-toolbar {
             position: sticky;
             top: 56px; /* navbar高度 */
@@ -697,11 +698,102 @@
             -webkit-backdrop-filter: none !important;
             border-bottom: 1px solid var(--border-subtle) !important;
         }
+        /* [日间模式] 搜索栏 背景条 无遮挡 */
         body.light-mode .tl-sticky-toolbar {
             background: transparent !important;
             backdrop-filter: none !important;
             -webkit-backdrop-filter: none !important;
             border-bottom-color: rgba(130,165,220,0.35) !important; 
+        }
+
+        /* ===== 监控列表工具栏控件透明化 ===== */
+        /* 搜索框 */
+        .tl-sticky-toolbar .form-control,
+        .tl-sticky-toolbar .qs-search-input {
+            background: transparent !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            border-color: var(--glass-border) !important;
+            color: var(--text) !important;
+        }
+        .tl-sticky-toolbar .form-control::placeholder,
+        .tl-sticky-toolbar .qs-search-input::placeholder {
+            color: var(--muted) !important;
+        }
+        /* 下拉选择框 */
+        .tl-sticky-toolbar .form-select,
+        .tl-sticky-toolbar .tl-sel {
+            background: transparent !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            border-color: var(--glass-border) !important;
+            color: var(--text) !important;
+        }
+        /* 下拉箭头保留（暗色主题） */
+        .tl-sticky-toolbar .form-select {
+            background: transparent !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            border-color: var(--glass-border) !important;
+            color: var(--text) !important;
+        }
+        /* 下拉选项列表文字颜色（暗色主题） */
+        .tl-sticky-toolbar .form-select option,
+        .tl-sticky-toolbar .tl-sel option {
+            background-color: var(--glass-card) !important; /* 半透明玻璃背景，跟随主题 */
+            color: #1a2540 !important; /* 深色文字，确保清晰 */
+        }
+        /* 日间模式下选项列表文字颜色 */
+        body.light-mode .tl-sticky-toolbar .form-select option,
+        body.light-mode .tl-sticky-toolbar .tl-sel option {
+            background-color: none !important; /* 使用个锤子颜色 不适用颜色 */
+            color: #1a2540 !important; /* 深色文字，确保清晰 */
+        }
+
+        /* 按钮组容器 */
+        .tl-sticky-toolbar .tab-pill {
+            background: transparent !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            border-color: var(--glass-border) !important;
+        }
+        .tl-sticky-toolbar .tab-pill button {
+            background: transparent !important;
+            backdrop-filter: none !important;
+            -webkit-backdrop-filter: none !important;
+            color: var(--muted) !important;
+        }
+        .tl-sticky-toolbar .tab-pill button.active {
+            background: rgba(80,140,255,0.15) !important;
+            color: var(--text) !important;
+        }
+
+        /* ----- 日间模式覆盖 ----- */
+        body.light-mode .tl-sticky-toolbar .form-control,
+        body.light-mode .tl-sticky-toolbar .qs-search-input {
+            color: #1a2540 !important;
+            border-color: rgba(130,165,220,0.4) !important;
+        }
+        body.light-mode .tl-sticky-toolbar .form-control::placeholder,
+        body.light-mode .tl-sticky-toolbar .qs-search-input::placeholder {
+            color: #5a6f96 !important;
+        }
+
+        body.light-mode .tl-sticky-toolbar .form-select,
+        body.light-mode .tl-sticky-toolbar .tl-sel {
+            color: #1a2540 !important;
+            border-color: rgba(130,165,220,0.4) !important;
+        }
+
+        body.light-mode .tl-sticky-toolbar .tab-pill {
+            border-color: rgba(130,165,220,0.4) !important;
+        }
+        body.light-mode .tl-sticky-toolbar .tab-pill button {
+            color: #5a6f96 !important;
+        }
+        body.light-mode .tl-sticky-toolbar .tab-pill button.active {
+            background: rgba(59,130,246,0.15) !important;
+            color: #1a2540 !important;
         }
 
         /* 工具栏下拉选择统一样式 */

@@ -31440,6 +31440,7 @@ A：（网格对了 后面最下面内容我会改了）
 
 //网络监控[导航栏]移除背景条遮挡
 //移除[监控列表]搜索栏背景条遮挡
+//[监控列表]搜索框视野也无遮挡
 
 给网络监控 导航栏 就是切换 仪盘表 监控列表 可用率排行 日志 那里 这一块区域 增加个半透明度
 那样网页往下滑的时候 遮挡住 还能看到后面的内容 只有那个框 加半透明 字体不要加
@@ -31933,13 +31934,600 @@ css
 
 修改完成后强制刷新页面（Ctrl+F5），工具栏将完全透明，不再遮挡内容。
 
+----------------
+Q：
+
+日间模式 搜索填空的地方 下拉时候 遮挡背景内容 特别明显
+还有 左边的3组 按钮 ALL/IPV4/IPV6 网络切换 和 ALL/TCP/UDP/HTTP/HTTPS 协议切换 和 当前状态切换 这些按钮 也顺便给他弄无遮挡！
+
+----------------
+A：
+
+明白了，您希望监控列表顶部的所有控件（搜索框、下拉选择框、按钮组等）在滚动时背景完全透明，不遮挡下方内容，同时文字、边框、图标保持清晰。
+
+当前透明化只针对了工具栏容器（.tl-sticky-toolbar 和 .card-header.tl-sticky-toolbar），但内部的子元素（输入框、下拉框、按钮）仍然有自己的背景色和毛玻璃效果，导致遮挡。
+
+下面给出修改方案，您只需要在 <style> 中找到对应的选择器，替换或添加规则即可。
+
+需要修改的控件及样式
+1. 搜索输入框（.qs-search-input 和 .form-control 在监控列表中的）
+在日间模式及其他模式下都透明：
+……
+2. 下拉选择框（.form-select 和 .tl-sel）
+……
+3. 按钮组（.tab-pill 及其内部按钮）
+……
+4. 其他辅助元素（如搜索框内的清除按钮 ✕ 等）无需处理，它们本来无背景。
+完整修改示例（直接复制添加到 CSS 末尾）
+您可以将下面这段 CSS 追加到 <style> 标签的末尾，它会覆盖之前的设置，确保所有控件透明：
+……
+
+注意事项
+上述代码只针对 .tl-sticky-toolbar 内部的控件，不会影响其他页面的表单样式。
+保留了边框和文字颜色，确保控件在透明背景下仍然可辨识。
+下拉箭头图标在日间模式下颜色变深，与文字颜色匹配。
+修改后，监控列表顶部的所有控件背景将完全透明，滚动时不再遮挡内容，视觉上更加清爽。
+
+----------------
+Q：
+
+/* 下拉箭头保留（暗色主题） */
+.tl-sticky-toolbar .form-select {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%2394a3b8' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e") !important;
+
+body.light-mode .tl-sticky-toolbar .tl-sel {
+    color: #1a2540 !important;
+    border-color: rgba(130,165,220,0.4) !important;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%235a6f96' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e") !important;
+}
+
+这2个 你引用图片的地方 引用了外网请求。。我不想请求外网 不想应用图片
+直接改成 下拉选择 背景也是透明的 要怎么改？
+
+----------------
+A：
+
+修改方法
+找到这两处代码，删除 background-image 那一行。
+
+第一处（暗色主题）：
+修改前
+
+css
+.tl-sticky-toolbar .form-select {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border-color: var(--glass-border) !important;
+    color: var(--text) !important;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%2394a3b8' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 0.75rem center !important;
+    background-size: 16px 12px !important;
+}
+修改后（删除 background-image 及相关设置）
+
+css
+.tl-sticky-toolbar .form-select {
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border-color: var(--glass-border) !important;
+    color: var(--text) !important;
+}
+第二处（日间模式）：
+修改前
+
+css
+body.light-mode .tl-sticky-toolbar .tl-sel {
+    color: #1a2540 !important;
+    border-color: rgba(130,165,220,0.4) !important;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%235a6f96' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M2 5l6 6 6-6'/%3e%3c/svg%3e") !important;
+}
+修改后（删除 background-image）
+
+css
+body.light-mode .tl-sticky-toolbar .tl-sel {
+    color: #1a2540 !important;
+    border-color: rgba(130,165,220,0.4) !important;
+}
+
+如果希望保留下拉箭头，但改用纯 CSS 的 Unicode 字符（如 ▼）或 Bootstrap 自带的箭头，可以用 ::after 伪元素实现，
+但既然您明确不要外部图片，我们建议直接移除，这样下拉框只显示文字，背景完全透明，符合“无遮挡”的要求。
+
+修改后，下拉框将没有任何箭头图标，但功能不变，用户仍可通过点击下拉框进行选择。
+如果您想保留箭头但避免外网请求，可以保留上述 data:image 形式，它并不是外网请求，只是内联的 SVG 数据，您可以放心使用。
+但您明确表示“不想引用图片”，我们就按移除处理。
+
+----------------
+Q：
+
+我截图给你看的 这2个 协议和当前状态 下拉选择框 他选择框 里面是偏白底的 我字都看不清了
+我想改成 下拉选择 不要白底 也是无遮挡 然后里面的字 要能看清楚的 要改哪里？
+
+现在不是箭头 和图片的问题 是选择框 点击后的背景。。你没看到我的截图吗？
+
+----------------
+A：
+
+明白了，您指的是下拉选择框展开后的选项列表背景为白色，导致文字看不清。这不是选择框本身的背景，而是 <select> 下拉选项列表（即 <option> 元素）的背景色。
+
+由于原生 <select> 的选项列表样式由浏览器控制，无法直接通过 CSS 完全透明，但我们可以强制设置选项文字颜色，使其在白色背景下清晰可读（日间模式用深色字，暗色模式用亮色字）。同时可尝试设置 background-color，但部分浏览器不生效。
+
+修改方案
+在现有 CSS 中，为监控列表工具栏中的 <select> 的 <option> 添加颜色规则，确保文字在浅色或深色背景下都能看清。
+
+修改前（无针对 option 的样式）
+您的代码中没有为 <option> 设置颜色，所以日间模式下选项列表背景为白色，文字可能是灰色或黑色，但若当前主题文字为亮色，则白底上看不清。
+
+修改后（添加 option 颜色）
+在 index.html 的 <style> 中，找到监控列表工具栏控件透明化的相关规则（约在 /* ===== 监控列表工具栏控件透明化 ===== */ 后面），在日间模式覆盖区域之后，添加以下样式：
+……
+
+如果希望选项列表背景完全透明，可尝试 background-color: transparent;，但可能某些浏览器不支持，且文字重叠可能看不清。建议保留浅色背景并配深色文字。
+
+完整修改示例（可直接复制到 CSS 末尾）
+……
+注意事项
+原生 <select> 的选项列表样式在不同浏览器、操作系统中表现各异，上述方法在 Chrome/Firefox 中有效。
+
+若仍需更精细控制，可考虑用 Vue 组件模拟下拉菜单（如 Bootstrap Dropdown + 自定义列表），但改动较大。
+
+当前方案至少保证了文字清晰可读，且背景色与主题协调。
+
+修改后，刷新页面，点击“协议”或“当前状态”下拉框，选项列表中的文字将清晰可见。
+
+----------------
+Q：
+
+        /* 下拉选项列表文字颜色（暗色主题） */
+        .tl-sticky-toolbar .form-select option,
+        .tl-sticky-toolbar .tl-sel option {
+            background-color: var(--glass-card); /* 使用玻璃背景，与卡片一致，但可能不透明 */
+            color: var(--text); /* 暗色主题文字亮色 */
+        }
+        /* 日间模式下选项列表文字颜色（深色，白底可读） */
+        body.light-mode .tl-sticky-toolbar .form-select option,
+        body.light-mode .tl-sticky-toolbar .tl-sel option {
+            background-color: #f8faff; /* 浅灰白色背景，也可保留默认白色 */
+            color: #1a2540 !important; /* 深色文字，确保清晰 */
+        }
+我要 点击 选择框后 这个背景无遮挡 不要有颜色。。又能看清楚里面的字 要怎么改？
+
+----------------
+A：
+
+明白了，您希望下拉选择框点击后弹出的选项列表背景完全透明/无颜色，同时选项文字清晰可读。
+
+技术限制说明
+原生 HTML <select> 的下拉选项列表（即 <option> 弹出层）的样式由浏览器操作系统控制，CSS 只能有限地干预：
+
+background-color 在 Chrome/Edge 中可以设置，但 transparent 通常不生效（会被浏览器忽略或显示为系统默认白色/灰色）。
+
+完全透明在大多数浏览器中无法实现。
+
+最优方案
+将选项背景设为极浅的半透明色（肉眼几乎看不见），文字使用高对比度颜色，这样既看起来“无遮挡”，文字又清晰。
+
+修改后（替换您之前添加的规则）
+css
+/* 下拉选项列表 — 暗色主题：半透明深色背景 + 亮色文字 */
+.tl-sticky-toolbar .form-select option,
+.tl-sticky-toolbar .tl-sel option {
+    background-color: rgba(10, 15, 30, 0.85) !important; /* 极深半透明，几乎与暗色背景融合 */
+    color: #e2eaf8 !important;
+}
+
+/* 下拉选项列表 — 日间模式：半透明白色背景 + 深色文字 */
+body.light-mode .tl-sticky-toolbar .form-select option,
+body.light-mode .tl-sticky-toolbar .tl-sel option {
+    background-color: rgba(255, 255, 255, 0.92) !important; /* 近乎白色，但隐约透出下方内容 */
+    color: #1a2540 !important;
+}
+如果您坚持“完全透明”
+可以尝试，但可能无效（部分浏览器会回退为白色）：
+
+css
+.tl-sticky-toolbar .form-select option,
+.tl-sticky-toolbar .tl-sel option {
+    background-color: transparent !important;
+    color: #e2eaf8 !important;
+}
+body.light-mode .tl-sticky-toolbar .form-select option,
+body.light-mode .tl-sticky-toolbar .tl-sel option {
+    background-color: transparent !important;
+    color: #1a2540 !important;
+}
+如果浏览器不响应，请使用上面的半透明方案。
+
+最终建议
+使用半透明方案（第一种），它能在所有主流浏览器中生效，视觉上背景几乎不遮挡内容，文字清晰可读。
+rgba(10,15,30,0.85) 在暗色背景下几乎不可见，rgba(255,255,255,0.92) 在日间模式下也近似白色，但下方内容仍能隐约透出。
+
+修改后保存文件，强制刷新（Ctrl+F5）即可生效。
+
+----------------
+Q：
+
+怎么我按照你的来改了 我点击 下拉 选择框 还有个灰色背景？ 日间模式也还是白色背景……
+你看看现在我发你的html代码 是不是哪里还有 被覆盖了？
+
+----------------
+A：
+
+我来看看这个下拉选择框点击后出现的灰色背景问题。从截图看，日间模式下选择框选项列表是白色背景，暗色模式下是灰色背景，但您想要完全透明。
+
+让我仔细检查您的HTML文件中的CSS样式，找出可能覆盖或影响下拉选项背景的地方。
+
+从您提供的代码中，我注意到几个关键点：
+
+您确实为 .tl-sticky-toolbar .form-select option 设置了 background-color: rgba(10, 15, 30, 0.85) 和日间模式的 rgba(255, 255, 255, 0.92)
+
+但是，原生 <select> 的选项列表样式受浏览器操作系统控制，CSS 中的 background-color 对 <option> 的生效程度有限。在大多数浏览器中，<option> 的 background-color 只能改变选项文字的背景色，但选项列表本身的背景色（即弹出层背景）通常无法通过 CSS 完全控制。
+
+您看到的“灰色背景”和“白色背景”实际上是浏览器系统默认的 <select> 弹出菜单背景色，CSS 无法直接透明化。
+
+解决方案
+有两种可行的方案：
+
+方案一：完全放弃原生 <select>，使用自定义下拉组件（推荐）
+Vue 项目中最彻底的做法是使用自定义下拉菜单（如 Bootstrap Dropdown 或自定义 div 模拟），但您目前使用的是原生 <select>，改动较大。
+
+方案二：使用 CSS 尽量接近透明（但无法做到完全透明）
+由于原生 <select> 的背景无法被 CSS 覆盖为透明，您只能接受这个限制，但可以调整颜色使之更协调：
+
+css
+/* 暗色主题下拉选项 — 使用深色背景与主题融合 */
+.tl-sticky-toolbar .form-select option,
+.tl-sticky-toolbar .tl-sel option {
+    background-color: #0d1b3e !important;  /* 直接使用主题深蓝色，与暗色背景融为一体 */
+    color: #e2eaf8 !important;
+}
+
+/* 日间模式下拉选项 — 使用浅色背景与主题融合 */
+body.light-mode .tl-sticky-toolbar .form-select option,
+body.light-mode .tl-sticky-toolbar .tl-sel option {
+    background-color: #dce8f5 !important;  /* 日间模式背景色 */
+    color: #1a2540 !important;
+}
+这样虽然背景不是透明的，但颜色与页面背景一致，看起来像是“透明”的（视觉上融为一体）。
+
+修改位置
+在您的 index.html 中找到这两个 CSS 规则（大约在 550-580 行附近）：
+
+修改前（当前）
+
+css
+.tl-sticky-toolbar .form-select option,
+.tl-sticky-toolbar .tl-sel option {
+    background-color: rgba(10, 15, 30, 0.85) !important;
+    color: #e2eaf8 !important;
+}
+body.light-mode .tl-sticky-toolbar .form-select option,
+body.light-mode .tl-sticky-toolbar .tl-sel option {
+    background-color: rgba(255, 255, 255, 0.92) !important;
+    color: #1a2540 !important;
+}
+修改后（改为纯色，与主题背景一致）
+
+css
+.tl-sticky-toolbar .form-select option,
+.tl-sticky-toolbar .tl-sel option {
+    background-color: #0d1b3e !important;  /* 与暗色主题背景 --bg-to 一致 */
+    color: #e2eaf8 !important;
+}
+body.light-mode .tl-sticky-toolbar .form-select option,
+body.light-mode .tl-sticky-toolbar .tl-sel option {
+    background-color: #dce8f5 !important;  /* 与日间模式背景 --bg-from 一致 */
+    color: #1a2540 !important;
+}
+关于颜色值
+如果您想完全匹配当前主题的背景渐变，可以查看 :root 中定义的颜色：
+
+暗色主题：背景渐变从 #0a0f1e 到 #0d1b3e，选项用 #0d1b3e 或 #0a0f1e 均可
+
+日间模式：背景渐变从 #dce8f5 到 #eaf2fc，选项用 #dce8f5 或 #eaf2fc 均可
+
+效果
+修改后，下拉选项列表的背景色将与页面背景颜色一致，视觉上仿佛“透明”的，文字保持清晰可读。虽然技术上不是真正的透明，但观感上达到了您想要的效果。
+
+----------------
+Q：
+
+颜色跟随主题 怎么弄？我切换个主题 你固定颜色 这样显然不对啊
+
+----------------
+A：
+
+明白了，您希望下拉选择框的选项列表背景和文字颜色跟随主题，而不是我们之前硬编码的固定颜色。同时您发现背景仍有灰色或白色，我们进一步优化。
+
+问题分析
+颜色不跟随主题：我们之前用了固定颜色值（如 #e2eaf8、rgba(10,15,30,0.85)），切换主题时不变。
+
+背景仍有灰色/白色：rgba(10,15,30,0.85) 在暗色主题下偏灰，日间模式下 rgba(255,255,255,0.92) 虽然是白色但不完全通透。
+
+根本原因：浏览器对 <option> 的样式支持有限，background-color 无法使用 transparent，但可以接受半透明色。我们可以使用 CSS 变量让颜色跟随主题。
+
+最佳解决方案
+使用主题变量 --glass-card（半透明玻璃背景）和 --text（文字颜色），这样背景色和文字色都会随主题自动变化。
+
+修改前（固定颜色）
+css
+.tl-sticky-toolbar .form-select option,
+.tl-sticky-toolbar .tl-sel option {
+    background-color: rgba(10, 15, 30, 0.85) !important;
+    color: #e2eaf8 !important;
+}
+body.light-mode .tl-sticky-toolbar .form-select option,
+body.light-mode .tl-sticky-toolbar .tl-sel option {
+    background-color: rgba(255, 255, 255, 0.92) !important;
+    color: #1a2540 !important;
+}
+修改后（使用主题变量）
+css
+.tl-sticky-toolbar .form-select option,
+.tl-sticky-toolbar .tl-sel option {
+    background-color: var(--glass-card) !important; /* 半透明玻璃背景，跟随主题 */
+    color: var(--text) !important; /* 文字颜色，跟随主题 */
+}
+/* 日间模式不需要单独覆盖，因为 --glass-card 和 --text 在日间模式已变化 */
+为什么这样更好
+主题	--glass-card 值	--text 值	效果
+蓝色/暗色	rgba(14,26,58,0.55)	#e2eaf8	深色半透明背景，亮色文字
+日间模式	rgba(255,255,255,0.62)	#1a2540	白色半透明背景，深色文字
+绿色/紫色/橙色	对应主题的玻璃色	对应主题文字色	自动适配
+优点：
+
+切换主题时，选项列表的颜色自动跟随，无需额外代码。
+
+背景半透明，下方内容仍可隐约透出，达到“无遮挡”视觉效果。
+
+文字颜色对比度足够，清晰可读。
+
+如何修改
+在您的 index.html 中，找到我们之前添加的 .tl-sticky-toolbar .form-select option 和 body.light-mode ... 相关规则，替换为上面的新规则（可删除日间模式的覆盖，因为变量已经处理）。
+
+具体操作：
+
+搜索 .tl-sticky-toolbar .form-select option，将整个规则块替换为：
+
+css
+.tl-sticky-toolbar .form-select option,
+.tl-sticky-toolbar .tl-sel option {
+    background-color: var(--glass-card) !important;
+    color: var(--text) !important;
+}
+删除之前添加的 body.light-mode .tl-sticky-toolbar .form-select option 相关规则（因为不需要了）。
+
+最终效果
+暗色主题下，选项列表为深色半透明背景，亮色文字。
+
+日间模式下，选项列表为白色半透明背景，深色文字。
+
+切换主题（蓝/绿/紫/橙/日间）时，颜色自动适配。
+
+背景仍有半透明感，不会完全遮挡下方内容。
+
+如果希望背景更透或更实
+您可以调整 --glass-card 变量（在 :root 和各个主题中）的透明度值，但请注意这会同时影响卡片背景。如果您只想单独调整选项列表背景，可以自定义一个新变量，例如 --select-option-bg，在 :root 中定义为 rgba(14,26,58,0.6)，各主题中重定义。但为了简化，使用 --glass-card 已足够。
+
+修改后保存，强制刷新页面，即可看到效果。
+
 
 --------------------------------------
 
 
+//修复查询tracker状态的IP级暂停未能正确显示当前状态
+（先暂停修复这个 感觉思路不对 目前只是有个API缺少自动暂停字段=小BUG）（正确的 应该是暂停 覆盖：在线/离线/-）
+
+这个查询tracker状态的API 有BUG 有的IP都暂停了 那个IP应该显示为暂停状态的 可是为什么他还显示在线？
+IP的状态"paused": true,了 他还显示为最后探测的状态online 如果IP被暂停了 必须更新为paused + 最后状态（这感觉有点不对？）
+（有暂停字段的话）手动暂停 显示：paused，自动暂停 显示auto_paused，另外 还要额外显示 最后探测的状态 不管是在线/离线/-（无）
+//就拿下面这个tracker.flatuslifir.is的某个IP举例： 193.148.251.143  paused online  90.9%  292ms  2026-06-18T11:56:17.196201
+（被标记为移除的IP 就不显示 是对的，有锁的话 额外无视移除标记 也是对的）
+
+C:\Users\Administrator\Desktop>curl "http://localhost:443/api/query?host=tracker.flatuslifir.is"
+tracker.flatuslifir.is  Online  92.8%  243ms  2026-06-19T16:44:34.960901
+2a0c:9a40:2201:10::1912  online  93.8%  243ms  2026-06-19T16:44:34.960901
+45.134.88.121  offline  -  -  2026-06-03T23:42:57.101353
+193.148.251.93  online  91.7%  218ms  2026-06-19T16:44:19.257920
+89.127.235.120  online  -  307ms  2026-06-11T14:47:16.387206
+193.148.251.143  online  90.9%  292ms  2026-06-18T11:56:17.196201
+2a0c:9a40:2202:102::1903  online  92.9%  307ms  2026-06-18T11:55:54.332908
+
+//从"http://localhost:443/api/datas"获取到的数据
+  "tracker.flatuslifir.is": {
+    "added_time": "2026-05-11T17:09:47.785497",
+    "dns_error": false,
+    "domain": "tracker.flatuslifir.is",
+    "ips": [
+      {
+        "added_time": "2026-05-11T17:09:47.785516",
+        "consec_fail": 0,
+        "country": {
+          "country": "United States",
+          "country_code": "US",
+          "isp": "iFog GmbH"
+        },
+        "ip": "2a0c:9a40:2201:10::1912",
+        "ip_uptime": 93.8,
+        "last_check": "2026-06-19T16:47:16.238156",
+        "last_check_ts": 1781858836.23816,
+        "latency": 233,
+        "status": "online",
+        "uptime_24h": 94,
+        "uptime_30d": 92.1,
+        "uptime_7d": 93.8,
+        "version": "ipv6"
+      },
+      {
+        "added_time": "2026-05-31T14:08:00.890286",
+        "consec_fail": 0,
+        "country": {
+          "country": "United Kingdom",
+          "country_code": "GB",
+          "isp": "iFog GmbH"
+        },
+        "ip": "45.134.88.121",
+        "ip_uptime": null,
+        "last_check": "2026-06-03T23:42:57.101353",
+        "last_check_ts": 1780501377.10135,
+        "latency": -1,
+        "paused": true,
+        "status": "offline",
+        "uptime_24h": null,
+        "uptime_30d": 76.4,
+        "uptime_7d": null,
+        "version": "ipv4"
+      },
+      {
+        "added_time": "2026-05-31T14:08:00.890300",
+        "consec_fail": 0,
+        "country": {
+          "country": "United States",
+          "country_code": "US",
+          "isp": "iFog GmbH"
+        },
+        "ip": "193.148.251.93",
+        "ip_uptime": 91.7,
+        "last_check": "2026-06-19T16:47:20.750558",
+        "last_check_ts": 1781858840.75056,
+        "latency": 232,
+        "lock": true,
+        "status": "online",
+        "uptime_24h": 91.5,
+        "uptime_30d": 89.4,
+        "uptime_7d": 91.7,
+        "version": "ipv4"
+      },
+      {
+        "added_time": "2026-06-11T08:53:05.672026",
+        "consec_fail": 0,
+        "country": {
+          "country": "Iceland",
+          "country_code": "IS",
+          "isp": "1984 ehf"
+        },
+        "ip": "89.127.235.120",
+        "ip_uptime": null,
+        "last_check": "2026-06-11T14:47:16.387206",
+        "last_check_ts": 1781160436.38721,
+        "latency": 307,
+        "paused": true,
+        "status": "online",
+        "uptime_24h": null,
+        "uptime_30d": 62.7,
+        "uptime_7d": null,
+        "version": "ipv4"
+      },
+      {
+        "added_time": "2026-06-11T18:38:34.247848",
+        "consec_fail": 0,
+        "country": {
+          "country": "United States",
+          "country_code": "US",
+          "isp": "iFog GmbH"
+        },
+        "ip": "193.148.251.143",
+        "ip_uptime": 90.9,
+        "last_check": "2026-06-18T11:56:17.196201",
+        "last_check_ts": 1781754977.1962,
+        "latency": 292,
+        "paused": true,
+        "status": "online",
+        "uptime_24h": null,
+        "uptime_30d": 91.1,
+        "uptime_7d": 90.9,
+        "version": "ipv4"
+      },
+      {
+        "added_time": "2026-06-13T21:04:19.874777",
+        "consec_fail": 0,
+        "country": {
+          "country": "United States",
+          "country_code": "US",
+          "isp": "iFog GmbH"
+        },
+        "ip": "2a0c:9a40:2202:102::1903",
+        "ip_uptime": 92.9,
+        "last_check": "2026-06-18T11:55:54.332908",
+        "last_check_ts": 1781754954.33291,
+        "latency": 307,
+        "paused": true,
+        "status": "online",
+        "uptime_24h": null,
+        "uptime_30d": 92.9,
+        "uptime_7d": 92.9,
+        "version": "ipv6"
+      }
+    ],
+    "port": 6969,
+    "protocol": "udp",
+    "uptime_24h": 92.8,
+    "uptime_30d": 90.9,
+    "uptime_7d": 92.8
+  },
+
+  "tracker.yume-hatsuyuki.moe": {
+    "added_time": "2026-03-24T01:30:23.133194",
+    "dns_error": false,
+    "domain": "tracker.yume-hatsuyuki.moe",
+    "fail_24h": 0,
+    "fail_30d": 578,
+    "fail_7d": 0,
+    "ips": [
+      {
+        "added_time": "2026-03-24T01:30:23.133210",
+        "auto_paused": true,
+        "consec_fail": 29,
+        "country": {
+          "country": "United States",
+          "country_code": "US",
+          "isp": "NetLab Global"
+        },
+        "ip": "154.40.43.165",
+        "ip_uptime": 98.1,
+        "last_check": "2026-06-19T14:38:50.803332",
+        "last_check_ts": 1781851130.80333,
+        "latency": -1,
+        "paused": true,
+        "status": "offline",
+        "uptime_24h": 98.1,
+        "uptime_30d": 97.7,
+        "uptime_7d": 98.1,
+        "version": "ipv4"
+      }
+    ],
+    "ok_24h": 0,
+    "ok_30d": 21169,
+    "ok_7d": 0,
+    "port": 6969,
+    "protocol": "udp",
+    "total_24h": 0,
+    "total_30d": 21747,
+    "total_7d": 0,
+    "uptime_24h": null,
+    "uptime_30d": 97.3,
+    "uptime_7d": null
+  },
+
+C:\Users\Administrator\Desktop>curl "http://localhost:443/api/query?host=tracker.yume-hatsuyuki.moe"
+tracker.yume-hatsuyuki.moe  Paused  -  -  2026-06-19T14:38:50.803332
+154.40.43.165  offline  98.1%  -  2026-06-19T14:38:50.803332
+
+//额外发现个BUG 在api/datas中 被自动暂停的IP 缺少"auto_paused"字段（data.json中都有）
+还有上面这个（tracker.yume-hatsuyuki.moe）就1个IP 被自动暂停的域名 为什么他的域名状态是暂停？我没暂停他域名呀。。只有自动暂停IP
+我没暂停 域名 我不希望域名那边 显示为暂停 应该根据 所有IP状态 显示域名状态
+当域名下 无解析IP 移除都=真(没有被锁定的IP) 状态应该是 - 为空的符号，其他只要该域名下 IP是非暂停且有在线的IP 域名都显示在线
+像上面这种 探测离线 最后暂停 所有IP都离线 域名没被暂停 只有IP暂停 域名应该显示为IP最终状态：离线（除非域名下还有其他IP在线 才显示在线）
+哪怕 该域名下 所有IP都被自动暂停 只要域名没暂停 就不能显示为域名暂停。。除非这个域名 真得被暂停了（所有IP都暂停了 域名显示为暂停=是对的）
+
+----------------
 
 
 
+
+--------------------------------------
 
 
 
