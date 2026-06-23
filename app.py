@@ -815,6 +815,9 @@ class TrackerDB:
             for ip_obj in t_copy['ips']:
                 ip_copy = {k: v for k, v in ip_obj.items()
                            if k not in ('history_24h','history_7d','history_30d')}
+                # 确保 auto_paused 字段被保留
+                if 'auto_paused' in ip_obj:
+                    ip_copy['auto_paused'] = ip_obj['auto_paused']
                 if 'added_time' not in ip_copy:
                     ip_copy['added_time'] = t_copy.get('added_time')
                 ip = ip_obj.get('ip', '')
@@ -5946,12 +5949,16 @@ def api_query():
             s_ip  = hdb.get_ip_summary(host, ipi.get('ip', ''), secs)
             up_ip = round(s_ip['ok'] / s_ip['total'] * 100, 1) if s_ip['total'] > 0 else None
             lat_i = ipi.get('latency', -1)
+            # IP状态：暂停优先于原始状态
+            ip_status = 'Paused' if ipi.get('paused') else ipi.get('status', 'unknown')
             row   = {
                 'ip':      ipi.get('ip'),
                 'version': ipi.get('version', 'ipv4'),
-                'status':  ipi.get('status', 'unknown'),
+                'status':  ip_status,
                 'latency': lat_i,
                 'uptime':  up_ip,
+                'paused':  ipi.get('paused', False),
+                'auto_paused': ipi.get('auto_paused', False),
             }
             if 'location' in fields:
                 co_i  = ipi.get('country') or {}

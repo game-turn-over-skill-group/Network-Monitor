@@ -4238,7 +4238,7 @@ createApp({
                 if (all_offline) cls = 'up-red';
                 else if (mixed)  cls = 'up-yellow';
                 else if (u < 50) cls = 'up-red';
-                else if (u <= 80) cls = 'up-yellow';
+                else if (u < 80) cls = 'up-yellow';
                 else cls = 'up-green';
             }
             return { domain, uptime: u!==null ? Math.round(u*10)/10 : null,
