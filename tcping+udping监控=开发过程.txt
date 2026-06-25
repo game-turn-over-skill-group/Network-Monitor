@@ -32320,6 +32320,7 @@ css
 //修复查询tracker状态的IP级暂停未能正确显示当前状态（先暂停修复查询API 感觉思路不对 目前先修复API缺少自动暂停字段=小BUG）（正确的 应该是暂停 覆盖：在线/离线/-）
 //修复APIdatas中已自动暂停的IP缺少auto_paused自动暂停字段
 //修正：查询tracker状态API=之前无法显示已暂停IP状态
+//修复重启app后data.json中残留auto_paused字段未能正确清除保存
 
 这个查询tracker状态的API 有BUG 有的IP都暂停了 那个IP应该显示为暂停状态的 可是为什么他还显示在线？
 IP的状态"paused": true,了 他还显示为最后探测的状态online 如果IP被暂停了 必须更新为paused + 最后状态（这感觉有点不对？）
@@ -32620,6 +32621,90 @@ json格式 （增加了暂停字段）：
 修改是否合理？
  合理。之前的逻辑确实存在问题：暂停的IP显示为 online 或 offline 容易误导用户，现在能清晰区分真实状态和暂停状态。
 
+----------------
+Q：
+
+之前app.py修复了 
+被自动暂停的IP 在/api/datas中 无法正确返回 auto_paused 字段的问题
+现在导致了个BUG 重启后 不会删除data.json中的"auto_paused": true,字段 又被加载回内存/api/datas中（功能虽然正常 能重新探测 但是字段会残留。。）
+看看是什么问题……
+现在的情况是 重启后删除了"paused": true,字段 但残留下了"auto_paused": true,字段
+
+----------------
+A：
+
+修复完成！
+
+问题分析
+找到了两个问题：
+
+问题1（主要问题）：保存条件错误
+在主程序第6330行，原来的条件是：
+```Python
+if modified_trackers and total_removed > 0:
+```
+
+问题：
+只有当有IP被移除时才保存修改。但自动暂停恢复逻辑不会删除任何IP，所以 total_removed = 0，
+导致内存中的修改（删除了 paused 和 auto_paused）永远不会保存到 data.json！
+
+修复：将条件改为只检查 modified_trackers 是否非空。
+
+问题2：日志信息不准确
+原来的日志只显示清理的IP数量，不显示恢复的自动暂停IP数量。
+
+修改内容
+第6330-6335行：
+# 修改前
+if modified_trackers and total_removed > 0:
+    cprint(f"[load] 共清理 {total_removed} 个已移除IP，保存 data.json", 'info')
+
+# 修改后
+if modified_trackers:
+    msg = f"[load] 共清理 {total_removed} 个已移除IP，恢复 {len(modified_trackers)} 个自动暂停IP，保存 data.json" if total_removed > 0 else f"[load] 恢复 {len(modified_trackers)} 个自动暂停IP，保存 data.json"
+    cprint(msg, 'info')
+
+修复后的行为
+重启后，当 auto_pause_persist=False 时：
+
+内存中：删除 paused 和 auto_paused 字段，恢复检测
+保存到 data.json：正确保存修改后的状态（不再残留 auto_paused 字段）
+关于之前的疑问
+用户提到"删除了 paused 但残留了 auto_paused"，这实际上是保存失败导致的假象：
+
+内存中的修改是正确的（两个字段都被删除了）
+但由于保存条件错误，修改没有写入文件
+文件中仍然保留旧数据（paused 和 auto_paused 都在）
+用户看到的可能是之前的缓存或文件内容
+
+----------------
+Q：
+
+你写的这个代码……第二个if直接加在ms打印的后面 都没换行之类的 不易阅读啊……优化一下代码 比如添加换行之类的 更方便阅读
+if modified_trackers:
+    msg = f"[load] 共清理 {total_removed} 个已移除IP，恢复 {len(modified_trackers)} 个自动暂停IP，保存 data.json" if total_removed > 0 else f"[load] 恢复 {len(modified_trackers)} 个自动暂停IP，保存 data.json"
+    cprint(msg, 'info')
+
+----------------
+A：
+
+优化完成！
+
+已将三元表达式拆分为清晰的 if-else 结构，现在代码更易读：
+
+```
+if modified_trackers:
+    if total_removed > 0:
+        msg = f"[load] 共清理 {total_removed} 个已移除IP，恢复 {len(modified_trackers)} 个自动暂停IP，保存 data.json"
+    else:
+        msg = f"[load] 恢复 {len(modified_trackers)} 个自动暂停IP，保存 data.json"
+    cprint(msg, 'info')
+    for d in modified_trackers:
+        db._dirty_trackers.add(d)  # 标记需要保存
+    db._save_async()
+```
+这样逻辑更清晰，也方便后续维护。
+
 
 --------------------------------------
 
@@ -32675,7 +32760,45 @@ A：
 --------------------------------------
 
 
+//跳过DNS查询域名名单(固定IP或无IP域名)=跳过所有DNS查询
+//DNS跳过查询名单
 
+（人工添加的名单 并非自动添加）
+搞一个固定跳过所有DNS查询的 域名名单 有的域名常年不换IP的 添加到该名单中 跳过向所有DNS发起查询 节约流量
+就比如下面超时的2个域名 在跳过DNS查询名单中的域名 不会发起A/AAAA记录查询 基本就是所有DNS 的 所有查询
+并且 给这些跳过DNS查询的域名名单 在监控列表那边弄一个标志(等同于UDP协议的蓝色)：DNS Skip（类似DNS ERROR）
+跳过DNS查询的域名名单列表 可以在 配置 DNS配置 那边添加/删除 一行一个
+
+2026/6/25 16:48:34[DEBUG] [custom DNS] 180.184.1.1(TCP) 查询 AAAA tracker.torrent.eu.org 失败: TimeoutError: timed out
+2026/6/25 16:15:15[DEBUG] [custom DNS] 180.184.1.1(TCP) 查询 A www.torrent.eu.org 失败: TimeoutError: timed out
+
+----------------
+
+DNS 跳过查询功能已全部实现完成。以下是修改摘要：
+
+### 后端 (app.py)
+1. DEFAULT_CONFIG 新增 dns_skip_domains: [] 配置项
+2. resolve() 函数改为返回 (ips, dns_skip_flag) 元组，域名在跳过名单中时直接返回 ([], True) 不发起任何 DNS 查询
+3. _is_dns_skip() 新增辅助函数，大小写不敏感匹配跳过名单
+4. update_ips() 新增 dns_skip 参数，跳过时不清除现有 IP、不标记 DNS 错误
+5. add_tracker() 新增 dns_skip 字段；添加 tracker 时如果域名在跳过名单中则拒绝添加
+6. 所有 3 个 resolve() 调用点（ _resolve_and_update 、 _dns_refresh_thread 、 api_add ）均已更新
+7. api_config labels 中添加了 dns_skip_domains 的中文标签
+
+### 前端 (index.html)
+1. DNS 配置区域 新增 textarea，一行一个域名，保存到 dns_skip_domains 数组
+2. 监控列表 域名行新增蓝色 DNS Skip 标志（ rgba(79,142,201,.15) ），与 UDP 蓝色风格一致
+3. Vue data 新增 dns_skip_domains: [] 和 dns_skip_domains_text: ''
+4. 配置加载时将数组转为文本显示，保存时将文本拆分为数组
+### 多语言 (zh/en/ja/fr/ru/ko)
+所有 6 个语言文件均已添加 dnsSkipDomains 、 dnsSkipDomainsPlaceholder 、 dnsSkipDomainsDesc 翻译。
+
+### 使用方式
+在 配置 → DNS 配置 页面底部找到「跳过DNS查询域名名单」文本框，每行输入一个域名（如 tracker.torrent.eu.org ），
+保存后该域名将不再发起任何 A/AAAA 记录查询，监控列表中会显示蓝色 DNS Skip 标志。
+
+
+--------------------------------------
 
 
 

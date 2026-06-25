@@ -2103,6 +2103,8 @@
                                     </span>
                                     <!-- DNS错误标记 -->
                                     <span v-if="tr.dns_error" class="badge ms-1" style="background:rgba(239,68,68,.2);color:#f87171;font-size:.66rem;">DNS ERR</span>
+                                    <!-- DNS跳过标记 -->
+                                    <span v-if="tr.dns_skip" class="badge ms-1" style="background:rgba(79,142,201,.15);color:#4f8ec9;font-size:.66rem;">DNS Skip</span>
                                 </div>
                                 <!-- 中(grid列2-7)：badge+IP | 延迟 | 国家(国旗+名称) | 运营商 | 最后检查 | 添加时间 -->
                                 <div class="tl-domain-meta">
@@ -2757,6 +2759,17 @@
                             </div>
                             <div class="form-text">{{ t('config.dnsTimeoutDesc') }}</div>
                         </div>
+                        <!-- DNS 跳过查询域名名单 -->
+                        <div class="col-md-12">
+                            <label class="form-label">{{ t('config.dnsSkipDomains') }}</label>
+                            <textarea class="form-control"
+                                      v-model="cfg.dns_skip_domains_text"
+                                      rows="4"
+                                      :placeholder="t('config.dnsSkipDomainsPlaceholder')"
+                                      @blur="saveCfg"
+                                      style="font-family:monospace;font-size:.85rem;"></textarea>
+                            <div class="form-text">{{ t('config.dnsSkipDomainsDesc') }}</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -3299,6 +3312,8 @@ createApp({
             dns_custom: '8.8.8.8',
             dns_use_tcp: false,
             dns_timeout: 0,
+            dns_skip_domains: [],
+            dns_skip_domains_text: '',
             max_log_entries: 1000,
             max_log_info: 1000,
             max_log_success: 1000,
@@ -3822,6 +3837,10 @@ createApp({
                     data.console_log_level = data.log_level;
                 }
                 cfg.value = {...cfg.value, ...data}; 
+                // 将 dns_skip_domains 数组转换为文本（每行一个域名）
+                if (data.dns_skip_domains && Array.isArray(data.dns_skip_domains)) {
+                    cfg.value.dns_skip_domains_text = data.dns_skip_domains.join('\n');
+                }
                 rankPeriod.value = cfg.value.dashboard_stat_period || '24h';
                 // 若 cookie 里没有 layoutWidth 覆盖，则应用配置中的默认视野
                 const hasCookieLW = document.cookie.split(';').some(c => c.trim().startsWith('layoutWidth='));
@@ -4013,6 +4032,7 @@ createApp({
                     dns_custom:cfg.value.dns_custom,
                     dns_use_tcp:cfg.value.dns_use_tcp||false,
                     dns_timeout: Number(cfg.value.dns_timeout) >= 0 ? Number(cfg.value.dns_timeout) : 0,
+                    dns_skip_domains: (cfg.value.dns_skip_domains_text || '').split('\n').map(s => s.trim()).filter(s => s),
                     max_log_entries:cfg.value.max_log_entries,max_log_info:cfg.value.max_log_info,max_log_success:cfg.value.max_log_success,max_log_error:cfg.value.max_log_error,
                     page_refresh_ms:cfg.value.page_refresh_ms,
                     tracker_stat_period:cfg.value.tracker_stat_period,

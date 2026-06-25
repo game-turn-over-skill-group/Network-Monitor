@@ -73,6 +73,7 @@ DEFAULT_CONFIG = {
     'dns_custom': '8.8.8.8',           # 自定义DNS时使用，支持多个用逗号分隔
     'dns_use_tcp': False,              # 自定义/dnspython 模式下强制使用 TCP 53（国内UDP丢包时开启）
     'dns_timeout': 0,                  # DNS 单次查询超时（秒）。0=与 timeout 相同；可设为 2~4 加快多 DNS 故障转移
+    'dns_skip_domains': [],            # 跳过DNS查询的域名名单（一行一个域名，固定IP或无IP域名，跳过所有A/AAAA查询节约流量）
     'dns_lb_enabled': True,            # DNS服务器负载均衡/权重排序开关（默认关闭）；关闭时始终按配置顺序顺序尝试
     'dns_refresh_interval': 120,       # DNS 刷新间隔（秒），默认 2 分钟
     'max_log_entries': 50000,          # 日志最大条目数（兼容旧版，以下三项优先）
@@ -547,6 +548,7 @@ class TrackerDB:
                     'ips': [],
                     'added_time': datetime.now().isoformat(),
                     'dns_error': False,
+                    'dns_skip': False,
                     'paused': False  # 确保新添加的 tracker 有 paused 字段
                 }
             else:
@@ -1029,19 +1031,24 @@ class TrackerDB:
                 self.logs = []
 
     # ---------- 持久化 ----------
-    def update_ips(self, domain, new_ip_list, dns_error=False):
+    def update_ips(self, domain, new_ip_list, dns_error=False, dns_skip=False):
         """每轮解析后更新 IP 列表：
         - 合并新IP（保留历史状态）
         - 标记消失的旧IP为 removed（不立即删除，保留检测到下次重启）
         - 记录 DNS 错误状态
+        - 记录 DNS 跳过状态
         """
         with self.lock:
             if domain not in self.trackers:
                 return
             td = self.trackers[domain]
             td['dns_error'] = dns_error
-            if dns_error or not new_ip_list:
+            td['dns_skip'] = dns_skip
+            if dns_error or (not new_ip_list and not dns_skip):
                 # DNS 失败：保留旧 IP 继续检测，仅标记错误
+                return
+            if dns_skip:
+                # DNS 跳过：不发起查询，保留现有 IP 继续检测
                 return
             existing = {x['ip']: x for x in td['ips']}
             new_ips  = {x['ip'] for x in new_ip_list}
@@ -1288,6 +1295,7 @@ class TrackerDB:
                         'protocol':t.get('protocol','tcp'),'ips':clean_ips,
                         'added_time':t.get('added_time',datetime.now().isoformat()),
                         'dns_error': t.get('dns_error', False),
+                        'dns_skip': t.get('dns_skip', False),
                         # 注意：history_24h, history_7d, history_30d 从 t 中排除，由 get_trackers() 实时计算
                     }
                     # 精简模式：有 paused 字段=真，无=假；旧版本兼容删除 paused=false
@@ -3027,8 +3035,27 @@ def _dns_fail_clear(domain: str):
     with _dns_fail_lock:
         _dns_fail_logged.discard(domain)
 
+def _is_dns_skip(domain: str) -> bool:
+    """检查域名是否在跳过DNS查询名单中"""
+    skip_list = CONFIG.get('dns_skip_domains', [])
+    if not skip_list:
+        return False
+    domain_lower = domain.lower()
+    for skip_domain in skip_list:
+        if skip_domain and skip_domain.lower() == domain_lower:
+            return True
+    return False
+
 def resolve(domain: str):
-    """根据 CONFIG['dns_mode'] 选择 DNS 解析策略"""
+    """根据 CONFIG['dns_mode'] 选择 DNS 解析策略
+    返回: (ips_list, dns_skip_flag)
+      - ips_list: 解析到的IP列表
+      - dns_skip_flag: True 表示该域名在跳过名单中，未发起DNS查询
+    """
+    # 检查是否在跳过DNS查询名单中
+    if _is_dns_skip(domain):
+        return ([], True)
+
     mode = CONFIG.get('dns_mode', 'system')
     try:
         if mode == 'dnspython':
@@ -3041,7 +3068,7 @@ def resolve(domain: str):
         if _dns_fail_once(domain):
             cprint(f"DNS解析异常 {domain}: {e}", 'error')
             db.add_log(f"DNS解析异常 {domain}: {e}", 'error')
-        return []
+        return ([], False)
     if ips:
         # 解析成功：按实际返回的记录类型精确清除否定缓存（计数 + CD）
         # 只清"本次真的查到了结果"的类型，避免把另一类型的否定缓存也误清掉
@@ -3060,7 +3087,7 @@ def resolve(domain: str):
     else:
         # 解析成功，清除静默标记（下次再失败时重新提醒）
         _dns_fail_clear(domain)
-    return ips
+    return (ips, False)
 
 
 def _proxy_tcp_connect(ip, port, timeout):
@@ -3898,9 +3925,11 @@ def _resolve_and_update(name, domain, port, protocol):
     if is_ip:
         return  # IP 直连模式，无需 DNS 解析
     try:
-        new_ips = resolve(domain)
-        db.update_ips(name, new_ips, dns_error=(not new_ips))
-        if new_ips:
+        new_ips, dns_skip = resolve(domain)
+        db.update_ips(name, new_ips, dns_error=(not new_ips and not dns_skip), dns_skip=dns_skip)
+        if dns_skip:
+            cprint(f"DNS跳过 {name} ({domain}): 在跳过名单中", 'debug')
+        elif new_ips:
             cprint(f"DNS刷新 {name} ({domain}): {len(new_ips)}个IP", 'debug')
         else:
             # 无结果时日志已在 resolve() 内通过 _dns_fail_once 去重，此处不重复打印
@@ -4578,9 +4607,11 @@ def _dns_refresh_thread(name: str, domain: str, port: int, protocol: str,
                 stop_event.wait(timeout=dns_interval)
                 continue
 
-            new_ips = resolve(domain)
-            db.update_ips(name, new_ips, dns_error=(not new_ips))
-            if new_ips:
+            new_ips, dns_skip = resolve(domain)
+            db.update_ips(name, new_ips, dns_error=(not new_ips and not dns_skip), dns_skip=dns_skip)
+            if dns_skip:
+                cprint(f"DNS跳过 {name} ({domain}): 在跳过名单中", 'debug')
+            elif new_ips:
                 cprint(f"DNS刷新 {name} ({domain}): {len(new_ips)}个IP", 'debug')
                 # 对新出现的IP自动启动独立监控线程
                 _ensure_ip_threads(name)
@@ -5423,7 +5454,9 @@ def api_add():
             ver  = 'ipv6' if ':' in host else 'ipv4'
             ips  = [{'ip':host,'version':ver,'country':geo}]
         else:
-            ips = resolve(host)
+            ips, dns_skip = resolve(host)
+            if dns_skip:
+                errors.append(f"域名 {host} 在DNS跳过名单中，无法添加"); continue
             if not ips:
                 errors.append(f"DNS解析失败: {host}"); continue
             valid, msg = _validate_domain_ips(ips)
@@ -6162,6 +6195,7 @@ def api_config():
             'stagger_batch_direct':  '直连每批发包数',
             'stagger_delay_proxy':   '代理批间延迟',
             'stagger_delay_direct':  '直连批间延迟',
+            'dns_skip_domains':      'DNS跳过域名名单',
             'log_to_disk':           '日志存盘',
             'log_level':             '日志级别',
             'console_log_level':     '控制台日志级别',
@@ -6327,8 +6361,12 @@ if __name__ == '__main__':
     hdb.load()
     db._cleanup_hdb_on_startup()   # 清理已移除IP和domain级的hdb key
     # 在 hdb 加载完成后，保存修改过的 tracker（此时 hdb 已就绪，可以正确计算历史统计）
-    if modified_trackers and total_removed > 0:
-        cprint(f"[load] 共清理 {total_removed} 个已移除IP，保存 data.json", 'info')
+    if modified_trackers:
+        if total_removed > 0:
+            msg = f"[load] 共清理 {total_removed} 个已移除IP，恢复 {len(modified_trackers)} 个自动暂停IP，保存 data.json"
+        else:
+            msg = f"[load] 恢复 {len(modified_trackers)} 个自动暂停IP，保存 data.json"
+        cprint(msg, 'info')
         for d in modified_trackers:
             db._dirty_trackers.add(d)  # 标记需要保存
         db._save_async()
