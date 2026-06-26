@@ -61,7 +61,7 @@ DEFAULT_CONFIG = {
     'stagger_delay_proxy': 150,        # 代理模式：批间延迟 ms
     'stagger_delay_direct': 100,       # 直连模式：批间延迟 ms
     'log_to_disk': False,              # 日志存盘（access.log、error.log）
-    'log_level': 'info',               # none | info | error | debug
+    'console_log_level': 'info',       # none | info | error | debug
     'console_error_log': False,        # 控制台 error 日志输出开关（默认关闭）
     'debug_save_trace': False,         # 调试：输出异步保存耗时/队列状态（仅 debug 级别打印）
     'log_file': 'error.log',
@@ -113,6 +113,7 @@ DEFAULT_CONFIG = {
     'probe_timeout': 5.0,              # 探针超时（秒），支持小数如 0.5s
     'probe_interval': 1,               # 探测周期（秒），默认1秒
     'probe_mode': 'icmp',              # 探测模式：icmp（ICMP ping）| tcp（TCP DNS探测）
+    'probe_fine_check_enabled': True,  # 精细探针检查开关：开启后任何一个探针超时即等待恢复（拥堵避让算法）
     'probe_ipv4_targets': [            # IPv4 探针目标列表（任一可达即认为 IPv4 正常）
         '8.8.8.8',                     # Google Public DNS
         '1.1.1.1',                     # Cloudflare DNS
@@ -148,9 +149,9 @@ def load_config():
             # 向后兼容：旧配置文件用 rank_stat_period，迁移到 dashboard_stat_period
             if 'dashboard_stat_period' not in saved and 'rank_stat_period' in saved:
                 cfg['dashboard_stat_period'] = saved['rank_stat_period']
-            # 向后兼容：旧配置文件用 console_log_level，迁移到 log_level
-            if 'log_level' not in cfg and 'console_log_level' in cfg:
-                cfg['log_level'] = cfg['console_log_level']
+            # 向后兼容：旧配置文件用 log_level，迁移到 console_log_level
+            if 'log_level' in saved and 'console_log_level' not in saved:
+                cfg['console_log_level'] = saved['log_level']
     except Exception as e:
         cprint(f"配置加载失败: {e}", 'error')
     return cfg
@@ -354,12 +355,12 @@ def cprint(msg: str, level: str = 'info', raw: bool = False):
     raw=True：原样输出（nginx access log 格式，不加前缀）
     raw=False：加 YYYY/M/D HH:MM:SS [LEVEL] 前缀；info级别同步写入 access.log
     """
-    cl = CONFIG.get('log_level', CONFIG.get('console_log_level', 'info'))
+    cl = CONFIG.get('console_log_level', 'info')
     if cl == 'none':
         return
     if level == 'success':
         return
-    # console_error_log 配置控制 error 级别日志是否输出到控制台
+    # console_error_log 优先级最高：关闭时不显示任何 error 日志，其他级别正常显示
     if level == 'error' and not CONFIG.get('console_error_log', False):
         return
     if cl == 'info' and level not in ('info',):
@@ -486,7 +487,7 @@ class TrackerDB:
         self._last_save_time = 0  # 上次保存时间（用于节流）
 
     def _save_trace_enabled(self):
-        return CONFIG.get('debug_save_trace', False) and CONFIG.get('log_level') == 'debug'
+        return CONFIG.get('debug_save_trace', False) and CONFIG.get('console_log_level') == 'debug'
 
     def _get_uptime_cached(self, domain, period):
         """从缓存获取域名可用率，如果缓存有效则返回，否则 None"""
@@ -3950,6 +3951,8 @@ _probe_lock  = threading.Lock()
 _net_bad     = False  # 网络故障标志（全局失败率超阈值）
 _net_bad_lock = threading.Lock()
 _probe_details = {}   # 每个探针IP的最后探测结果 {ip: {'ok': bool, 'latency': int_or_-1, 'version': 'ipv4'/'ipv6'}}
+_probe_has_timeout_v4 = False  # IPv4探针是否有任何一个超时（精细检测）
+_probe_has_timeout_v6 = False  # IPv6探针是否有任何一个超时（精细检测）
 
 # 实时健康缓存（每次探测前检查，TTL 秒内不重复扫描）
 _health_cache = {
@@ -4103,9 +4106,11 @@ def _probe_loop():
     - _probe_ok_v4 = IPv4 可达（用于判断是否丢弃IPv4探测的历史写入）
     - _probe_ok_v6 = IPv6 可达 / None（未配置）
     """
-    global _probe_ok_v4, _probe_ok_v6, _probe_details
+    global _probe_ok_v4, _probe_ok_v6, _probe_details, _probe_has_timeout_v4, _probe_has_timeout_v6
     _warned_v4 = False
     _warned_v6 = False
+    _warned_fine_v4 = False  # 精细探针检查告警去重（IPv4）
+    _warned_fine_v6 = False  # 精细探针检查告警去重（IPv6）
     while True:
         # 从配置读取参数
         PROBE_INTERVAL = float(CONFIG.get('probe_interval', 1))
@@ -4132,6 +4137,7 @@ def _probe_loop():
         # ── IPv4 探测（并行执行）───────────────────────────────────────────
         v4_reachable = None  # None=未配置
         v4_hit = ''
+        v4_has_timeout = False  # 是否有任何一个IPv4探针超时
         if IPV4_TARGETS:
             v4_reachable = False
             with ThreadPoolExecutor(max_workers=len(IPV4_TARGETS)) as executor:
@@ -4147,11 +4153,14 @@ def _probe_loop():
                     if ok and not v4_reachable:
                         v4_reachable = True
                         v4_hit = f"{host}:{port}"
+                    if not ok:
+                        v4_has_timeout = True
 
         # ── IPv6 探测（并行执行）─────────────────────────────────────────────
         v6_reachable = None  # None=未配置
         v6_hit = ''
         v6_errors = []
+        v6_has_timeout = False  # 是否有任何一个IPv6探针超时
         if IPV6_TARGETS:
             v6_reachable = False
             with ThreadPoolExecutor(max_workers=len(IPV6_TARGETS)) as executor:
@@ -4169,11 +4178,15 @@ def _probe_loop():
                         v6_hit = f"{host}:{port}"
                     elif not ok and err:
                         v6_errors.append(f"{host}: {err}")
+                    if not ok:
+                        v6_has_timeout = True
 
         with _probe_lock:
             _probe_ok_v4 = v4_reachable
             _probe_ok_v6 = v6_reachable
             _probe_details = details
+            _probe_has_timeout_v4 = v4_has_timeout
+            _probe_has_timeout_v6 = v6_has_timeout
 
         # ── IPv4 告警 ──────────────────────────────────────────────────
         v4_targets_str = ', '.join(f"{h}:{p}" for h,p,_ in IPV4_TARGETS) if IPV4_TARGETS else '(无)'
@@ -4182,11 +4195,13 @@ def _probe_loop():
             db.add_log(msg, 'info')
             cprint(msg, 'info')
             _warned_v4 = True
+            _warned_fine_v4 = True  # 全部不可达时也标记精细告警已触发
         elif v4_reachable and _warned_v4:
             msg = f"[探针] IPv4网络已恢复，{v4_hit} 可达"
             db.add_log(msg, 'info')
             cprint(msg, 'info')
             _warned_v4 = False
+            _warned_fine_v4 = False  # 恢复时清除精细告警标记
 
         # ── IPv6 告警（附带具体错误原因）──────────────────────────────────
         if v6_reachable is not None:
@@ -4197,11 +4212,47 @@ def _probe_loop():
                 db.add_log(msg, 'info')
                 cprint(msg, 'info')
                 _warned_v6 = True
+                _warned_fine_v6 = True  # 全部不可达时也标记精细告警已触发
             elif v6_reachable and _warned_v6:
                 msg = f"[探针] IPv6网络已恢复，{v6_hit} 可达"
                 db.add_log(msg, 'info')
                 cprint(msg, 'info')
                 _warned_v6 = False
+                _warned_fine_v6 = False  # 恢复时清除精细告警标记
+
+        # ── 精细探针检查告警（仅开启精细检查时）──────────────────────────────
+        # 条件：至少1个成功（避免与全部不可达告警重复）、但存在超时
+        # 注意：日志已备注，如有需要可取消备注
+        probe_fine_check = CONFIG.get('probe_fine_check_enabled', False)
+        if probe_fine_check:
+            # IPv4 精细告警
+            if IPV4_TARGETS and v4_reachable and v4_has_timeout and not _warned_fine_v4:
+                # 找出超时的探针
+                v4_timeout_ips = [h for h, d in details.items() if d.get('version') == 'ipv4' and not d.get('ok')]
+                v4_timeout_str = ', '.join(v4_timeout_ips) if v4_timeout_ips else ''
+                # msg = f"[精细探针] IPv4部分探针({v4_timeout_str})超时，暂停探测等待恢复"
+                # db.add_log(msg, 'info')
+                # cprint(msg, 'info')
+                _warned_fine_v4 = True
+            elif IPV4_TARGETS and not v4_has_timeout and _warned_fine_v4:
+                # msg = f"[精细探针] IPv4所有探针已恢复，继续探测"
+                # db.add_log(msg, 'info')
+                # cprint(msg, 'info')
+                _warned_fine_v4 = False
+
+            # IPv6 精细告警
+            if IPV6_TARGETS and v6_reachable and v6_has_timeout and not _warned_fine_v6:
+                v6_timeout_ips = [h for h, d in details.items() if d.get('version') == 'ipv6' and not d.get('ok')]
+                v6_timeout_str = ', '.join(v6_timeout_ips) if v6_timeout_ips else ''
+                # msg = f"[精细探针] IPv6部分探针({v6_timeout_str})超时，暂停探测等待恢复"
+                # db.add_log(msg, 'info')
+                # cprint(msg, 'info')
+                _warned_fine_v6 = True
+            elif IPV6_TARGETS and not v6_has_timeout and _warned_fine_v6:
+                # msg = f"[精细探针] IPv6所有探针已恢复，继续探测"
+                # db.add_log(msg, 'info')
+                # cprint(msg, 'info')
+                _warned_fine_v6 = False
 
         time.sleep(PROBE_INTERVAL)
 
@@ -4319,6 +4370,8 @@ def _get_probe_net_status(ip_str: str):
     with _probe_lock:
         probe_v4_ok = _probe_ok_v4
         probe_v6_ok = _probe_ok_v6
+        probe_v4_timeout = _probe_has_timeout_v4
+        probe_v6_timeout = _probe_has_timeout_v6
     
     # IPv4 探针未就绪或异常 → 跳过 IPv4 IP 的探测和写入
     if ver == 'ipv4' and probe_v4_ok is not True:  # None 或 False 都跳过
@@ -4327,7 +4380,16 @@ def _get_probe_net_status(ip_str: str):
     if ver == 'ipv6' and probe_v6_ok is not True:  # None 或 False 都跳过
         return True, True, 'IPv6探针不可达'
     
-    # 2. 实时整体健康检查（基于失败率）- 只跳过写入，不跳过探测
+    # 2. 精细探针检查（拥堵避让）- 任何一个探针超时即等待恢复
+    # 探测IPv4时检查所有IPv4探针，探测IPv6时检查所有IPv6探针
+    probe_fine_check = CONFIG.get('probe_fine_check_enabled', False)
+    if probe_fine_check:
+        if ver == 'ipv4' and probe_v4_timeout:
+            return True, True, 'IPv4探针存在超时，等待恢复'
+        if ver == 'ipv6' and probe_v6_timeout:
+            return True, True, 'IPv6探针存在超时，等待恢复'
+    
+    # 3. 实时整体健康检查（基于失败率）- 只跳过写入，不跳过探测
     if _update_health_status():
         return False, True, '全局网络故障（失败率超阈值）'
     
@@ -4431,7 +4493,8 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                     cprint(f"[网络异常] {domain}({ip}) {net_reason}，跳过本次探测", 'debug')
                     _warned_net = True
                 # 持续异常：跳过探测，等待后继续
-                next_wait = CONFIG.get('check_interval', 30)
+                # 使用 probe_interval 快速重试检查，避免长时间等待
+                next_wait = CONFIG.get('probe_interval', 1)
                 stop_event.wait(timeout=next_wait)
                 continue
             elif _warned_net:
@@ -4926,7 +4989,7 @@ def security_headers(response):
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
         response.headers['Pragma'] = 'no-cache'
     # ── 调试模式判断（控制 304 是否静默） ──
-    is_debug_mode = CONFIG.get('log_level') == 'debug' or getattr(app, 'debug', False)
+    is_debug_mode = CONFIG.get('console_log_level') == 'debug' or getattr(app, 'debug', False)
     # ── 静态资源（/static/）缓存策略 ──
     # 路径安全：Flask send_from_directory 内部用 werkzeug.security.safe_join，
     # 已防止路径穿越（CWE-22），无需额外处理。
@@ -6239,6 +6302,7 @@ def api_config():
             'probe_ipv4_targets':    'IPv4探针目标',
             'probe_interval':        '探测周期',
             'probe_mode':            '探测模式',
+            'probe_fine_check_enabled': '精细探针检查',
             'auto_pause_enabled':    '自动暂停开关',
             'auto_pause_threshold':  '自动暂停累计失败次数',
             'auto_pause_persist':    '重启保持自动暂停',
@@ -6254,9 +6318,6 @@ def api_config():
             if k not in data: continue
             old_val = CONFIG.get(k)
             new_val = data[k]
-            if k == 'console_log_level':
-                k = 'log_level'
-                old_val = CONFIG.get('log_level', CONFIG.get('console_log_level'))
             if old_val == new_val: continue
             CONFIG[k] = new_val
             label  = labels.get(k, k)
@@ -6282,7 +6343,8 @@ def api_config():
         if changes:
             msg = f"配置已更新: {' | '.join(changes)}"
             g.access_note = msg
-        return jsonify({'success':True,'config':{k:CONFIG[k] for k in keys if k != 'console_log_level'}})
+        result = {k: CONFIG[k] for k in keys}
+        return jsonify({'success':True,'config':result})
     # GET 读取配置：未登录只返回前端行为控制必要字段（不含账户/代理等敏感信息）
     # 已登录用户额外返回运维相关字段（仍不含账户信息）
     public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'uptime_algorithm', 'dashboard_stat_period', 'tracker_stat_period', 'show_removed_ips', 'default_layout_width', 'allow_private_ips', 'min_password_length']
@@ -6533,7 +6595,7 @@ if __name__ == '__main__':
     print(f"  DNS解析模式    : {dns_desc}")
     print(f"  日志最大条目   : Info={CONFIG.get('max_log_info',1000)} / Success={CONFIG.get('max_log_success',1000)} / Error={CONFIG.get('max_log_error',1000)}条")
     print(f"  重试模式       : {CONFIG['retry_mode']}")
-    print(f"  日志级别       : {CONFIG.get('log_level', 'info')}")
+    print(f"  日志级别       : {CONFIG.get('console_log_level', 'info')}")
     print(f"  磁盘日志       : {'开启' if CONFIG['log_to_disk'] else '关闭'}")
     if CONFIG['http_proxy_enabled']:
         http_p = CONFIG.get('http_proxy','').strip()

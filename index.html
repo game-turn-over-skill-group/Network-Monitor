@@ -2706,6 +2706,14 @@
                             </select>
                             <div class="form-text mt-2">{{ t('config.uptimeAlgorithmDesc') }}</div>
                         </div>
+                        <!-- [控制台]Error日志输出开关 -->
+                        <div class="col-md-4">
+                            <div class="form-check form-switch mt-4 mb-4">
+                                <input class="form-check-input" type="checkbox" v-model="cfg.console_error_log" @change="saveCfg" id="consoleErrorLogSwitch">
+                                <label class="form-check-label" for="consoleErrorLogSwitch">{{ t('config.consoleErrorLog') }}</label>
+                            </div>
+                            <div class="form-text">{{ t('config.consoleErrorLogDesc') }}</div>
+                        </div>
                         <!-- 结束 -->
                     </div>
                 </div>
@@ -2828,14 +2836,7 @@
                             </div>
                             <div class="form-text">{{ t('config.allowPrivateIpsDesc') }}</div>
                         </div>
-                        <!-- 控制台error日志输出开关（第五位） -->
-                        <div class="col-md-8">
-                            <div class="form-check form-switch">
-                                <input class="form-check-input" type="checkbox" v-model="cfg.console_error_log" @change="saveCfg" id="consoleErrorLogSwitch">
-                                <label class="form-check-label" for="consoleErrorLogSwitch">{{ t('config.consoleErrorLog') }}</label>
-                            </div>
-                            <div class="form-text">{{ t('config.consoleErrorLogDesc') }}</div>
-                        </div>
+                        
                     </div>
                 </div>
             </div>
@@ -3010,6 +3011,22 @@
                                 </label>
                             </div>
                             <div class="form-text mt-3">{{ t('config.probeThrottleDesc') }}</div>
+                        </div>
+                        <!-- 精细探针检查开关 -->
+                        <div class="col-md-4">
+                            <label class="form-label">
+                                <i class="bi bi-shield-check me-1"></i>
+                                <span style="font-weight:600;">🛡️</span>
+                                <span class="ms-1">{{ t('config.probeFineCheckLabel') }}</span>
+                            </label>
+                            <div class="form-check form-switch mt-0" style="min-height: 38px; display: flex; align-items: center;">
+                                <input class="form-check-input" type="checkbox" v-model="cfg.probe_fine_check_enabled"
+                                       @change="saveCfg" id="probeFineCheckSwitch">
+                                <label class="form-check-label ms-2" for="probeFineCheckSwitch" style="cursor:pointer;">
+                                    {{ cfg.probe_fine_check_enabled ? t('config.probeFineCheckEnabled') : t('config.probeFineCheckDisabled') }}
+                                </label>
+                            </div>
+                            <div class="form-text mt-3">{{ t('config.probeFineCheckDesc') }}</div>
                         </div>
                     </div>
                 </div>
@@ -3343,6 +3360,7 @@ createApp({
             udp_proxy_enabled: false,
             probe_fail_threshold: 50,
             probe_throttle_enabled: false,
+            probe_fine_check_enabled: false,
             probe_timeout: 5,
             probe_interval: 1,
             probe_mode: 'icmp',
@@ -3833,9 +3851,6 @@ createApp({
         const loadCfg = async () => { 
             try { 
                 const data = (await axios.get('/api/config')).data;
-                if (data.log_level !== undefined && data.console_log_level === undefined) {
-                    data.console_log_level = data.log_level;
-                }
                 cfg.value = {...cfg.value, ...data}; 
                 // 将 dns_skip_domains 数组转换为文本（每行一个域名）
                 if (data.dns_skip_domains && Array.isArray(data.dns_skip_domains)) {
@@ -4058,6 +4073,7 @@ createApp({
                     udp_proxy_enabled: cfg.value.udp_proxy_enabled,
                     probe_fail_threshold: cfg.value.probe_fail_threshold ?? 50,
                     probe_throttle_enabled: cfg.value.probe_throttle_enabled ?? false,
+                    probe_fine_check_enabled: cfg.value.probe_fine_check_enabled ?? false,
                     probe_timeout: cfg.value.probe_timeout || 5,
                     probe_interval: cfg.value.probe_interval || 1,
                     probe_mode: cfg.value.probe_mode || 'icmp',
@@ -4067,7 +4083,12 @@ createApp({
                     auto_pause_threshold: cfg.value.auto_pause_threshold || 30,
                     auto_pause_persist: cfg.value.auto_pause_persist || false,
                 });
-                if (res.data?.success) showToast(_t('config.savedOk'), 'ok', 2000);
+                if (res.data?.success) {
+                    showToast(_t('config.savedOk'), 'ok', 2000);
+                    if (res.data.config) {
+                        cfg.value = {...cfg.value, ...res.data.config};
+                    }
+                }
                 // 检测端口或监听地址是否改变
                 if (oldPort !== cfg.value.listen_port ||
                     oldIPv4Mode !== cfg.value.listen_ipv4 ||
