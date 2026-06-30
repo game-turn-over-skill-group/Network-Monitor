@@ -2795,6 +2795,12 @@ def _query_single_server(domain: str, rtype: str, srv_ip: str, use_tcp: bool):
     proto   = 'TCP' if use_tcp else 'UDP'
     timeout = _dns_query_timeout()
 
+    # ── 网络探针检查：根据DNS服务器IP类型检查对应探针状态 ───────────────
+    skip, reason = _should_skip_dns_for_server(srv_ip)
+    if skip:
+        # 探针异常时跳过此DNS服务器查询，视为超时
+        return None
+
     def _log_noresult():
         now = time.time()
         key = (domain, rtype)
@@ -3925,6 +3931,16 @@ def _resolve_and_update(name, domain, port, protocol):
     is_ip = bool(re.match(r'^\d{1,3}(?:\.\d{1,3}){3}$', domain)) or (':' in domain and '.' not in domain)
     if is_ip:
         return  # IP 直连模式，无需 DNS 解析
+    
+    # 网络探针检查：探针异常时跳过DNS查询，避免产生无效DNS请求
+    # 注意：自定义DNS模式在 _query_single_server 层面按DNS服务器IP类型精细检查
+    # 系统DNS/dnspython模式无法区分DNS服务器类型，使用全局检查
+    dns_mode = CONFIG.get('dns_mode', 'system')
+    if dns_mode != 'custom':
+        skip_dns, dns_reason = _should_skip_dns_query()
+        if skip_dns:
+            return
+    
     try:
         new_ips, dns_skip = resolve(domain)
         db.update_ips(name, new_ips, dns_error=(not new_ips and not dns_skip), dns_skip=dns_skip)
@@ -4396,6 +4412,109 @@ def _get_probe_net_status(ip_str: str):
     # 正常情况
     return False, False, ''
 
+def _should_skip_dns_query():
+    """检查是否应该跳过DNS查询（网络探针故障时避让）
+    返回 (skip: bool, reason: str)
+    - skip: True = 跳过DNS查询，False = 继续查询
+    - reason: 跳过原因描述
+    
+    适用于系统DNS和dnspython模式（无法区分DNS服务器IP类型），
+    自定义DNS模式使用 _should_skip_dns_for_server 进行更精细的检查。
+    """
+    with _probe_lock:
+        probe_v4_ok = _probe_ok_v4
+        probe_v6_ok = _probe_ok_v6
+        probe_v4_timeout = _probe_has_timeout_v4
+        probe_v6_timeout = _probe_has_timeout_v6
+    
+    # 从配置读取探针目标列表，判断是否配置了对应协议的探针
+    ipv4_targets = CONFIG.get('probe_ipv4_targets', ['8.8.8.8', '1.1.1.1', '223.6.6.6'])
+    ipv6_targets = CONFIG.get('probe_ipv6_targets', [])
+    has_ipv4_probe = bool(ipv4_targets) and any(t.strip() for t in ipv4_targets)
+    has_ipv6_probe = bool(ipv6_targets) and any(t.strip() for t in ipv6_targets)
+    
+    # 1. 基础检查：IPv4和IPv6探针全部异常时跳过
+    v4_all_bad = probe_v4_ok is False
+    v6_all_bad = probe_v6_ok is False
+    
+    # 如果配置了IPv4探针且全部失败
+    if has_ipv4_probe and v4_all_bad:
+        return True, 'IPv4探针全部不可达'
+    # 如果配置了IPv6探针且全部失败
+    if has_ipv6_probe and v6_all_bad:
+        return True, 'IPv6探针全部不可达'
+    
+    # 2. 精细探针检查（拥堵避让）- 任何一个探针超时即跳过
+    # 注意：系统DNS/dnspython模式无法区分，所以只要任意一方有超时就全部跳过
+    probe_fine_check = CONFIG.get('probe_fine_check_enabled', False)
+    if probe_fine_check:
+        if has_ipv4_probe and probe_v4_timeout:
+            return True, 'IPv4探针存在超时，等待恢复'
+        if has_ipv6_probe and probe_v6_timeout:
+            return True, 'IPv6探针存在超时，等待恢复'
+    
+    # 3. 实时整体健康检查（基于失败率）
+    if _update_health_status():
+        return True, '全局网络故障（失败率超阈值）'
+    
+    return False, ''
+
+def _should_skip_dns_for_server(srv_ip: str):
+    """检查向特定DNS服务器发起查询时是否应该跳过
+    根据DNS服务器的IP类型（IPv4/IPv6）检查对应的探针状态
+    
+    srv_ip: DNS服务器IP地址
+    
+    返回 (skip: bool, reason: str)
+    - skip: True = 跳过此DNS服务器查询，False = 继续查询
+    - reason: 跳过原因描述
+    """
+    import ipaddress as _ipa
+    try:
+        ip_obj = _ipa.ip_address(srv_ip)
+        is_ipv6 = isinstance(ip_obj, _ipa.IPv6Address)
+    except Exception:
+        # 解析失败，默认为IPv4
+        is_ipv6 = False
+    
+    ver = 'ipv6' if is_ipv6 else 'ipv4'
+    
+    with _probe_lock:
+        probe_v4_ok = _probe_ok_v4
+        probe_v6_ok = _probe_ok_v6
+        probe_v4_timeout = _probe_has_timeout_v4
+        probe_v6_timeout = _probe_has_timeout_v6
+    
+    # 从配置读取探针目标列表，判断是否配置了对应协议的探针
+    ipv4_targets = CONFIG.get('probe_ipv4_targets', ['8.8.8.8', '1.1.1.1', '223.6.6.6'])
+    ipv6_targets = CONFIG.get('probe_ipv6_targets', [])
+    has_ipv4_probe = bool(ipv4_targets) and any(t.strip() for t in ipv4_targets)
+    has_ipv6_probe = bool(ipv6_targets) and any(t.strip() for t in ipv6_targets)
+    
+    # IPv4 DNS服务器 → 检查IPv4探针
+    if not is_ipv6:
+        if has_ipv4_probe and probe_v4_ok is False:
+            return True, 'IPv4探针全部不可达'
+        
+        probe_fine_check = CONFIG.get('probe_fine_check_enabled', False)
+        if probe_fine_check and has_ipv4_probe and probe_v4_timeout:
+            return True, 'IPv4探针存在超时，等待恢复'
+    
+    # IPv6 DNS服务器 → 检查IPv6探针
+    else:
+        if has_ipv6_probe and probe_v6_ok is False:
+            return True, 'IPv6探针全部不可达'
+        
+        probe_fine_check = CONFIG.get('probe_fine_check_enabled', False)
+        if probe_fine_check and has_ipv6_probe and probe_v6_timeout:
+            return True, 'IPv6探针存在超时，等待恢复'
+    
+    # 实时整体健康检查（基于失败率）- 任何网络故障都跳过
+    if _update_health_status():
+        return True, '全局网络故障（失败率超阈值）'
+    
+    return False, ''
+
 def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                        initial_delay: float = 0.0):
     """每个IP独立监控线程。
@@ -4632,8 +4751,14 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
 
         except Exception as e:
             cprint(f"[IP线程异常] {domain}({ip}): {type(e).__name__}: {e}", 'error')
-            # 异常时也等待正常间隔，避免疯狂重试
+            import traceback as _tb
+            cprint(f"[IP线程异常] 调用栈:\n{_tb.format_exc()}", 'error')
             next_wait = CONFIG.get('check_interval', 30)
+        except BaseException as e:
+            cprint(f"[IP线程致命] {domain}({ip}): {type(e).__name__}: {e}", 'error')
+            import traceback as _tb
+            cprint(f"[IP线程致命] 调用栈:\n{_tb.format_exc()}", 'error')
+            raise
 
         # 按照计算出的等待时间进入下一次循环
         stop_event.wait(timeout=next_wait)
@@ -4669,6 +4794,18 @@ def _dns_refresh_thread(name: str, domain: str, port: int, protocol: str,
             if paused:
                 stop_event.wait(timeout=dns_interval)
                 continue
+
+            # 网络探针检查：探针异常时跳过DNS查询，避免产生无效DNS请求
+            # 注意：自定义DNS模式在 _query_single_server 层面按DNS服务器IP类型精细检查
+            # 系统DNS/dnspython模式无法区分DNS服务器类型，使用全局检查
+            dns_mode = CONFIG.get('dns_mode', 'system')
+            if dns_mode != 'custom':
+                skip_dns, dns_reason = _should_skip_dns_query()
+                if skip_dns:
+                    # 等待 probe_interval 后重试检查，与IP探测保持一致的响应速度
+                    next_wait = CONFIG.get('probe_interval', 1)
+                    stop_event.wait(timeout=next_wait)
+                    continue
 
             new_ips, dns_skip = resolve(domain)
             db.update_ips(name, new_ips, dns_error=(not new_ips and not dns_skip), dns_skip=dns_skip)
@@ -6693,6 +6830,34 @@ if __name__ == '__main__':
     try:
         from waitress import serve
         print("  使用 waitress 生产服务器\n")
+
+        import errno as _errno
+        import traceback as _tb
+        from waitress import trigger as _waitress_trigger
+        _orig_trigger_close = _waitress_trigger.trigger.close
+        _trigger_close_stack = [None]
+        def _patched_trigger_close(self):
+            if not getattr(self, '_closed', False):
+                import io as _io
+                buf = _io.StringIO()
+                _tb.print_stack(file=buf)
+                _trigger_close_stack[0] = buf.getvalue()
+                cprint(f"[诊断] trigger.close() 被调用，调用栈:\n{buf.getvalue()}", 'error')
+            _orig_trigger_close(self)
+        _waitress_trigger.trigger.close = _patched_trigger_close
+
+        _orig_physical_pull = _waitress_trigger.trigger._physical_pull
+        def _patched_physical_pull(self):
+            try:
+                _orig_physical_pull(self)
+            except OSError as e:
+                if getattr(e, 'winerror', None) in (_errno.WSAENOTSOCK,):
+                    cprint(f"[诊断] trigger._physical_pull 触发 WSAENOTSOCK，_closed={getattr(self, '_closed', '?')}", 'error')
+                    if _trigger_close_stack[0]:
+                        cprint(f"[诊断] 上次 trigger.close 调用栈:\n{_trigger_close_stack[0]}", 'error')
+                else:
+                    raise
+        _waitress_trigger.trigger._physical_pull = _patched_physical_pull
         
         if https_enabled:
             # 检查证书文件是否存在
