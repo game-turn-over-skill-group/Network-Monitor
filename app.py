@@ -2798,8 +2798,9 @@ def _query_single_server(domain: str, rtype: str, srv_ip: str, use_tcp: bool):
     # ── 网络探针检查：根据DNS服务器IP类型检查对应探针状态 ───────────────
     skip, reason = _should_skip_dns_for_server(srv_ip)
     if skip:
-        # 探针异常时跳过此DNS服务器查询，视为超时
-        return None
+        # 探针异常时跳过此DNS服务器查询，返回特殊哨兵值表示探针跳过
+        # 与 None（超时/错误）和 []（无结果）区分
+        return _DNS_PROBE_SKIP
 
     def _log_noresult():
         now = time.time()
@@ -2865,6 +2866,9 @@ def _query_single_server(domain: str, rtype: str, srv_ip: str, use_tcp: bool):
         _log_error(e)
         return None
 
+# 探针跳过标记（特殊哨兵值，用于区分探针跳过时的DNS查询结果）
+_DNS_PROBE_SKIP = object()
+
 # ── DNS 轮询状态（全局，所有 domain 共用，线程安全） ─────────────────────
 # 记录"当前轮到哪台服务器"的游标，原子递增取模实现 Round-Robin。
 # 各 domain 的每次查询都从同一个游标出发，天然分散请求到不同服务器，
@@ -2887,6 +2891,10 @@ def _dns_rr_next(count: int) -> int:
 def _resolve_custom(domain: str):
     """模式3: 自定义DNS服务器 —— 健康度排序 + Round-Robin + 顺序故障转移.
 
+    返回: (ips_list, probe_skipped)
+      - ips_list: 解析到的IP列表
+      - probe_skipped: True 表示所有DNS服务器都因探针跳过未查询
+
     策略说明：
       1. 按近期超时次数做短冷却：经常超时的服务器排在队尾（仍会尝试，避免全员冷却时饿死）。
       2. 在优先序列上再做 Round-Robin 旋转，分散负载。
@@ -2906,6 +2914,7 @@ def _resolve_custom(domain: str):
     count   = len(servers)
     ips     = []
     seen    = set()
+    all_probe_skipped = True  # 是否所有记录类型都被探针跳过
 
     for rtype, ver in [('A', 'ipv4'), ('AAAA', 'ipv6')]:
         # 否定缓存命中：该记录类型已确认不存在，直接跳过，不向 DNS 发包
@@ -2922,7 +2931,13 @@ def _resolve_custom(domain: str):
             idx = try_order[i]
             srv_ip, use_tcp = servers[idx]
             res = _query_single_server(domain, rtype, srv_ip, use_tcp)
+            
+            # 探针跳过：未实际查询，不记录统计，直接跳过此服务器
+            if res is _DNS_PROBE_SKIP:
+                continue
+            
             queried += 1
+            all_probe_skipped = False  # 至少有一次实际查询
 
             if res is None:
                 # 超时/网络错误：不算无结果，标记 had_timeout
@@ -2953,14 +2968,17 @@ def _resolve_custom(domain: str):
             # 有超时：重置连续无结果计数，本轮结果不确定
             _dns_neg_record_timeout(domain, rtype)
             result_ips = []
-
+        elif result_ips is None and queried == 0:
+            # 所有服务器都被探针跳过：不记录错误，跳过此记录类型
+            continue
+        
         if result_ips:
             for ip in result_ips:
                 if ip not in seen:
                     seen.add(ip)
                     ips.append({'ip': ip, 'version': ver, 'country': get_geo(ip)})
 
-    return ips
+    return ips, all_probe_skipped
 
 # 已记录过DNS失败的域名集合（应用生命周期内只报一次，避免控制台/web日志刷屏）
 # 重启应用后集合清空，会重新提醒一次，方便感知配置变更后的效果。
@@ -3057,18 +3075,19 @@ def resolve(domain: str):
     """根据 CONFIG['dns_mode'] 选择 DNS 解析策略
     返回: (ips_list, dns_skip_flag)
       - ips_list: 解析到的IP列表
-      - dns_skip_flag: True 表示该域名在跳过名单中，未发起DNS查询
+      - dns_skip_flag: 'list'=域名在跳过名单中；'probe'=因探针异常跳过；False=正常查询
     """
     # 检查是否在跳过DNS查询名单中
     if _is_dns_skip(domain):
-        return ([], True)
+        return ([], 'list')
 
     mode = CONFIG.get('dns_mode', 'system')
+    probe_skipped = False  # 是否因探针跳过未实际查询
     try:
         if mode == 'dnspython':
             ips = _resolve_dnspython(domain)
         elif mode == 'custom':
-            ips = _resolve_custom(domain)
+            ips, probe_skipped = _resolve_custom(domain)
         else:
             ips = _resolve_system(domain)
     except Exception as e:
@@ -3076,6 +3095,11 @@ def resolve(domain: str):
             cprint(f"DNS解析异常 {domain}: {e}", 'error')
             db.add_log(f"DNS解析异常 {domain}: {e}", 'error')
         return ([], False)
+    
+    # 探针跳过：不触发DNS错误，保留旧缓存
+    if probe_skipped:
+        return ([], 'probe')
+    
     if ips:
         # 解析成功：按实际返回的记录类型精确清除否定缓存（计数 + CD）
         # 只清"本次真的查到了结果"的类型，避免把另一类型的否定缓存也误清掉
@@ -3943,10 +3967,18 @@ def _resolve_and_update(name, domain, port, protocol):
     
     try:
         new_ips, dns_skip = resolve(domain)
-        db.update_ips(name, new_ips, dns_error=(not new_ips and not dns_skip), dns_skip=dns_skip)
-        if dns_skip:
+        
+        # DNS跳过名单：不更新数据库
+        if dns_skip == 'list':
             cprint(f"DNS跳过 {name} ({domain}): 在跳过名单中", 'debug')
-        elif new_ips:
+            return
+        
+        # 探针跳过：不更新数据库（保留旧缓存）
+        if dns_skip == 'probe':
+            return
+        
+        db.update_ips(name, new_ips, dns_error=(not new_ips and not dns_skip), dns_skip=False)
+        if new_ips:
             cprint(f"DNS刷新 {name} ({domain}): {len(new_ips)}个IP", 'debug')
         else:
             # 无结果时日志已在 resolve() 内通过 _dns_fail_once 去重，此处不重复打印
@@ -4808,10 +4840,23 @@ def _dns_refresh_thread(name: str, domain: str, port: int, protocol: str,
                     continue
 
             new_ips, dns_skip = resolve(domain)
-            db.update_ips(name, new_ips, dns_error=(not new_ips and not dns_skip), dns_skip=dns_skip)
-            if dns_skip:
+            
+            # DNS跳过名单：按正常周期等待，不需要频繁重试
+            if dns_skip == 'list':
                 cprint(f"DNS跳过 {name} ({domain}): 在跳过名单中", 'debug')
-            elif new_ips:
+                # 不更新数据库，按正常周期等待
+                stop_event.wait(timeout=dns_interval)
+                continue
+            
+            # 探针跳过：快速重试检查，避免长时间等待
+            if dns_skip == 'probe':
+                cprint(f"DNS跳过 {name} ({domain}): 探针异常，等待恢复", 'debug')
+                next_wait = CONFIG.get('probe_interval', 1)
+                stop_event.wait(timeout=next_wait)
+                continue
+            
+            db.update_ips(name, new_ips, dns_error=(not new_ips and not dns_skip), dns_skip=False)
+            if new_ips:
                 cprint(f"DNS刷新 {name} ({domain}): {len(new_ips)}个IP", 'debug')
                 # 对新出现的IP自动启动独立监控线程
                 _ensure_ip_threads(name)

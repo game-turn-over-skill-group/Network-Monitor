@@ -33501,6 +33501,131 @@ Q：
 ----------------
 A：
 
+这个线索非常重要！你说这些连接是 启动时创建的、关闭后不会再产生 ——这强烈暗示这是 waitress 的 trigger socket 对 （内部线程间通信用的）。
+
+让我确认一下 waitress 在 Windows 上是否使用 socketpair() 创建 trigger：
+
+C:\Users\Administrator\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.13_qbz5n2kfra8p0\LocalCache\local-packages\Python313\site-packages\waitress\trigger.py
+
+Thought
+
+找到了！ 这就是 waitress 在 Windows 上创建的 trigger socket 对 ！
+
+看代码（ trigger.py ）：
+
+```
+a = socket.socket()
+a.bind(("127.0.0.1", 0))     # 绑定到 127.0.0.1:随机端口
+connect_address = a.getsockname()
+a.listen(1)
+w.connect(connect_address)     # w 连接到 a
+r, addr = a.accept()           # a 接受连接，得到 r
+self.trigger = w               # 写端 → 工作线程用它发信号
+wasyncore.dispatcher.__init__(self, r, map=map)  # 读端 → 
+select循环监听
+```
+这就是你看到的"自己连接自己"的连接！ 这是正常的——waitress 在 Windows 上因为没有 socketpair() ，所以用这种方式创建内部通信的 socket 对。
+
+## 现在问题清晰了
+既然这些连接是正常的，那为什么会出现 WinError 10038 ？
+
+关键在于 ：这对 socket 在进程生命周期内应该一直存在。如果其中一个被关闭了，另一个尝试 send() 就会报错。
+
+让我看看你的截图——黄色圈出的端口 1216 和 1217 ，它们是成对出现的。如果这些连接是正常的 trigger socket，那问题可能出在：
+
+waitress 的某个地方错误地关闭了 trigger socket ，然后工作线程继续调用 pull_trigger() → send() → WinError 10038 。
+
+## 请运行诊断版本
+现在我加的诊断代码就能派上用场了——它会记录 trigger.close() 的调用栈。请：
+
+1. 重启程序 （运行带诊断代码的版本）
+2. 等待问题复现
+3. 把 [诊断] 开头的输出发给我
+这样我就能知道 到底是谁关闭了 trigger 。
+
+----------------
+Q：
+
+我很好奇 为什么要创建连接 自己连接自己？我用网络工具 给他们关闭了 好像也不影响程序运行
+这个2个连接的创建 是哪来产生的？是必要的吗？我也没看到他们传输通信数据呀
+好像建立完 就放那边了一样 是不是BUG？你检查一下代码……
+
+----------------
+A：
+
+## 为什么 waitress 要"自己连接自己"？
+这不是 BUG，是 Windows 平台的技术限制导致的变通方案 。让我详细解释：
+
+### Unix vs Windows 的差异
+Unix/Linux 系统有一个系统调用 socketpair() ，可以直接创建一对 已经连接好的 socket ，用于同一进程内的线程间通信。
+
+但 Windows 没有 socketpair() ，所以 waitress 用了一个巧妙的变通方法：
+```python
+# Windows 上模拟 socketpair() 的代码（来自 waitress/trigger.py）
+a = socket.socket()
+a.bind(("127.0.0.1", 0))          # 创建一个监听 socket，绑定随机端口
+w = socket.socket()
+w.connect(a.getsockname())        # 创建另一个 socket，连接到监听端口
+r, addr = a.accept()              # 接受连接，得到一对已连接的 socket
+
+self.trigger = w                  # w = 写端（工作线程用）
+wasyncore.dispatcher.__init__(self, r)  # r = 读端（主线程 select 循环用）
+```
+
+### 这个连接的作用
+这是一个 线程间唤醒机制 ：
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   主线程 (wasyncore.select)          │
+│                                                     │
+│    ┌────────────────────────────────────────────┐   │
+│    │  select([读端socket, HTTP监听socket, ...]) │◄───┼─── 阻塞等待事件
+│    └────────────────────────────────────────────┘   │
+│                          │                          │
+│                          │ 检测到读端socket有数据     │
+│                          ▼                          │
+│                    从阻塞中唤醒                      │
+│                    处理新的HTTP请求                  │
+└─────────────────────────────────────────────────────┘
+         ▲
+         │ 发送 'x' 唤醒
+         │
+┌─────────────────────────────────────────────────────┐
+│                   工作线程 (处理HTTP请求)            │
+│                                                     │
+│    request = handle_request()                       │
+│    send_response()                                  │
+│    self.trigger.send(b"x")  ────────────────────────┘
+│    # 发送一个字节，唤醒主线程的select循环
+└─────────────────────────────────────────────────────┘
+```
+### 为什么你感觉不到它在工作？
+1. 数据量极小 ：每次只发送一个字节 b"x" ，网络工具可能看不到明显的数据传输
+2. 即时消费 ：主线程收到后立即读取消费，不会有数据累积
+3. 频率低 ：只有工作线程完成请求时才发送
+### 为什么关闭它好像不影响程序？
+关闭后，工作线程调用 pull_trigger() → send() 会报错，但：
+
+- waitress 的错误处理会捕获这个异常
+- 主线程的 select 循环只能靠 超时机制 来轮询新连接（效率降低）
+- 短期内感觉不到差异，但高并发时会有延迟
+## 回到核心问题
+既然这个机制是正常的，那为什么会出现 WinError 10038 ？
+
+答案 ：某个地方错误地 关闭了这对 socket 中的一个 ，然后工作线程继续尝试 send() 。
+
+我加的诊断代码已经在追踪 trigger.close() 的调用栈了。请运行带诊断的版本，把 [诊断] 开头的输出发给我，我就能找到罪魁祸首。
+
+----------------
+Q：
+
+
+
+----------------
+A：
+
+
 
 
 --------------------------------------
@@ -33510,6 +33635,8 @@ A：
 //系统DNS和pyDNS缺少网络故障检测
 //彻底解决自定义DNS和其他模式下DNS查询=兼容网络健康探针故障检测
 //修复读取DNS配置报错
+//修复DNS网络故障检测触发DNS_ERROR的问题
+//（修复：非自定义DNS模式下）DNS列表名单跳过和DNS探测网络健康超时的跳过做区分开重试间隔
 
 现在 正常tcping和udping检测 已经都支持 网络故障 自动避让了 有1个探针超时都不会进行检测 这个很好
 但是我发现DNS请求查询 似乎没有检查网络故障 还是啥？看看代码 也让它检测网络探针 都正常的情况下 才请求DNS更新……
@@ -33707,6 +33834,139 @@ t in ipv6_targets)
 同样改为从 CONFIG 读取探针配置，而不是访问不存在的全局变量。
 
 现在两个函数都能正确判断是否配置了IPv4/IPv6探针，不会再报 NameError 了。
+
+----------------
+Q：
+
+好像发现个BUG DNS加入网络故障检测 似乎有时候 会触发DNS ERROR？
+看看是怎么回事……修复一下 明明是跳过本次检测 为什么会触发查询错误？
+这种错误 我记得是域名没有IP的错误……
+
+----------------
+A：
+
+修复完成！问题是当探针异常导致DNS查询被跳过时，返回的 None 被上层视为"超时/错误"，触发了DNS错误标记。
+
+## 修复内容
+### 新增哨兵值 _DNS_PROBE_SKIP (app.py:2869)
+用于区分"探针跳过"和"真正的超时/错误"
+
+### 修改 _query_single_server() (app.py:2798-2803)
+探针跳过时返回 _DNS_PROBE_SKIP 而不是 None
+
+### 修改 _resolve_custom() (app.py:2891-2982)
+- 新增 all_probe_skipped 标记
+- 遇到 _DNS_PROBE_SKIP 时不记录统计，直接跳过
+- 返回 (ips, all_probe_skipped) 元组
+### 修改 resolve() (app.py:3085-3102)
+- 处理 _resolve_custom 的新返回格式
+- 当 probe_skipped=True 时，返回 ([], True) ，视为"跳过查询"，不触发DNS错误
+## 工作流程
+场景 			返回值 			DNS错误标记 
+探针跳过所有DNS服务器 	([], True) 		❌ 不标记 
+正常解析成功 		([ip1, ip2], False) 	❌ 不标记 
+真正的DNS超时/错误 	([], False) 		✅ 标记
+
+这样探针跳过时就不会触发DNS错误了，保留旧的IP缓存，等待探针恢复后再重新查询。
+
+----------------
+Q：
+
+现在这样修复 那有某个探针超时了 跳过探测后 短时间内 它会重试对吗？比如超时等待1秒恢复正常后 1秒后继续？
+不会说再等待2分钟吧？
+
+----------------
+A：
+
+修复完成！现在探针超时后的重试时间是正确的：
+
+## 重试时间总结
+线程类型 			等待时间 	配置项 
+IP探测线程 			默认1秒 	probe_interval 
+DNS刷新线程（系统DNS） 		默认1秒 	probe_interval 
+DNS刷新线程（自定义DNS） 	默认1秒 	probe_interval
+
+不会等待2分钟！ 只会等待 probe_interval （默认1秒）后重试。
+
+## 修改内容
+### _dns_refresh_thread()
+新增探针跳过时的快速重试逻辑：
+```python
+if dns_skip:
+    cprint(f"DNS跳过 {name} ({domain}): 探针异常，等待恢复", 'debug')
+    next_wait = CONFIG.get('probe_interval', 1)
+    stop_event.wait(timeout=next_wait)
+    continue
+```
+
+## 工作流程
+1. 探针超时 → 检测到 dns_skip=True
+2. 等待1秒 （ probe_interval ）
+3. 重新检查探针状态
+4. 恢复正常 → 继续DNS查询和IP探测
+5. 仍超时 → 再等待1秒，循环检查
+这样响应速度很快，不会有长时间的延迟。
+
+----------------
+Q：
+
+我怎么感觉你把 跳过列表名单 和 探测网络健康超时的跳过 弄混合在一起了？
+跳过名单 正常周期检测就好。。如果在名单中就跳过 不需要频繁重试
+需要重试的是 网络错误 探针哪怕有1个超时的跳过 这个要重试。。
+
+----------------
+A：
+
+修复完成！现在两种跳过已经正确区分了：
+
+## 修复内容
+### 修改 resolve() 返回值 (app.py:3080-3101)
+将 dns_skip 返回值从布尔值改为字符串标记：
+
+- 'list' → 域名在DNS跳过名单中
+- 'probe' → 因探针异常跳过
+- False → 正常查询
+### 修改 _dns_refresh_thread() (app.py:4836-4850)
+```
+# DNS跳过名单：按正常周期等待，不需要频繁重试
+if dns_skip == 'list':
+    stop_event.wait(timeout=dns_interval)  # 默认30秒
+    continue
+
+# 探针跳过：快速重试检查，避免长时间等待
+if dns_skip == 'probe':
+    next_wait = CONFIG.get('probe_interval', 1)  # 默认1秒
+    stop_event.wait(timeout=next_wait)
+    continue
+```
+### 修改 _resolve_and_update() (app.py:3969-3985)
+同样区分处理两种跳过
+
+## 两种跳过的区别
+跳过类型 返回值 等待时间 行为 DNS跳过名单 'list' dns_interval （默认30秒） 按正常周期检测 探针异常跳过 'probe' probe_interval （默认1秒） 快速重试，等待恢复
+
+这样就不会混淆了！跳过名单中的域名按正常周期检测，而探针异常时会快速重试。
+
+----------------
+Q：
+
+resolve函数中的 注释 更新一下 已经不是用True了 而是用list和probe
+
+----------------
+A：
+
+已更新注释：
+
+resolve()
+
+```
+"""根据 CONFIG['dns_mode'] 选择 DNS 解析策略
+返回: (ips_list, dns_skip_flag)
+  - ips_list: 解析到的IP列表
+  - dns_skip_flag: 'list'=域名在跳过名单中；'probe'=因探针异常
+  跳过；False=正常查询
+"""
+```
 
 
 --------------------------------------
