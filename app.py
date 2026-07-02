@@ -3968,12 +3968,13 @@ def _resolve_and_update(name, domain, port, protocol):
     try:
         new_ips, dns_skip = resolve(domain)
         
-        # DNS跳过名单：不更新数据库
+        # DNS跳过名单：更新数据库标记跳过状态
         if dns_skip == 'list':
             cprint(f"DNS跳过 {name} ({domain}): 在跳过名单中", 'debug')
+            db.update_ips(name, [], dns_error=False, dns_skip=True)
             return
         
-        # 探针跳过：不更新数据库（保留旧缓存）
+        # 探针跳过：不更新数据库（保留旧缓存和跳过状态）
         if dns_skip == 'probe':
             return
         
@@ -4844,13 +4845,15 @@ def _dns_refresh_thread(name: str, domain: str, port: int, protocol: str,
             # DNS跳过名单：按正常周期等待，不需要频繁重试
             if dns_skip == 'list':
                 cprint(f"DNS跳过 {name} ({domain}): 在跳过名单中", 'debug')
-                # 不更新数据库，按正常周期等待
+                # 更新数据库标记跳过状态
+                db.update_ips(name, [], dns_error=False, dns_skip=True)
                 stop_event.wait(timeout=dns_interval)
                 continue
             
             # 探针跳过：快速重试检查，避免长时间等待
             if dns_skip == 'probe':
                 cprint(f"DNS跳过 {name} ({domain}): 探针异常，等待恢复", 'debug')
+                # 不更新数据库（保留旧缓存和跳过状态）
                 next_wait = CONFIG.get('probe_interval', 1)
                 stop_event.wait(timeout=next_wait)
                 continue

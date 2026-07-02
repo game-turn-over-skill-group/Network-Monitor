@@ -33637,6 +33637,7 @@ A：
 //修复读取DNS配置报错
 //修复DNS网络故障检测触发DNS_ERROR的问题
 //（修复：非自定义DNS模式下）DNS列表名单跳过和DNS探测网络健康超时的跳过做区分开重试间隔
+//修复DNS_Skip图标丢失的问题
 
 现在 正常tcping和udping检测 已经都支持 网络故障 自动避让了 有1个探针超时都不会进行检测 这个很好
 但是我发现DNS请求查询 似乎没有检查网络故障 还是啥？看看代码 也让它检测网络探针 都正常的情况下 才请求DNS更新……
@@ -33967,6 +33968,92 @@ resolve()
   跳过；False=正常查询
 """
 ```
+
+----------------
+Q：
+
+有问题…… 之前修复了 DNS网络故障检测触发DNS_ERROR的问题？
+还有区分 列表DNS跳过 和 探针网络异常跳过 ？现在导致了 DNS_Skip图标丢失
+本来在 DNS跳过列表名单中的域名 在监控列表页面 域名后面 会有 DNS_Skip图标 现在没了……
+
+----------------
+A：
+
+修复完成！问题找到了：
+
+## 问题原因
+当 dns_skip == 'list' 时，之前没有调用 db.update_ips 更新数据库，导致前端无法获取到跳过状态（ tr.dns_skip 为 false ），DNS Skip 图标就不会显示。
+
+## 修复内容
+### _dns_refresh_thread()
+```
+if dns_skip == 'list':
+    cprint(f"DNS跳过 {name} ({domain}): 在跳过名单中", 
+    'debug')
+    # 更新数据库标记跳过状态
+    db.update_ips(name, [], dns_error=False, 
+    dns_skip=True)
+    stop_event.wait(timeout=dns_interval)
+    continue
+```
+### _resolve_and_update()
+```
+if dns_skip == 'list':
+    cprint(f"DNS跳过 {name} ({domain}): 在跳过名单中", 
+    'debug')
+    db.update_ips(name, [], dns_error=False, 
+    dns_skip=True)
+    return
+```
+## 两种跳过的处理差异
+跳过类型 	返回值 	数据库更新 		DNS Skip图标 	等待时间 
+DNS跳过名单 	'list' 	✅ 更新 dns_skip=True 	✅ 显示 	dns_interval （30秒） 
+探针异常跳过 	'probe' ❌ 不更新 		❌ 不显示 	probe_interval （1秒）
+
+这样 DNS 跳过名单中的域名会正确显示 DNS Skip 图标，而探针异常跳过时不会显示图标（因为这只是临时网络问题）。
+
+----------------
+Q：
+
+为什么要调用 db.update_ips(name, [], dns_error=False, dns_skip=True) 更新数据库？
+以前好像 直接返回none 返回空就完事了。。为什么不直接修改 返回list那边 让它返回空？
+是因为 返回空 没办法区分是跳过类型 还是探针错误？还是DNS ERROR？
+所以现在的更新数据库不会影响已存在的IP对吗？
+
+----------------
+A：
+
+你的理解完全正确！让我解释一下：
+
+## 为什么需要调用 db.update_ips？
+不是为了修改IP列表 ，而是为了更新 dns_skip 状态标记。
+
+查看 db.update_ips 的逻辑 ( app.py:1051-1053 )：
+
+```
+if dns_skip:
+    # DNS 跳过：不发起查询，保留现有 IP 继续检测
+    return
+```
+当 dns_skip=True 时，函数直接返回， 不会修改任何IP ，只会更新两个标记：
+
+- td['dns_error'] = False
+- td['dns_skip'] = True
+## 为什么不直接返回空就完事？
+因为返回空列表有多种含义，需要通过 dns_skip 参数区分：
+
+返回值组合 		含义 		数据库操作 
+([], 'list') 	域名在跳过名单中 	✅ 更新 dns_skip=True ，显示图标 
+([], 'probe') 	探针异常跳过 		❌ 不更新，临时网络问题 
+([], False) 	DNS解析失败 		✅ 更新 dns_error=True ，显示错误
+
+## 总结
+调用 db.update_ips(name, [], dns_error=False, dns_skip=True) ：
+
+1. 不会影响已存在的IP （函数直接返回，跳过IP处理）
+2. 只会更新状态标记 （ dns_skip=True ）
+3. 前端根据这个标记显示 DNS Skip 图标
+这是必要的，因为 resolve() 是纯解析函数，不负责数据库操作，数据库更新由调用方负责。
 
 
 --------------------------------------
