@@ -34634,6 +34634,86 @@ A：
 --------------------------------------
 
 
+//修复：删除域名未更新data.json
+
+修复一下BUG 删除tracker不会 立刻保存到data.json的问题 包括定时保存也不会更新删除的域名和IP还是留在那边 导致重启后又出现
+::1 - - - - [15/Jul/2026:06:40:46 +0800] "POST /api/tracker/delete HTTP/1.1" 200 17  # delete tracker.adgk.net by ::1 [rer]
+
+----------------
+
+修复完成。语法检查通过（exit code 0）。
+
+## BUG 根因与修复总结
+删除 tracker 后 data.json 不更新的原因是 _save() 用 _dirty_trackers 集合判断是否需要保存 ，而删除操作从未把域名加入该集合，导致：
+
+- _save() 第 1161 行 if len(self._dirty_trackers) == 0: return 直接跳过保存
+- 定时保存线程第 5034 行 if len(db._dirty_trackers) > 0 也跳过
+- 重启后从 data.json 读回被删的域名
+
+### 三处修改
+1. app.py:5756 api_delete() — 删除域名后加入 _dirty_trackers.add(domain) ，让保存逻辑感知到变化。
+2. app.py:6392-6399 api_clear_removed_ips() — 清理 removed IP 时，对每个受影响的域名标记 dirty（之前同样漏标）。
+3. app.py:1196-1199 _save() 增量保存路径 — 从旧 data.json 读出的 dict 中，移除「dirty 但已不在 self.trackers 」的域名。
+   之前增量保存只 data[d] = entry 更新/新增，从不删除，所以即使标记了 dirty，被删的域名也会原样写回。
+   全量保存路径（ data = {} 重新构建）原本就能正确处理删除，无需改动。
+现在删除 tracker 后会立即异步保存，且定时保存也能正确触发，重启后不会复活。
+
+----------------
+Q：
+
+显示历史IP 开启后显示已移除的历史IP（灰色半透明）
+我默认开启的 显示历史IP 功能 现在这样改后 会不会导致历史IP被立刻删除？
+有没有判断这个 显示历史IP的开关？
+域名级 立刻删除 是对的 但是IP级呢？
+
+----------------
+A：
+
+完全确认了。下面回答你的三个问题。
+
+## 结论：不会导致历史 IP 被立刻删除
+### 1. 会不会导致历史 IP 被立刻删除？
+不会。 我的修改只影响 域名级删除 ，不触碰 IP 级的 removed 标记逻辑。
+
+三条删除路径逐一分析：
+
+路径 				触发场景 			我的修改 是否影响历史IP 
+update_ips() L1056-1108 	DNS 刷新发现 IP 消失 		未修改 否。 show_removed=True 时只打 removed:True 标记，IP 仍在 td['ips'] 列表里 
+api_delete() L5749 		用户删除整个域名 		加了 _dirty_trackers.add(domain) 否。这是域名级删除，本就该全删 
+api_clear_removed_ips() L6389 	admin 手动点「清空历史IP」按钮 	加了 _dirty_trackers.add(domain) 否。这是显式清理操作，原本就删除 removed IP，只是之前删了没存盘
+
+### 2. 有没有判断「显示历史IP」开关？
+有 ，但只在 update_ips() 里判断（ L1056 ）：
+```python
+show_removed = CONFIG.get('show_removed_ips', True)
+...
+if show_removed:
+    ip_obj['removed'] = True   # 只标记，保留在列表中（前端灰色半透明显示）
+else:
+    td['ips'].pop(i)           # 直接从列表删除
+```
+
+我的修改 完全没有触碰这段逻辑 。 show_removed=True （你的默认值）时，消失的 IP 仍然只是被标记 removed: True ，保留在 td['ips'] 中。
+
+### 3. 域名级立刻删除是对的，IP 级呢？
+我的 _save() 修改（ L1196-1199 ）只处理 域名级删除 ：
+```python
+for d in self._dirty_trackers:
+    if d not in self.trackers:   # ← 整个域名已不在内存中（被 api_delete 删除）
+        data.pop(d, None)
+```
+
+IP 级完全不受影响 ，因为：
+
+- 增量保存的快照（ L1176-1179 ）遍历 t['ips'] 的 所有 IP（含 removed: True 的），原样写入 data.json
+- removed: True 的 IP 会被完整保存到 data.json（带标记），重启后由 load() 的 L1273 决定是否加载（这是原有的启动清理逻辑，未改动）
+
+总结 ：
+我的修复只补上了「删除操作后忘记标记 dirty」和「增量保存不处理已删域名」两个缺口。
+IP 级的 removed 标记机制和 show_removed_ips 开关行为完全保持原样。
+
+
+--------------------------------------
 
 
 

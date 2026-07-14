@@ -1193,6 +1193,10 @@ class TrackerDB:
                                 data = {}
                     else:
                         data = {}
+                    # 处理删除场景：dirty 但已不在 self.trackers 中的域名，需从 data.json 移除
+                    for d in self._dirty_trackers:
+                        if d not in self.trackers:
+                            data.pop(d, None)
                 else:
                     # 全量保存
                     snapshot = []
@@ -5753,6 +5757,7 @@ def api_delete():
             del db.trackers[domain]
             db._recalc()
             db._clear_uptime_cache(domain)
+            db._dirty_trackers.add(domain)  # 标记需要保存（删除场景：_save 据此从 data.json 移除该域名）
             db._save_async()
             raw_ip = _client_ip()
             masked_ip = _anonymize_ip(raw_ip)
@@ -6388,10 +6393,14 @@ def api_clear_removed_ips():
         with db.lock:
             cleared = 0
             for domain, td in db.trackers.items():
+                domain_changed = False
                 for i in range(len(td['ips'])-1, -1, -1):
                     if td['ips'][i].get('removed'):
                         td['ips'].pop(i)
                         cleared += 1
+                        domain_changed = True
+                if domain_changed:
+                    db._dirty_trackers.add(domain)  # 标记需要保存
             db._recalc()
             db._clear_uptime_cache()
             db._save_async()
