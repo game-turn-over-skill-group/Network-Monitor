@@ -34716,6 +34716,199 @@ IP 级的 removed 标记机制和 show_removed_ips 开关行为完全保持原�
 --------------------------------------
 
 
+//新增：重试请求=打印用户+IP
+//修复：重试域名级不再重试已移除(除锁定IP外)或暂停的IP
+//修复：重试结果打印时间(非超时结果时间)等于POST重试时间=BUG
+
+控制台输出内容：
+[PAUSE] ::1 [rer] 监控恢复: tracker.pmman.tech
+::1 - - - - [06/Aug/2026:17:00:30 +0800] "POST /api/tracker/pause HTTP/1.1" 200 65  # 恢复 tracker.pmman.tech by ::1 [rer]
+2026/8/6 17:00:32 [INFO] 重试结果: HTTPS://tracker.pmman.tech:443 (172.67.144.128) → online 198ms
+2026/8/6 17:00:32 [INFO] 重试结果: HTTPS://tracker.pmman.tech:443 (104.21.71.114) → online 199ms
+2026/8/6 17:00:32 [INFO] 重试结果: HTTPS://tracker.pmman.tech:443 (2606:4700:3036::ac43:9080) → online 210ms
+2026/8/6 17:00:32 [INFO] 重试结果: HTTPS://tracker.pmman.tech:443 (2606:4700:3032::6815:4772) → online 230ms
+::1 - - - - [06/Aug/2026:17:00:32 +0800] "POST /api/tracker/check HTTP/1.1" 200 386
+
+有几个明显的问题
+我在恢复监控后 进行了重试
+
+重试API是@app.route('/api/tracker/check', methods=['POST'])
+::1 - - - - [06/Aug/2026:17:00:32 +0800] "POST /api/tracker/check HTTP/1.1" 200 386 //我需要在这里 显示出和暂停恢复那样的备注 比如：# 重试 tracker.pmman.tech by ::1 [rer]
+显示IP那边的逻辑 和 他们也要相同 要判断权限 是否是admin否则显示加密**的IP字段
+然后控制台现在打印的顺序 也不对 为什么POST请求 会在结果之后打印 不应该先收到post然后打印到控制台 在输出 重试结果吗？
+
+解决一下我说的这2个问题：
+1、重试API请求 添加备注 显示 重试IP/域名 执行者IP 执行者用户（参考：暂停/恢复 API）
+2、控制台打印重试结果的顺序 必须在post后
+
+----------------
+
+### 修改内容（app.py:5951-6005）
+1. 重试API添加了操作备注
+
+参考暂停/恢复API的实现模式，在 api_check 函数中添加了：
+
+- 操作者信息获取 ： _client_ip() 获取原始IP， session.get('username') 获取用户名
+- IP脱敏 ：IPv4 格式 1.*.*.256 ，IPv6 格式 ::1:****:ffff （Web日志中使用脱敏IP）
+- 控制台打印 （第5978行）： print(f"[RETRY] {raw_ip} [{op_user}] 重试: {target}") — 完整IP，用于控制台
+- g.access_note （第6002行）： g.access_note = f"重试 {target} by {raw_ip} [{op_user}]" — 在 nginx 访问日志行末尾显示 # 重试 xxx by ::1 [rer]
+- Web日志 （第6003-6004行）： db.add_log(web_str, 'info') — 脱敏IP，用于Web界面
+2. 修复日志打印顺序
+
+之前日志顺序错误的原因是：重试结果在函数内通过 cprint 打印，而 nginx 访问日志是在 return 之后的 after_request 钩子中才打印的。
+
+解决方案 ：在函数执行重试循环 之前 （第5978行）先通过 print() 打印操作信息。这样日志顺序变为：
+[RETRY] ::1 [rer] 重试: tracker.pmman.tech        ← 操作信息（先打印）
+2026/8/6 17:00:32 [INFO] 重试结果: HTTPS://...     ← 重试结果
+::1 - - - - [06/Aug/2026:17:00:32] "POST /api/tracker/check HTTP/1.1" 200 386  # 重试 tracker.pmman.tech by ::1 [rer]  ← nginx日志（最后打印，带备注）
+
+这与暂停/恢复API的日志格式完全一致。
+
+----------------
+Q：
+
+不应该是这样吗？
+[RETRY] ::1 [rer] 重试: tracker.pmman.tech        ← 操作信息（先打印）
+::1 - - - - [06/Aug/2026:17:00:32] "POST /api/tracker/check HTTP/1.1" 200 386  # 重试 tracker.pmman.tech by ::1 [rer]  ← nginx日志
+2026/8/6 17:00:32 [INFO] 重试结果: HTTPS://...     ← 重试结果（最后打印）
+
+----------------
+A：
+
+你说得对，逻辑上应该是：收到POST请求 → 打印nginx日志 → 执行重试 → 打印重试结果。
+
+但问题是：Flask 的 after_request （打印nginx日志）在视图函数返回 之后 才执行，而重试结果是在函数内打印的，所以重试结果一定会在nginx日志之前。
+
+要实现你期望的顺序，我需要将重试结果的打印 延迟 到 after_request 打印nginx日志之后。方案是：在函数内收集重试结果消息存入 g.deferred_retry_logs ，在 after_request 中nginx日志打印完后再输出它们。
+
+现在修改 after_request ，在nginx日志打印之后输出延迟的重试结果：
+
+无语法错误。现在控制台输出顺序将是：
+```
+[RETRY] ::1 [rer] 重试: tracker.pmman.tech                                           ← 1. 操作信息（函数内先打印）
+::1 - - - - [06/Aug/2026:17:00:32] "POST /api/tracker/check HTTP/1.1" 200 386  # 重试 tracker.pmman.tech by ::1 [rer]  ← 2. nginx日志（after_request打印）
+2026/8/6 17:00:32 [INFO] 重试结果: HTTPS://tracker.pmman.tech:443 (...) → online 198ms  ← 3. 重试结果（after_request中延迟打印）
+```
+实现原理 ：
+1. api_check 函数内先 print 操作信息（第5978行）
+2. 重试结果不再直接 cprint ，而是收集到 g.deferred_retry_logs 列表（第6000行）
+3. 函数返回后， after_request 先打印 nginx 日志行（第5259行），再遍历 g.deferred_retry_logs 打印重试结果（第5263行）
+这样三个日志的顺序就符合逻辑了：收到请求 → 记录请求 → 输出处理结果。
+
+----------------
+Q：
+
+[RETRY] ::1 [rer] 重试: tracker.pmman.tech               ←控制台的这一行不要了给他备注 或者 删掉吧
+
+web的logs页面 我需要重试像 暂停/恢复那样 打印出日志
+2026/8/6 17:00:30[INFO] ::****:1 [rer] 重试: tracker.pmman.tech
+
+----------------
+A：
+
+完成。改动总结：
+
+1. 删除了 [RETRY] 控制台打印行 — nginx日志的备注 # 重试 tracker.pmman.tech by ::1 [rer] 已包含相同信息，不再重复
+2. Web日志操作记录移到重试前 （ app.py:5981-5983 ）— 与暂停/恢复一致，使用脱敏IP，且在重试结果之前记录
+现在控制台输出顺序：
+```
+::1 - - - - [06/Aug/2026:17:00:32] "POST /api/tracker/check HTTP/1.1" 200 386  # 重试 tracker.pmman.tech by ::1 [rer]  ← nginx日志
+2026/8/6 17:00:32 [INFO] 重试结果: HTTPS://tracker.pmman.tech:443 (...) → online 198ms  ← 重试结果
+```
+Web日志页顺序：
+```
+2026/8/6 17:00:32 [INFO] :****:1 [rer] 重试: tracker.pmman.tech          ← 操作记录（脱敏IP）
+2026/8/6 17:00:32 [INFO] 重试结果: HTTPS://tracker.pmman.tech:443 (...) → online 198ms  ← 重试结果
+```
+
+----------------
+Q：
+
+有的IP都被标记为移除/暂停了 他会去重试 已经被标记为移除或暂停的IP吗？
+为什么打印出来 已移除的IP重试结果？看看现在的重试逻辑……修复一下这个问题
+
+::1 - - - - [06/Aug/2026:17:56:42 +0800] "POST /api/tracker/check HTTP/1.1" 200 318  # 重试 open.ftorrent.com by ::1 [rer]
+2026/8/6 17:56:37 [INFO] 重试结果: UDP://open.ftorrent.com:443 (149.106.106.25) → online 190ms
+2026/8/6 17:56:42 [INFO] 重试结果: UDP://open.ftorrent.com:443 (2605:6dc0:1::c:9bdd) → offline N/A | 超时(>5s)
+2026/8/6 17:56:42 [INFO] 重试结果: UDP://open.ftorrent.com:443 (2605:6dc0:1::d:cf65) → online 201ms
+::1 - - - - [06/Aug/2026:17:56:51 +0800] "POST /api/tracker/check HTTP/1.1" 200 333  # 重试 open.ftorrent.com by ::1 [rer]
+2026/8/6 17:56:46 [INFO] 重试结果: UDP://open.ftorrent.com:443 (149.106.106.25) → offline N/A | 超时(>5s)
+2026/8/6 17:56:51 [INFO] 重试结果: UDP://open.ftorrent.com:443 (2605:6dc0:1::c:9bdd) → offline N/A | 超时(>5s)
+2026/8/6 17:56:51 [INFO] 重试结果: UDP://open.ftorrent.com:443 (2605:6dc0:1::d:cf65) → online 199ms
+
+----------------
+A：
+
+问题在 app.py:5993-5994 — 循环只过滤了 target_ip ，没有跳过 removed 或 paused 的IP。
+已修复。在 app.py:5994 添加了过滤，跳过标记为 removed 或 paused 的IP，不再对它们执行重试。
+
+----------------
+Q：
+
+你修复的太潦草了。。
+我还有锁定IP的机制啊 你没判断锁定IP就无视已移除的IP吗？
+只有已暂停的IP 是固定确认跳过的
+已移除的IP 还分为是否被锁定 被锁定的IP是必须要重试的
+
+----------------
+A：
+
+明白了。根据锁定机制（ app.py:1072 和 app.py:5915-5918 ），逻辑应该是：
+- paused → 跳过
+- removed 且未锁定 → 跳过
+- removed 但已锁定 → 必须重试
+
+已修复（ app.py:5994-5996 ）：
+- paused → 固定跳过
+- removed + 无 lock → 跳过
+- removed + 有 lock → 必须重试
+- 正常IP → 重试
+
+----------------
+Q：
+
+怎么回事？控制台打印POST的时间是18:08:34，但是重试结果为超时的也是18:08:34？超时至少等待5秒才有结果 肯定有1个时间错了！
+检查一下是哪个时间不对。。
+
+::1 - - - - [06/Aug/2026:18:08:34 +0800] "POST /api/tracker/check HTTP/1.1" 200 252  # 重试 tracker.torrent.eu.org by ::1 [rer]
+2026/8/6 18:08:34 [INFO] 重试结果: UDP://tracker.torrent.eu.org:451 (2a03:7220:8083:cd00::1) → offline N/A | 超时(>5s)
+2026/8/6 18:08:34 [INFO] 重试结果: UDP://tracker.torrent.eu.org:451 (89.234.156.205) → online 285ms
+::1 - - - - [06/Aug/2026:18:08:39 +0800] "POST /api/tracker/check HTTP/1.1" 200 293  # 重试 tracker2.itzmx.com by ::1 [rer]
+2026/8/6 18:08:39 [INFO] 重试结果: UDP://tracker2.itzmx.com:6961 (172.245.220.20) → online 176ms
+2026/8/6 18:08:39 [INFO] 重试结果: UDP://tracker2.itzmx.com:6961 (46.17.45.92) → online 255ms
+2026/8/6 18:08:39 [INFO] 重试结果: UDP://tracker2.itzmx.com:6961 (107.172.250.226) → online 244ms
+
+----------------
+A：
+
+让我分析时间问题。重试结果的时间戳是在 check_ip 返回后计算的，而nginx日志的时间是 after_request 中 datetime.now() — 两者都是"完成时间"而非"请求时间"。
+对于5秒超时的请求，请求实际在 ~18:08:29 收到，但两个时间戳都显示 18:08:34（完成时间），所以看起来矛盾。
+
+问题找到了。nginx日志时间（ app.py:5241 ）用的是 datetime.now() — 这是 after_request 执行时的时间（即请求完成后），不是请求收到时的时间。
+对于5秒超时的请求，完成时间比接收时间晚5秒。
+修复方案：在 before_request 记录请求开始时间， after_request 用它作为nginx日志时间。
+
+已修复。两处改动：
+1. app.py:5134 — before_request 中记录请求接收时间到 g.req_start
+2. app.py:5242 — after_request 中 nginx 日志用 g.req_start 而非 datetime.now()
+修复后的时间顺序（以5秒超时为例）：
+
+```
+::1 - - - - [06/Aug/2026:18:08:29 +0800] "POST /api/tracker/check HTTP/1.1" 200 252  # 重试 ...  ← 请求接收时间
+2026/8/6 18:08:34 [INFO] 重试结果: ... → offline N/A | 超时(>5s)                              ← 结果获取时间（5秒后）
+2026/8/6 18:08:34 [INFO] 重试结果: ... → online 285ms                                         ← 第二个IP结果
+```
+现在 nginx 日志显示请求接收时间（18:08:29），重试结果显示结果完成时间（18:08:34），5秒的超时差一目了然。
+
+
+--------------------------------------
+
+
+
+
+
+
+
 
 
 

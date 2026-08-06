@@ -5131,6 +5131,7 @@ _page_req_lock = threading.Lock()
 @app.before_request
 def log_request():
     """记录初始化批量加载提示（仅在页面首次加载时）"""
+    g.req_start = datetime.now()  # 记录请求接收时间，供 after_request 使用
     path   = request.path
     method = request.method
     remote = request.remote_addr
@@ -5238,7 +5239,7 @@ def security_headers(response):
     # ── Nginx 风格访问日志 ──
     real_ip   = request.headers.get('X-Real-IP', request.remote_addr)
     cf_ip     = request.headers.get('CF-Connecting-IP', '-')
-    now_str   = datetime.now().strftime('%d/%b/%Y:%H:%M:%S +0800')
+    now_str   = getattr(g, 'req_start', datetime.now()).strftime('%d/%b/%Y:%H:%M:%S +0800')
     status    = response.status_code
     # send_file 等流式响应 get_data() 为空，优先从 Content-Length header 读
     try:
@@ -5258,6 +5259,10 @@ def security_headers(response):
         line += f'  # {note}'
     cprint(line, 'info', raw=True)
     _write_access_log(line)   # 写盘（log_to_disk=True 时）
+
+    # 重试结果延迟打印：在 nginx 日志之后输出，保证顺序：操作信息→nginx日志→重试结果
+    for _log_msg in getattr(g, 'deferred_retry_logs', []):
+        cprint(_log_msg, 'info', raw=True)
 
     # ===== 为 GET 页面请求设置 CSRF cookie =====
     if request.method == 'GET' and not request.path.startswith('/api/'):
@@ -5961,6 +5966,22 @@ def api_check():
             return jsonify({'error': '操作过于频繁，请稍候'}), 429
     domain    = (request.json or {}).get('domain','').strip()
     target_ip = (request.json or {}).get('ip', None)
+    # 操作者信息
+    raw_ip   = _client_ip()
+    op_user  = session.get('username', '?')
+    parts = raw_ip.split('.')
+    if len(parts) == 4:
+        masked_ip = f"{parts[0]}.*.*.{parts[3]}"
+    else:
+        segs = raw_ip.split(':')
+        if len(segs) >= 3:
+            masked_ip = f"{segs[0]}:{segs[1]}:****:{segs[-1]}"
+        else:
+            masked_ip = raw_ip
+    target = f"{domain}/{target_ip}" if target_ip else domain
+    # Web 日志：重试操作记录（脱敏IP），在重试结果之前
+    web_str = f"{masked_ip} [{op_user}] 重试: {target}"
+    db.add_log(web_str, 'info')
     with db.lock:
         if domain not in db.trackers:
             return jsonify({'error':'不存在'}), 404
@@ -5968,7 +5989,12 @@ def api_check():
         protocol = db.trackers[domain].get('protocol','tcp')
         ips_snap = list(db.trackers[domain]['ips'])
     results = []
+    # 重试结果延迟到 after_request（nginx日志之后）打印，保证顺序：操作信息→nginx日志→重试结果
+    g.deferred_retry_logs = []
     for ipi in ips_snap:
+        # 已暂停的IP固定跳过；已移除但未锁定的IP也跳过（锁定的IP必须重试）
+        if ipi.get('paused'): continue
+        if ipi.get('removed') and not ipi.get('lock'): continue
         if target_ip and ipi['ip'] != target_ip: continue
         status, lat, err = check_ip(domain, ipi, retry=False)
         lat_s = f"{lat}ms" if lat>=0 else "N/A"
@@ -5977,14 +6003,13 @@ def api_check():
         if status == 'skipped':
             reason_clean = err.replace(_PROXY_UNAVAIL_PREFIX, '') if err else ''
             res_msg = f"重试结果: {protocol.upper()}://{domain}:{port} ({ipi['ip']}) → 跳过(代理不可用) | {reason_clean}"
-            cprint(f"{ts} [INFO] {res_msg}", 'info', raw=True)
         else:
             reason = f" | {err}" if err and status=='offline' else ""
             res_msg = f"重试结果: {protocol.upper()}://{domain}:{port} ({ipi['ip']}) → {status} {lat_s}{reason}"
-            cprint(f"{ts} [INFO] {res_msg}", 'info', raw=True)
+        g.deferred_retry_logs.append(f"{ts} [INFO] {res_msg}")
         db.add_log(res_msg, 'info')
         results.append({'ip':ipi['ip'],'status':status,'latency':lat,'error':err})
-    # after_request 自动输出 nginx 行，无需 g.access_note（避免重复信息）
+    g.access_note = f"重试 {target} by {raw_ip} [{op_user}]"
     return jsonify({'success':True,'domain':domain,'port':port,'protocol':protocol,'results':results})
 
 @app.route('/api/ranking/<period>')
