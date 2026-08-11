@@ -137,6 +137,7 @@ window.__i18n_zh = {
     apiParamNet: '协议过滤',
     apiParamIp: 'IP 版本过滤',
     apiParamUrl: '追加到每条 URL 末尾的后缀',
+    apiParamName: '对于IP地址域名额外附加名称版URL',
     apiColParam: '参数',
     apiColValues: '可选值',
     apiColDefault: '默认值',
@@ -148,7 +149,8 @@ window.__i18n_zh = {
     apiEx4: '24h ≥ 90%，UDP，IPv4，自定义后缀',
     apiEx6: '仅 HTTP（不含 UDP 和 HTTPS）',
     apiEx7: '仅 HTTPS',
-    apiEx5: '下载为文件（旧URL自动跳转）'
+    apiEx5: '下载为文件（旧URL自动跳转）',
+    apiEx8: 'IP域名tracker同时导出名称版'
   },
   logs: {
     title: '请求结果',

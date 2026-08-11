@@ -137,6 +137,7 @@ window.__i18n_ko = {
     apiParamNet: '프로토콜 필터',
     apiParamIp: 'IP 버전 필터',
     apiParamUrl: '각 Tracker URL 끝에 추가되는 접미사',
+    apiParamName: 'IP 전용 트래커에 이름 기반 URL 추가',
     apiColParam: '매개변수',
     apiColValues: '값',
     apiColDefault: '기본값',
@@ -148,7 +149,8 @@ window.__i18n_ko = {
     apiEx4: '24시간 ≥ 90%, UDP, IPv4, 사용자 정의 접미사',
     apiEx6: 'HTTP만 (UDP 및 HTTPS 제외)',
     apiEx7: 'HTTPS만',
-    apiEx5: '파일로 저장 (구 URL은 자동 리디렉션)'
+    apiEx5: '파일로 저장 (구 URL은 자동 리디렉션)',
+    apiEx8: 'IP 트래커에 이름 기반 URL 추가하여 내보내기'
   },
   logs: {
     title: '요청 로그',

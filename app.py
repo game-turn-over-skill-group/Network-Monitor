@@ -4412,6 +4412,20 @@ def _ip_ver(ip_str: str) -> str:
     except Exception:
         return 'ipv4'
 
+def _wrap_ipv6(host: str) -> str:
+    """将 IPv6 地址包装为 [addr] 格式，IPv4/hostname 原样返回。
+    用于拼接 tracker URL 时确保 IPv6 地址被 [] 包裹。
+    """
+    if not host:
+        return host
+    # 已经包装过的直接返回
+    if host.startswith('[') and host.endswith(']'):
+        return host
+    # 包含冒号 → IPv6 地址
+    if ':' in host:
+        return f'[{host}]'
+    return host
+
 def _get_probe_net_status(ip_str: str):
     """返回 (skip_probe: bool, skip_history: bool, reason: str)
     - skip_probe: True = 完全跳过探测（不发包），False = 继续探测
@@ -4716,7 +4730,7 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                             # 只有当 auto_pause_persist 开启时才保存暂停状态到磁盘
                             if auto_pause_persist:
                                 db._dirty_trackers.add(domain)  # 标记需要保存
-                    pause_msg = (f"[自动暂停] {protocol.upper()}://{domain}:{port} ({ip}) "
+                    pause_msg = (f"[自动暂停] {protocol.upper()}://{_wrap_ipv6(domain)}:{port} ({ip}) "
                                  f"累计失败 {cur} 次，已自动暂停监控"
                                  f"{'（重启后保持暂停）' if auto_pause_persist else '（重启后恢复）'}")
                     db.add_log(pause_msg, 'info')
@@ -4756,12 +4770,12 @@ def _ip_monitor_thread(domain: str, ip: str, stop_event: threading.Event,
                 lat_s = f"{lat}ms" if lat >= 0 else "N/A"
                 proto_s = protocol.upper()
                 if status == 'online':
-                    db.add_log(f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}", 'success')
-                    cprint(f"✓ {proto_s}://{domain}:{port} ({ip}) {lat_s}", 'success')
+                    db.add_log(f"✓ {proto_s}://{_wrap_ipv6(domain)}:{port} ({ip}) {lat_s}", 'success')
+                    cprint(f"✓ {proto_s}://{_wrap_ipv6(domain)}:{port} ({ip}) {lat_s}", 'success')
                 else:
                     reason = f" | {err}" if err else ""
-                    db.add_log(f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}", 'error')
-                    cprint(f"✗ {proto_s}://{domain}:{port} ({ip}) 离线{reason}", 'error')
+                    db.add_log(f"✗ {proto_s}://{_wrap_ipv6(domain)}:{port} ({ip}) 离线{reason}", 'error')
+                    cprint(f"✗ {proto_s}://{_wrap_ipv6(domain)}:{port} ({ip}) 离线{reason}", 'error')
                 # 归属地补查（异步执行，不阻塞探测线程）
                 need_geo = False
                 with db.lock:
@@ -5367,6 +5381,7 @@ def api_trackers_export():
       net    = all | tcp | udp | http | https  (default: all)   protocol filter
       ip     = all | ipv4 | ipv6    (default: all)   IP version filter
       url    = any string            (default: /announce) URL suffix per entry
+      name   = any string            (default: empty) 对于IP地址域名额外附加名称版URL
 
     Examples:
       curl http://host/api/tracker
@@ -5374,12 +5389,14 @@ def api_trackers_export():
       curl "http://host/api/tracker?day=30d&uptime=90&net=tcp&ip=ipv4"
       curl "http://host/api/tracker?day=30d&uptime=90&ip=ipv6"
       curl "http://host/api/tracker?uptime=90&net=udp&ip=ipv4&url=/announce"
+      curl "http://host/api/tracker?name=1"  # IP域名tracker同时导出名称版
     """
     period     = request.args.get('day', '24h')
     if period not in ('24h','7d','30d'): period = '24h'
     min_uptime = request.args.get('uptime', 0, type=float)
     proto      = request.args.get('net', 'all').lower()
     ip_ver     = request.args.get('ip', 'all').lower()
+    name_param = 'name' in request.args  # &name 存在即生效，无需赋值
     suffix_raw = request.args.get('url', None)
     if suffix_raw is None:
         suffix = CONFIG.get('export_suffix', '/announce')
@@ -5420,8 +5437,14 @@ def api_trackers_export():
                 if proto == 'https' and not is_https:          continue
                 if proto == 'http'  and (is_udp or is_https):  continue
             scheme = 'udp' if protocol == 'udp' else ('https' if protocol == 'https' else 'http')
-            url = f"{scheme}://{domain}:{port}{suffix}"
+            url = f"{scheme}://{_wrap_ipv6(domain)}:{port}{suffix}"
             lines.append(url)
+            # &name: 当domain为纯IP时，额外附加名称版URL
+            if name_param and name != domain:
+                is_ip = ':' in domain or bool(re.match(r'^\d{1,3}(\.\d{1,3}){3}$', domain))
+                if is_ip:
+                    name_url = f"|{scheme}://{name}:{port}{suffix}"
+                    lines.append(name_url)
             lines.append('')  # 每个域名后空一行
     while lines and lines[-1] == '':
         lines.pop()
@@ -5724,9 +5747,9 @@ def api_add():
         raw_ip = _client_ip()
         masked_ip = _anonymize_ip(raw_ip)
         op_user = session.get('username', '?')
-        msg = f"添加 {protocol.upper()}://{host}:{port} 解析{len(ips)}个IP"
+        msg = f"添加 {protocol.upper()}://{_wrap_ipv6(host)}:{port} 解析{len(ips)}个IP"
         db.add_log(f"{masked_ip} [{op_user}] {msg}", 'info')   # 脱敏后写入日志
-        g.access_note = f"add {protocol.upper()}://{host}:{port} ({len(ips)} IPs) by {raw_ip} [{op_user}]"
+        g.access_note = f"add {protocol.upper()}://{_wrap_ipv6(host)}:{port} ({len(ips)} IPs) by {raw_ip} [{op_user}]"
         # 为新增 tracker 启动独立监控线程（含DNS刷新和所有IP的探测线程）
         def _start_new_tracker(name=host, domain=host, prt=port, proto=protocol):
             time.sleep(0.3)  # 短暂延迟，等 add_tracker 落库完成
@@ -6002,10 +6025,10 @@ def api_check():
         ts = f"{now.year}/{now.month}/{now.day} {now.strftime('%H:%M:%S')}"
         if status == 'skipped':
             reason_clean = err.replace(_PROXY_UNAVAIL_PREFIX, '') if err else ''
-            res_msg = f"重试结果: {protocol.upper()}://{domain}:{port} ({ipi['ip']}) → 跳过(代理不可用) | {reason_clean}"
+            res_msg = f"重试结果: {protocol.upper()}://{_wrap_ipv6(domain)}:{port} ({ipi['ip']}) → 跳过(代理不可用) | {reason_clean}"
         else:
             reason = f" | {err}" if err and status=='offline' else ""
-            res_msg = f"重试结果: {protocol.upper()}://{domain}:{port} ({ipi['ip']}) → {status} {lat_s}{reason}"
+            res_msg = f"重试结果: {protocol.upper()}://{_wrap_ipv6(domain)}:{port} ({ipi['ip']}) → {status} {lat_s}{reason}"
         g.deferred_retry_logs.append(f"{ts} [INFO] {res_msg}")
         db.add_log(res_msg, 'info')
         results.append({'ip':ipi['ip'],'status':status,'latency':lat,'error':err})
@@ -6027,12 +6050,14 @@ def api_ranking_export():
       proto     = tcp | udp | all (协议过滤，默认 all)
       ip_ver    = ipv4 | ipv6 | all (IP版本过滤，默认 all)
       suffix    = /announce        (追加路径，默认 /announce)
+      name      = any string       (默认空) 对于IP地址域名额外附加名称版URL
     """
     period     = request.args.get('period', '24h')
     if period not in ('24h','7d','30d'): period = '24h'
     min_uptime = request.args.get('min_uptime', 0, type=float)
     proto      = request.args.get('proto', 'all').lower()      # tcp | udp | all
     ip_ver     = request.args.get('ip_ver', 'all').lower()     # ipv4 | ipv6 | all
+    name_param = 'name' in request.args  # &name 存在即生效，无需赋值
     suffix     = request.args.get('suffix', CONFIG.get('export_suffix', '/announce'))
     ranking = db.get_ranking(period, 9999, min_uptime)
     with db.lock:
@@ -6064,8 +6089,14 @@ def api_ranking_export():
             scheme = 'udp'
         else:
             scheme = 'http'
-        url = f"{scheme}://{domain}:{port}{suffix}"
+        url = f"{scheme}://{_wrap_ipv6(domain)}:{port}{suffix}"
         lines.append(url)
+        # &name: 当domain为纯IP时，额外附加名称版URL
+        if name_param and name != domain:
+            is_ip = ':' in domain or bool(re.match(r'^\d{1,3}(\.\d{1,3}){3}$', domain))
+            if is_ip:
+                name_url = f"|{scheme}://{name}:{port}{suffix}"
+                lines.append(name_url)
         lines.append('')  # 每个域名后空一行
     while lines and lines[-1] == '':
         lines.pop()

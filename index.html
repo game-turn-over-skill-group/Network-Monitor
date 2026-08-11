@@ -2356,6 +2356,7 @@
                             <tr><td><code>net</code></td><td><code>all</code> <code>tcp</code> <code>udp</code> <code>http</code> <code>https</code></td><td><code>all</code></td><td>{{ t('ranking.apiParamNet') }}</td></tr>
                             <tr><td><code>ip</code></td><td><code>all</code> <code>ipv4</code> <code>ipv6</code></td><td><code>all</code></td><td>{{ t('ranking.apiParamIp') }}</td></tr>
                             <tr><td><code>url</code></td><td><i style="color:#64748b;">any string</i></td><td><code>/announce</code></td><td>{{ t('ranking.apiParamUrl') }}</td></tr>
+                            <tr><td><code>name</code></td><td><i style="color:#64748b;">any string</i></td><td><i style="color:#64748b;">any string</i></td><td>{{ t('ranking.apiParamName') }}</td></tr>
                         </tbody>
                     </table>
                     <!-- Examples -->
@@ -3293,6 +3294,7 @@ createApp({
                 { descKey:'apiEx6', cmd: `curl "${b}/api/tracker?uptime=90&net=http"` },
                 { descKey:'apiEx7', cmd: `curl "${b}/api/tracker?uptime=90&net=https"` },
                 { descKey:'apiEx5', cmd: `curl "${b}/tracker.txt" -L -o trackers.txt` },
+                { descKey:'apiEx8', cmd: `curl "${b}/api/tracker?name"` },
             ];
         });
         const queryApiExamples = Vue.computed(() => {
@@ -3314,10 +3316,11 @@ createApp({
             const list = filteredRanking.value;
             if (!list.length) { showToast('暂无可导出数据', 'warn'); return; }
             const suffix = cfg.value.export_suffix || '/announce';
+            const wrapIpv6 = (host) => host && host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
             const lines = list.map(item => {
                 const proto = (item.protocol||'tcp').toLowerCase();
                 const scheme = proto === 'https' ? 'https' : proto === 'udp' ? 'udp' : 'http';
-                return `${scheme}://${item.domain}:${item.port}${suffix}`;
+                return `${scheme}://${wrapIpv6(item.domain)}:${item.port}${suffix}`;
             });
             const text = lines.join('\n');
             const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });

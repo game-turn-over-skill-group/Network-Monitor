@@ -137,6 +137,7 @@ window.__i18n_fr = {
     apiParamNet: 'Filtre de protocole',
     apiParamIp: 'Filtre de version IP',
     apiParamUrl: 'Suffixe ajouté à chaque URL de tracker',
+    apiParamName: 'Ajouter une URL basée sur le nom pour les trackers IP',
     apiColParam: 'Paramètre',
     apiColValues: 'Valeurs',
     apiColDefault: 'Par défaut',
@@ -148,7 +149,8 @@ window.__i18n_fr = {
     apiEx4: '24h ≥ 90%, UDP, IPv4, suffixe personnalisé',
     apiEx6: 'HTTP uniquement (exclut UDP et HTTPS)',
     apiEx7: 'HTTPS uniquement',
-    apiEx5: 'Enregistrer dans un fichier (URL héritée redirige automatiquement)'
+    apiEx5: 'Enregistrer dans un fichier (URL héritée redirige automatiquement)',
+    apiEx8: 'Exporter les trackers IP avec des URL basées sur le nom'
   },
   logs: {
     title: 'Journaux de requêtes',

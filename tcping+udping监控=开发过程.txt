@@ -34904,10 +34904,357 @@ A：
 --------------------------------------
 
 
+//CF WAF规则设置
+
+查看app.py统计一份api的路由名单给我
+我要加入到CF白名单 来过滤掉别人的恶意请求
+比如：
+/api/auth/whoami
+/api/logs
+/api/count
+/api/tracker
+/api/query
+
+----------------
+
+已统计 app.py 中全部 /api/ 开头路由，共 27 条路径 （ /api/users 同时支持 GET/POST）。
+
+## 完整 API 路由名单（按路径字母序）
+路径 方法 /api/csrf-token GET /api/count GET /api/datas GET /api/nav POST /api/query GET /api/config GET, POST /api/users GET, POST /api/auth/login POST /api/auth/logout POST /api/auth/change-password POST /api/auth/whoami GET /api/tracker GET /api/tracker/add POST /api/tracker/delete POST /api/tracker/pause POST /api/tracker/lock POST /api/tracker/check POST /api/ranking/<period> GET /api/ranking/export GET /api/logs GET /api/logs/clear POST /api/logs/export GET /api/stats/threads GET /api/history/clear POST /api/history/status GET /api/ips/clear-removed POST
+
+## CF WAF 白名单建议（通配符合并版，更简洁）
+可直接在 Cloudflare → Security → WAF → Custom rules 中用「Path starts with」或「URI Path」匹配放行，非命中即拦截：
+
+```
+/api/csrf-token
+/api/count
+/api/datas
+/api/nav
+/api/query
+/api/config
+/api/users
+/api/auth/*
+/api/tracker/*
+/api/ranking/*
+/api/logs/*
+/api/stats/*
+/api/history/*
+/api/ips/*
+```
+## 补充提醒
+1. 页面路由 （非 API，但浏览器需访问）： / 、 /home 、 /stats 、 /ranking 、 /logs 、 /config 、 /trackers 、 /tracker.txt 。若整站都要正常访问，记得一并放行静态资源（ /static/* ）。
+2. 动态路由 /api/ranking/<period> 仅接受 24h / 7d / 30d ，CF 层用 /api/ranking/* 放行即可，业务层已做校验。
+3. CSRF 校验 ：POST 接口依赖 /api/csrf-token ，白名单里务必保留它。
+4. 若用 CF 的「URI Path equals」精确匹配，注意 /api/users 一条规则要勾选 GET+POST 两种方法放行。
+需要我顺手生成一份 CF WAF 表达式（表达式语法版）吗？
+
+----------------
+Q：
+
+这个是CF WAF 白名单规则排除语法
+and not http.request.uri contains "/api/csrf-token"
+
+你帮我补齐这些
+/api/csrf-token
+/api/count
+/api/datas
+/api/nav
+/api/query
+/api/config
+/api/users
+/api/auth/*
+/api/tracker/*
+/api/ranking/*
+/api/logs/*
+/api/stats/*
+/api/history/*
+/api/ips/*
+最好是一行一个方便查看
+
+----------------
+A：
+
+and not http.request.uri contains "/api/csrf-token"
+and not http.request.uri contains "/api/count"
+and not http.request.uri contains "/api/datas"
+and not http.request.uri contains "/api/nav"
+and not http.request.uri contains "/api/query"
+and not http.request.uri contains "/api/config"
+and not http.request.uri contains "/api/users"
+and not http.request.uri contains "/api/auth"
+and not http.request.uri contains "/api/tracker"
+and not http.request.uri contains "/api/ranking"
+and not http.request.uri contains "/api/logs"
+and not http.request.uri contains "/api/stats"
+and not http.request.uri contains "/api/history"
+and not http.request.uri contains "/api/ips"
+
+## 说明
+1. CF 的 contains 是子串匹配，不支持 * 通配符 ，所以我把末尾的 / 和 * 都去掉了。这样一条规则可同时覆盖根路径与子路径，例如 contains "/api/tracker" 能命中 /api/tracker 、 /api/tracker/add 、 /api/tracker/delete 等全部。
+2. 顺序无关 ： and not 之间是「与」关系，命中任意一条都会被排除（放行）。
+3. 建议加括号分组 （避免与现有条件优先级混淆），完整写法示例：
+//【下面这个不太对 但是很接近 or用于规则区分 and用于括号内】
+(http.request.uri contains "/api/" and not (
+  http.request.uri contains "/api/csrf-token" or
+  http.request.uri contains "/api/count" or
+  http.request.uri contains "/api/datas" or
+  http.request.uri contains "/api/nav" or
+  http.request.uri contains "/api/query" or
+  http.request.uri contains "/api/config" or
+  http.request.uri contains "/api/users" or
+  http.request.uri contains "/api/auth" or
+  http.request.uri contains "/api/tracker" or
+  http.request.uri contains "/api/ranking" or
+  http.request.uri contains "/api/logs" or
+  http.request.uri contains "/api/stats" or
+  http.request.uri contains "/api/history" or
+  http.request.uri contains "/api/ips"
+))
+
+这种写法语义更清晰：「凡是 /api/ 开头、且不在白名单内的请求」才触发拦截规则，更不容易漏配。
+
+4. 别忘了页面路由 ： / 、 /home 、 /stats 、 /ranking 、 /logs 、 /config 、 /trackers 、 /tracker.txt 、 /static/* 也要放行，否则浏览器打不开页面。
+
+----------------
+Q：
+
+我第一个匹配了主机名host包含我的域名后 下面每次点击or还需要在匹配一次吗？用and就不需要匹配了 我知道 那or呢？
+
+----------------
+A：
+
+## CF WAF 逻辑解析：and vs or 的作用域
+### 核心规则
+运算符 			作用域 						是否需要重复匹配 host 
+and 	左侧为真才会继续评估右侧， 左侧条件"包裹"住右侧所有内容 	❌ 不需要，天然覆盖 
+or 	左侧为真即短路，右侧独立求值， 不受左侧条件约束 		✅ 需要，每个分支独立
+
+### 举你当前规则的例子
+你现在的结构大概是这样的（ 正确写法 ）：
+```
+http.host contains "test.rer.lol" and (
+    http.request.uri ne "/" or
+    http.request.uri ne "/home" or
+    ...
+)
+```
+这里 and 把整个括号组"罩住"了 → 括号里的 or 分支 都天然受 host 限制 ，不需要重复写 host 判断。
+
+### 如果你错误地用 or 拼接 host 条件
+```
+( http.host contains "test.rer.lol" and 条件A )
+or
+条件B   ← 这里没有 host 限制！会匹配所有域名的请求！
+```
+这种情况下 条件B 会绕过 host 过滤，必须写成：
+```
+( http.host contains "test.rer.lol" and 条件A )
+or
+( http.host contains "test.rer.lol" and 条件B )  ← 必须重写 host
+```
+
+### 你的场景推荐写法（把 host 放最外层）
+```
+http.host contains "test.rer.lol" and (
+    http.request.uri ne "/" or
+    http.request.uri ne "/home" or
+    http.request.uri ne "/stats" or
+    http.request.uri ne "/ranking" or
+    http.request.uri ne "/logs" or
+    http.request.uri ne "/config" or
+    http.request.uri ne "/trackers" or
+    http.request.uri ne "/tracker.txt" or
+    not starts_with(http.request.uri, "/static")
+)
+and not (
+    http.request.uri contains "/api/csrf-token" or
+    http.request.uri contains "/api/count" or
+    ...
+)
+```
+and 是 右结合延伸 ，从第一个 http.host 开始，后面所有 and 链上的条件都共享同一个 host 过滤， 完全不需要重复写 。
 
 
+--------------------------------------
 
 
+//修复：导出trackerAPI未对ipv6地址正确输出
+//部分日志输出补充[ipv6地址]格式
+//修复：导出API
+
+Tracker 导出 API 【api/tracker】在导出ipv6地址的tracker的时候 没有把ipv6地址给[]起来 解决一下这个问题ipv6地址必须[]起来才能使用
+
+现在错误的：http://2c0f:f4c0::108:80/announce
+正确的应该：http://[2c0f:f4c0::108]:80/announce
+
+这个也是错误的：udp://2605:6400:20:6c:::6969/announce
+正确的应该是：udp://[2605:6400:20:6c::]:6969/announce
+
+因为我有的时候是修改data.json中域名参数"domain"的直接改成ipv6地址，需要同时修复
+
+----------------
+
+修复完成！以下是所做的改动总结：
+
+修改内容
+1. 新增 _wrap_ipv6 辅助函数 (app.py#L4415-L4427)
+在 _ip_ver 函数之后新增了 _wrap_ipv6(host) 函数：
+
+如果 host 已经是 [addr] 格式，原样返回
+如果 host 包含冒号（即 IPv6 地址），自动包裹为 [addr]
+IPv4 和 hostname 原样返回
+2. 修复导出 API URL 构造（2处）
+api_trackers_export() — url = f"{scheme}://{_wrap_ipv6(domain)}:{port}{suffix}"
+api_ranking_export() — url = f"{scheme}://{_wrap_ipv6(domain)}:{port}{suffix}"
+3. 修复日志消息格式（7处）
+在 _ip_monitor_thread 和手动重试相关的日志输出中，也使用了 _wrap_ipv6(domain) 确保日志中的 URL 格式正确。
+
+效果对比
+场景	修复前	修复后
+HTTP IPv6	http://2c0f:f4c0::108:80/announce	http://[2c0f:f4c0::108]:80/announce
+UDP IPv6	udp://2605:6400:20:6c:::6969/announce	udp://[2605:6400:20:6c::]:6969/announce
+Hostname	https://tracker.linvk.com:443/announce	不变
+IPv4	http://192.168.1.1:80/announce	不变
+当你在 data.json 中将 domain 参数直接改为 IPv6 地址时，导出的 tracker URL 会自动加上 [] 包裹。
+
+----------------
+Q：
+
+导出按钮 是否也同样可以生效？
+导出按钮是web实现的 如果在页面看到什么 他就导出什么
+
+----------------
+A：
+
+回答你的问题：是的，前端"导出"按钮现在也生效了。
+
+### 修复范围总结
+我一共修复了 10 处 代码中涉及 tracker URL 拼接的位置：
+ 后端 app.py （9处）
+位置 用途 代码 _wrap_ipv6 新增辅助函数 _wrap_ipv6(host) api_trackers_export #L5437 /api/tracker 导出 API {scheme}://{_wrap_ipv6(domain)}:{port}{suffix} api_ranking_export #L6081 /api/ranking/export 导出 API 同上 api_add #L5741-L5743 添加 tracker 日志 {protocol}://{_wrap_ipv6(host)}:{port} _ip_monitor_thread #L4733 自动暂停日志 同上 _ip_monitor_thread #L4773-L4778 在线/离线日志 同上 重试日志 #L6019-L6022 手动重试日志 同上
+
+ 前端 index.html （1处）
+位置 用途 代码 exportRanking #L3317-L3321 排行榜导出按钮 wrapIpv6(item.domain)
+
+当 data.json 中 domain 参数被设为 IPv6 地址（如 2c0f:f4c0::108 ）时，无论是通过 API 导出、前端按钮导出，还是日志显示，都会自动加上 [] 包裹变为 [2c0f:f4c0::108] 。
+
+----------------
+A：
+
+对，完全正确。前端导出按钮（ index.html#L3313-L3330 ）的逻辑就是：
+
+1. 读取当前页面展示的 filteredRanking （已经过筛选器/可用率阈值过滤的数据）
+2. 用 item.domain 拼接 URL
+3. 现在加上了 wrapIpv6() 处理，所以页面看到的 IPv6 域名导出时会自动包 []
+换句话说，页面上排行榜显示什么域名（包括筛选后的结果），导出的就是什么，不会走后端 API 的另一套逻辑。两处独立的导出路径都已修复完毕：
+
+导出方式 实现位置 IPv6 修复状态 前端"导出"按钮 index.html JS ✅ 已修复 后端 /api/tracker app.py Python ✅ 已修复 后端 /api/ranking/export app.py Python ✅ 已修复
+
+
+--------------------------------------
+
+
+//导出API新增name参数=作为导出附加备注
+//修复：给name参数备注url名称连接补充分割符号
+
+给tracker导出API 新增一个name参数 可选值和默认值 都为空 -
+name - - 对于纯IP地址的 添加|来源域名
+作用就是 给API 附加&name参数时 对于data.json中"domain"参数字段 是非域名仅IP时
+给予在导出下方贴合的 附加上 名称的完整导出
+例子：
+udp://[2605:6400:20:6c::]:6969/announce
+|udp://tracker.gmi.gd:6969/announce
+
+简单来说 原本只导出协议ip的连接 现在变成多导出一个名称的连接 能明白我意思吧？要携带这个&name参数 才这样导出 其他保持不变
+还有你更新html文件时 记得更新 \static\language\文件夹下 的多国语言翻译.js文件
+
+----------------
+
+所有修改完成！以下是变更总结：
+
+## 修改内容
+### 后端 app.py（2处 API）
+1. api_trackers_export — /api/tracker 导出 API
+
+- 新增 name 查询参数读取
+- 新增逻辑：当 &name 参数存在且 domain 为纯 IP（IPv4/IPv6）时，额外追加一行使用 name （原始域名）的 URL
+2. api_ranking_export — /api/ranking/export 导出 API
+
+- 同步新增 name 参数支持
+### 导出效果示例
+当 data.json 中某 tracker 被手动改为 IP 地址（如 2605:6400:20:6c:: ），原始名称为 tracker.gmi.gd ：
+
+无 &name （保持不变）：
+```
+udp://[2605:6400:20:6c::]:6969/announce
+```
+
+加 &name=1 ：
+```
+udp://[2605:6400:20:6c::]:6969/announce
+udp://tracker.gmi.gd:6969/announce
+```
+
+### 前端 index.html（2处）
+- API 参数表格新增 name 行（ #L2359 ）
+- 示例列表新增 apiEx8 示例（ #L3297 ）
+### 语言文件（6个）
+文件 新增 key zh.js apiParamName 、 apiEx8 en.js apiParamName 、 apiEx8 ja.js apiParamName 、 apiEx8 ko.js apiParamName 、 apiEx8 fr.js apiParamName 、 apiEx8 ru.js apiParamName 、 apiEx8
+
+### 使用方式
+```
+# 普通导出（不变）
+curl http://host/api/tracker
+
+# 启用 &name 参数后，IP域名tracker会同时导出名称版
+curl http://host/api/tracker?name=1
+curl "http://host/api/tracker?day=7d&uptime=90&name=1"
+```
+
+----------------
+Q：
+
+为什么要加成&name=1
+直接&name
+不行吗？
+
+----------------
+A：
+
+你说得对， &name 不带值也应该生效。问题在于 request.args.get('name', '') 对 ?name （无值）返回空字符串，被当成 falsy 跳过了。
+改用 'name' in request.args 判断参数是否存在即可。
+
+现在更新前端示例，去掉 =1 ：
+
+已修复。现在 &name 、 &name=1 、 &name=anything 都能生效，不传 &name 则保持原行为不变。
+
+----------------
+Q：
+
+有问题 现在导出的 备注那边 缺少了|符号
+现在的：
+http://192.99.100.68:6969/announce
+http://tr4ck3r.duckdns.org:6969/announce
+预期的：
+http://192.99.100.68:6969/announce
+|http://tr4ck3r.duckdns.org:6969/announce
+
+----------------
+A：
+
+已修复。现在导出效果：
+
+```
+http://192.99.100.68:6969/announce
+|http://tr4ck3r.duckdns.org:6969/announce
+
+http://2c0f:f4c0::108:80/announce
+|http://tracker.gmi.gd:80/announce
+```
+每行额外的名称版 URL 都会以 | 开头，方便区分和识别。
+
+
+--------------------------------------
 
 
 

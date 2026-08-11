@@ -137,6 +137,7 @@ window.__i18n_ja = {
     apiParamNet: 'プロトコルフィルタ',
     apiParamIp: 'IPバージョンフィルタ',
     apiParamUrl: '各Tracker URLの末尾に追加するサフィックス',
+    apiParamName: 'IPアドレスのみのトラッカーに名前ベースURLを追加',
     apiColParam: 'パラメータ',
     apiColValues: '値',
     apiColDefault: 'デフォルト値',
@@ -148,7 +149,8 @@ window.__i18n_ja = {
     apiEx4: '24時間 ≥ 90%、UDP、IPv4、カスタムサフィックス',
     apiEx6: 'HTTPのみ（UDPとHTTPSを除く）',
     apiEx7: 'HTTPSのみ',
-    apiEx5: 'ファイルに保存（旧URLは自動リダイレクト）'
+    apiEx5: 'ファイルに保存（旧URLは自動リダイレクト）',
+    apiEx8: 'IPトラッカーに名前ベースURLを追加してエクスポート'
   },
   logs: {
     title: 'リクエストログ',

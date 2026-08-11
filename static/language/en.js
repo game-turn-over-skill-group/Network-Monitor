@@ -137,6 +137,7 @@ window.__i18n_en = {
     apiParamNet: 'Protocol filter',
     apiParamIp: 'IP version filter',
     apiParamUrl: 'Suffix appended to each tracker URL',
+    apiParamName: 'Add name-based URL for IP-only trackers',
     apiColParam: 'Parameter',
     apiColValues: 'Values',
     apiColDefault: 'Default',
@@ -148,7 +149,8 @@ window.__i18n_en = {
     apiEx4: '24h ≥ 90%, UDP, IPv4, custom suffix',
     apiEx6: 'HTTP only (excludes UDP and HTTPS)',
     apiEx7: 'HTTPS only',
-    apiEx5: 'Save to file (legacy URL auto-redirects)'
+    apiEx5: 'Save to file (legacy URL auto-redirects)',
+    apiEx8: 'Export IP trackers with name-based URLs'
   },
   logs: {
     title: 'Request Logs',
