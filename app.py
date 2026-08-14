@@ -4148,6 +4148,19 @@ def _parse_target(target):
     # 纯地址（IPv4或IPv6）：不解析端口
     return target, 53
 
+def _format_probe_target(host, port, mode):
+    """格式化探针目标显示字符串
+    - ICMP 模式：仅显示主机地址（无端口，ICMP 不使用端口）
+    - TCP  模式：显示 主机:端口（自动跟随自定义端口；IPv6 使用 [host]:port 避免歧义）
+    """
+    if mode == 'icmp':
+        return host
+    # TCP 模式：显示端口（端口由 _parse_target 解析，支持自定义端口如 853）
+    if host.count(':') > 1:
+        # IPv6 地址，使用方括号格式避免与端口混淆
+        return f"[{host}]:{port}"
+    return f"{host}:{port}"
+
 def _probe_loop():
     """后台探针线程：IPv4/IPv6 分组探测，分别维护可达状态和延迟。
     - IPv4 探针：从 CONFIG['probe_ipv4_targets'] 读取（默认 8.8.8.8/1.1.1.1/223.6.6.6）
@@ -4205,7 +4218,7 @@ def _probe_loop():
                     details[host] = {'ok': ok, 'latency': lat, 'version': ver, 'error': err}
                     if ok and not v4_reachable:
                         v4_reachable = True
-                        v4_hit = f"{host}:{port}"
+                        v4_hit = _format_probe_target(host, port, PROBE_MODE)
                     if not ok:
                         v4_has_timeout = True
 
@@ -4228,9 +4241,9 @@ def _probe_loop():
                     details[host] = {'ok': ok, 'latency': lat, 'version': ver, 'error': err}
                     if ok and not v6_reachable:
                         v6_reachable = True
-                        v6_hit = f"{host}:{port}"
+                        v6_hit = _format_probe_target(host, port, PROBE_MODE)
                     elif not ok and err:
-                        v6_errors.append(f"{host}: {err}")
+                        v6_errors.append(f"{_format_probe_target(host, port, PROBE_MODE)}: {err}")
                     if not ok:
                         v6_has_timeout = True
 
@@ -4242,7 +4255,7 @@ def _probe_loop():
             _probe_has_timeout_v6 = v6_has_timeout
 
         # ── IPv4 告警 ──────────────────────────────────────────────────
-        v4_targets_str = ', '.join(f"{h}:{p}" for h,p,_ in IPV4_TARGETS) if IPV4_TARGETS else '(无)'
+        v4_targets_str = ', '.join(_format_probe_target(h, p, PROBE_MODE) for h,p,_ in IPV4_TARGETS) if IPV4_TARGETS else '(无)'
         if not v4_reachable and not _warned_v4:
             msg = f"[探针] IPv4全部目标({v4_targets_str})均不可达，IPv4网络可能异常"
             db.add_log(msg, 'info')
@@ -4258,7 +4271,7 @@ def _probe_loop():
 
         # ── IPv6 告警（附带具体错误原因）──────────────────────────────────
         if v6_reachable is not None:
-            v6_targets_str = ', '.join(f"{h}:{p}" for h,p,_ in IPV6_TARGETS)
+            v6_targets_str = ', '.join(_format_probe_target(h, p, PROBE_MODE) for h,p,_ in IPV6_TARGETS)
             if not v6_reachable and not _warned_v6:
                 error_detail = '; '.join(v6_errors) if v6_errors else '所有目标均无响应'
                 msg = f"[探针] IPv6全部目标({v6_targets_str})均不可达: {error_detail}"
