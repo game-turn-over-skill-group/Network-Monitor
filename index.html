@@ -629,6 +629,14 @@
         }
         .ipvb-v6 { background: rgba(99,102,241,.15); color: #818cf8; }
         .ipvb-v4 { background: rgba(16,185,129,.10); color: #34d399; }
+        /* 内网/保留地址徽章（SSRF 防护：开关关闭时该类IP不做实际探测） */
+        .ip-lan-badge {
+            display: inline-flex; align-items: center;
+            font-size: .58rem; padding: 1px 4px; border-radius: 3px;
+            margin-left: 4px; flex-shrink: 0;
+            line-height: 1; height: 16px;
+            background: rgba(251,191,36,.15); color: #fbbf24;
+        }
         /* 状态点 ● ✗ — ✗ 小一点 */
         .ip-status-dot { font-weight: 700; margin-right: 3px; line-height: 1; }
         .dot-on  { color: #34d399; font-size: .82rem; }
@@ -2169,7 +2177,7 @@
                                      :class="{paused: ip.paused, removed: ip.removed && !ip.lock}">
                                     <!-- IP地址 + 版本标 -->
                                     <div class="tl-ip-addr">
-                                        <span class="ip-mono" :class="ip.version==='ipv6'?'ip-mono-v6':'ip-mono-v4'">{{ ip.ip }}</span><span class="ip-ver-badge" :class="ip.version==='ipv6'?'ipvb-v6':'ipvb-v4'">{{ ip.version==='ipv6'?'v6':'v4' }}</span>
+                                        <span class="ip-mono" :class="ip.version==='ipv6'?'ip-mono-v6':'ip-mono-v4'">{{ ip.ip }}</span><span class="ip-ver-badge" :class="ip.version==='ipv6'?'ipvb-v6':'ipvb-v4'">{{ ip.version==='ipv6'?'v6':'v4' }}</span><span v-if="ip.is_private" class="ip-lan-badge">LAN</span>
                                     </div>
                                     <!-- 状态 + 可用率 -->
                                     <div class="tl-ip-status">

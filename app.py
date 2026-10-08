@@ -824,6 +824,8 @@ class TrackerDB:
                 if 'added_time' not in ip_copy:
                     ip_copy['added_time'] = t_copy.get('added_time')
                 ip = ip_obj.get('ip', '')
+                # 内网/保留地址标记（前端显示 LAN 徽章；开关关闭时该类IP不做实际探测）
+                ip_copy['is_private'] = is_private_ip(ip)
                 # 从缓存获取IP级统计
                 ip_stats = ip_stats_map.get(ip, {})
                 # IP 级三个周期可用率
@@ -1848,6 +1850,10 @@ hdb = HistoryDB()
 
 # 代理连接/握手失败专用异常（区别于 UDP 探测超时）
 class _ProxyConnectError(OSError):
+    pass
+
+# SSRF 防护拦截目标专用异常（区别于代理故障：不计入代理熔断、不关闭代理会话）
+class _TargetBlockedError(OSError):
     pass
 
 # 代理故障冷却时间（秒）
@@ -3215,6 +3221,9 @@ def _proxy_tcp_connect(ip, port, timeout):
 
 def tcp_ping(ip, port):
     """TCP 连接检测，支持 HTTP CONNECT 和 SOCKS5 代理，支持 IPv4/IPv6 目标。"""
+    # SSRF 防护：开关关闭时禁止探测内网地址（代理/直连均不实际连接，仅返回失败结果）
+    if is_private_ip(ip) and not CONFIG.get('allow_private_ips'):
+        return False, -1, "禁止访问内网地址"
     timeout = CONFIG['timeout']
     use_proxy = (CONFIG.get('http_proxy_enabled') and
                  CONFIG.get('http_proxy', '').strip())
@@ -3461,12 +3470,12 @@ def _udp_tracker_packet():
 def _socks5_sendto(udp_sock: socket.socket, data: bytes,
                    dst: tuple, relay_addr: tuple):
     """封装 SOCKS5 UDP 头并发往 relay，支持 IPv4/IPv6 目标，添加安全检查"""
+    # 目标地址校验放在 try 外：SSRF 拦截是目标侧结果而非代理故障，
+    # 需以 _TargetBlockedError 原样抛出，避免被包装成 OSError 误计入代理熔断
+    dst_host, dst_port = dst
+    if is_private_ip(dst_host) and not CONFIG.get('allow_private_ips'):
+        raise _TargetBlockedError("禁止访问内网地址")
     try:
-        # 验证目标地址
-        dst_host, dst_port = dst
-        if is_private_ip(dst_host) and not CONFIG.get('allow_private_ips'):
-            raise OSError("禁止访问内网地址")
-        
         # 验证端口
         if not (1 <= dst_port <= 65535):
             raise OSError("无效的端口号")
@@ -3520,6 +3529,9 @@ def udp_ping(ip, port):
     代理路径: 使用 Socks5UdpSocket（手动SOCKS5协议，支持IPv4/IPv6目标，不依赖PySocks）。
     直连路径: 使用 getaddrinfo 获取正确 sockaddr，原生支持 IPv4/IPv6。
     """
+    # SSRF 防护：开关关闭时禁止探测内网地址（代理/直连均不实际发包，仅返回失败结果）
+    if is_private_ip(ip) and not CONFIG.get('allow_private_ips'):
+        return False, -1, "禁止访问内网地址"
     udp_proxy = CONFIG.get('udp_proxy', '').strip() if CONFIG.get('udp_proxy_enabled') else ''
     packet  = _udp_tracker_packet()
     timeout = CONFIG['timeout']
@@ -3559,6 +3571,10 @@ def udp_ping(ip, port):
                     continue
                 _socks5_pool.report_failure(str(e))
                 return False, -1, f"{_PROXY_UNAVAIL_PREFIX}代理连接失败"
+
+            except _TargetBlockedError as e:
+                # SSRF 防护拦截目标：仅当前目标探测失败，不影响代理连接池（不熔断、不关闭会话）
+                return False, -1, str(e)
 
             except Exception as e:
                 err_str = f"{type(e).__name__}: {e}"
