@@ -2787,6 +2787,15 @@ class _TcpDnsPool:
         if conn:
             conn.close()
 
+    def retain(self, keep_ips: set):
+        """关闭并移除不在 keep_ips 中的连接（DNS 配置变更后清理不再使用的长连接）。
+        仍在配置中的服务器连接保持不变，避免影响其进行中/后续的查询。"""
+        with self._lock:
+            stale = [ip for ip in self._conns if ip not in keep_ips]
+            conns = [self._conns.pop(ip) for ip in stale]
+        for conn in conns:
+            conn.close()
+
 
 # 全局 TCP DNS 连接池单例
 _tcp_dns_pool = _TcpDnsPool()
@@ -6526,7 +6535,8 @@ def api_config():
         if errors:
             return jsonify({'error': '配置参数无效', 'details': errors}), 400
         # 自动从 DEFAULT_CONFIG 获取所有配置键，避免重复定义
-        keys = list(DEFAULT_CONFIG.keys())
+        # users 只能通过 /api/users 修改（含 PBKDF2 哈希与校验），配置接口不接收也不回传
+        keys = [k for k in DEFAULT_CONFIG.keys() if k != 'users']
         labels = {
             'check_interval':        '监控间隔',
             'timeout':               '连接超时',
@@ -6593,12 +6603,14 @@ def api_config():
         }
         bool_fmt = {True: '开', False: '关'}
         changes = []
+        changed_keys = set()
         for k in keys:
             if k not in data: continue
             old_val = CONFIG.get(k)
             new_val = data[k]
             if old_val == new_val: continue
             CONFIG[k] = new_val
+            changed_keys.add(k)
             label  = labels.get(k, k)
             suffix = suffixes.get(k, '')
             if isinstance(new_val, bool):
@@ -6609,11 +6621,17 @@ def api_config():
         persist_config(CONFIG)
         # 如果代理相关配置变化，重置 SOCKS5 连接池
         proxy_changed_keys = {'udp_proxy', 'timeout', 'udp_proxy_enabled', 'http_proxy_enabled'}
-        if any(k in data and data[k] != CONFIG.get(k) for k in proxy_changed_keys):
+        if changed_keys & proxy_changed_keys:
             _socks5_pool.invalidate()
             cprint('[SOCKS5Pool] 代理配置变更，连接池已重置', 'debug')
+        # DNS 配置变化：只关闭已不在当前配置中的 TCP DNS 长连接，仍在使用的服务器连接保持不变
+        if changed_keys & {'dns_mode', 'dns_custom', 'dns_use_tcp'}:
+            keep_ips = set()
+            if CONFIG.get('dns_mode', 'system') == 'custom':
+                keep_ips = {ip for ip, use_tcp in _parse_dns_servers() if use_tcp}
+            _tcp_dns_pool.retain(keep_ips)
         # 如果并发检测数变化，更新信号量
-        if 'monitor_workers' in data and data['monitor_workers'] != CONFIG.get('monitor_workers'):
+        if 'monitor_workers' in changed_keys:
             global _probe_semaphore
             max_workers = data['monitor_workers']
             _probe_semaphore = threading.Semaphore(max_workers)
@@ -6625,12 +6643,14 @@ def api_config():
         result = {k: CONFIG[k] for k in keys}
         return jsonify({'success':True,'config':result})
     # GET 读取配置：未登录只返回前端行为控制必要字段（不含账户/代理等敏感信息）
-    # 已登录用户额外返回运维相关字段（仍不含账户信息）
+    # 已登录用户额外返回运维相关字段（仍不含账户信息；代理地址可能含凭据，仅管理员可见）
     public_keys = ['page_refresh_ms', 'tab_switch_refresh', 'uptime_algorithm', 'dashboard_stat_period', 'tracker_stat_period', 'show_removed_ips', 'default_layout_width', 'allow_private_ips', 'min_password_length']
-    if not session.get('role'):
+    role = session.get('role')
+    if not role:
         return jsonify({k: CONFIG.get(k) for k in public_keys})
     # 自动从 DEFAULT_CONFIG 获取所有配置键，避免重复定义
-    all_keys = list(DEFAULT_CONFIG.keys())
+    hidden_keys = {'users'} if role == 'admin' else {'users', 'http_proxy', 'udp_proxy'}
+    all_keys = [k for k in DEFAULT_CONFIG.keys() if k not in hidden_keys]
     return jsonify({k: CONFIG.get(k) for k in all_keys})
 
 @app.route('/api/users', methods=['GET'])

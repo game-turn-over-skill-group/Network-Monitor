@@ -35485,6 +35485,126 @@ CSS 类名`.ip-lan-badge` 正好和 LAN 对上了，保持不动。`py_compile` 
 --------------------------------------
 
 
+//修复并发检测数上限web设置页面不更新+代理连接池等热更新不重新应用配置的问题
+//修复普通用户权限获取敏感信息泄露+普通用户绕过管理员用户权限post保存config配置
+
+::1 - - - - [22/Oct/2026:21:02:37 +0800] "POST /api/config HTTP/1.1" 200 1084  # 配置已更新: 并发检测数=20
+我通过web把同时并发最大数量从120改成20以后 但是web看到的还是?/120就是最大数量没更新
+实际上最大数量app.py中 应该生效了？但是web的html那边写死了？没读取配置？修复下这个问题
+不过app.py也检查一下 到底修改后是不是 立刻就生效……
+
+----------------
+
+修复完成，两处问题：
+
+1. 后端热更新失效（ app.py ）
+
+旧代码在判断前已经把新值写进了`CONFIG` ：
+```
+Python
+CONFIG[k] = new_val          # 循环里先写入
+...
+if data['monitor_workers'] != CONFIG.get('monitor_workers'):  # 永远相等
+...
+
+所以信号量和`_stats_thread_info['max_probes']` 从来没被更新过，实际并发上限仍是 120。现改为在写入前记录`old_monitor_workers` 再比较。探测线程每次探测时都重新读取全局`_probe_semaphore` ，因此修改后 新发起 的探测会立即按新上限限制；已在旧信号量上排队的探测会跑完当前一轮，之后切换到新上限（可能有短暂一瞬超出）。
+
+2. 前端徽章不刷新（ index.html ）
+
+“当前使用: x/y”读的是`threadStats` ，而它只在切换到配置页时加载一次，保存后不重新拉取。现在保存成功后调用`loadThreadStats()` ，徽章会立即显示`x/20` 。
+
+另外发现同样的写法还影响代理配置：`proxy_changed_keys` 的判断也在`CONFIG` 写入之后执行，所以 SOCKS5 连接池重置其实从未触发。这次未改动，需要的话可以单独修。
+
+----------------
+Q：
+
+“另外发现同样的写法还影响代理配置：`proxy_changed_keys` 的判断也在`CONFIG` 写入之后执行，所以 SOCKS5 连接池重置其实从未触发。”
+一并修了他。。再看看还有别的问题没？
+
+----------------
+A：
+
+代理连接池的问题已一并修复，并做了语法检查。
+
+本次改动（ app.py ）
+
+新增`changed_keys` ，在写入循环里记录真正发生变化的配置键，代理池和信号量都基于它判断：
+```
+Python
+changed_keys = set()
+...
+CONFIG[k] = new_val
+changed_keys.add(k)
+...
+if changed_keys & proxy_changed_keys:   # 代理变更 → 重置 SOCKS5 池
+if 'monitor_workers' in changed_keys:   # 并发变更 → 重建信号量
+```
+
+这样两个热更新判断都不再受“先写 CONFIG 再比较”的影响。
+
+还发现的问题
+
+1. 敏感信息泄露（较严重） ： app.py 的`GET /api/config` 对任何已登录角色返回`DEFAULT_CONFIG` 的全部键，包括：
+   - `users` ：所有账户的密码哈希 + salt（viewer/operator 都能拿到）
+   - `http_proxy` /`udp_proxy` ：可能带代理账号密码
+与上方注释“不含账户/代理等敏感信息”完全相反。POST 的返回`result` 同样包含`users` 。
+
+2. 绕过用户管理校验 ： app.py 的保存循环接受`users` 键，可通过`POST /api/config` 直接写入并落盘，绕过`/api/users` 的 PBKDF2 哈希、用户名校验和“至少保留一个 admin”的检查。
+3. 轻微 ：修改`dns_custom` 不会清理`_tcp_dns_pool` 中旧 DNS 服务器的持久 TCP 连接。功能不受影响（连接按 IP 键取用），但旧连接会一直保留到失效。
+前两个建议一起修（从配置接口的键列表和返回结果中排除`users` ，并按角色过滤代理配置）。要现在修吗？
+
+----------------
+Q：
+
+我去 使用普通user用户登录 能获取到所有账户的密码哈希+salt？这是高危漏洞啊 我去！！！这必须修复！
+post绕过校监写入config也是高危漏洞。。
+按照你说的 先修复前2点 这2个的问题 挺严重的。。
+现在的TCP DNS请求 有定时保活检测不？会检测失效断开重连不？如果有保活检测的话 旧的这个连接 如果更新DNS了 你觉得需要清除长连接吗？好像需要？
+但是如果只是修改配置 改了1个 会不会影响别的也断开？你看看怎么修最合理 
+
+----------------
+A：
+
+全部改完并做了接口级验证。
+
+1. 账户哈希泄露（高危）—— 已修复
+
+app.py ：
+
+- 未登录：仍只返回`public_keys`
+- 非 admin（operator/viewer）：隐藏`users` 、`http_proxy` 、`udp_proxy`
+- admin：返回运维配置和代理配置，但 永不返回`users`
+没有直接把非 admin 限制成`public_keys` ，因为前端日志页/导出还依赖`max_log_*` 、`export_suffix` 等字段；改为只隐藏真正的敏感项。
+
+2. POST 绕过用户校验（高危）—— 已修复
+
+app.py ：配置保存的键列表排除`users` ，请求里带`users` 会被直接忽略，也不会出现在返回的`config` 中。
+用户变更只能走`/api/users` ，保留哈希、用户名格式校验和“至少一个 admin”保护。
+
+验证结果：
+viewer: users leaked = False , proxy leaked = False
+admin : users leaked = False , proxy visible = True
+POST users: status = 200 , users in response = False , users unchanged = True
+
+3. TCP DNS 长连接
+
+现状：
+
+- 没有应用层定时保活线程，但有 OS 层 TCP keepalive （10 秒空闲、5 秒间隔，Windows/Linux 都设置了）
+- 每次查询前都会`_check_alive()` （select + MSG_PEEK 检测 FIN）；发现失效会关闭并自动重连，最多重试 1 次
+- 所以连接空闲期间即使对端已断开，也会在下一次查询时被发现并重建
+清理策略：我加了 `_TcpDnsPool.retain()` ，只在`dns_mode` /`dns_custom` /`dns_use_tcp` 变化时， 只关闭已经不在当前配置里的服务器连接 ，仍在用的连接保持不动。
+这样改一个 DNS 不会误伤其他 DNS 的长连接；`dns_timeout` 变化也不影响连接，因为超时是每次查询时传入的。验证：
+
+retain: kept alive = True , removed closed = True
+POST dns: retain keep = {'8.8.4.4'}   # 1.1.1.1 仍保留，新增 tcp://8.8.4.4
+
+`python -m py_compile app.py` 通过。
+
+
+--------------------------------------
+
+
 
 
 
